@@ -8,6 +8,8 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      repositories:
+        enabled: false  # Prevents Redis from claiming MongoDB repositories
 
   mail:
     host: ${MAIL_HOST:smtp.gmail.com}
@@ -21,6 +23,10 @@ spring:
           starttls:
             enable: true
             required: true
+
+  cloud:
+    discovery:
+      enabled: false
 
 server:
   port: 8084
@@ -48,11 +54,13 @@ mpesa:
     callback-url: ${MPESA_CALLBACK_URL:https://your-domain.com/wallet/payments/mpesa/callback}
     environment: ${MPESA_ENV:sandbox}
 
-# Frontend URL for email links
+# Frontend URL for CORS
 frontend:
   url: ${FRONTEND_URL:http://localhost:3000}
 
 logging:
   level:
-    com.premisave: DEBUG
-    org.springframework.data.mongodb: WARN
+    "[com.premisave]": DEBUG
+    "[org.springframework.data.mongodb]": WARN
+    "[org.springframework.data.repository.config.RepositoryConfigurationExtensionSupport]": ERROR
+    "[org.springframework.cloud.commons.util.InetUtils]": ERROR
