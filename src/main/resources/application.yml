@@ -1,0 +1,58 @@
+spring:
+  application:
+    name: premisave-wallet-service
+
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/premisave-wallet}
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+
+server:
+  port: 8084
+
+# Auth Service Integration
+auth:
+  service:
+    url: ${AUTH_SERVICE_URL:http://localhost:8080}
+
+# JWT Configuration (must match other services)
+jwt:
+  secret: ${JWT_SECRET:eW91ci12ZXJ5LXNlY3VyZS1qd3Qtc2VjcmV0LWtleS0zMi1ieXRlcyE=}
+
+# Rate Limiting
+rate-limit:
+  requests-per-minute: 60
+
+# M-Pesa Daraja Configuration
+mpesa:
+  daraja:
+    consumer-key: ${MPESA_CONSUMER_KEY:your_consumer_key}
+    consumer-secret: ${MPESA_CONSUMER_SECRET:your_consumer_secret}
+    shortcode: ${MPESA_SHORTCODE:174379}
+    passkey: ${MPESA_PASSKEY:your_passkey}
+    callback-url: ${MPESA_CALLBACK_URL:https://your-domain.com/wallet/payments/mpesa/callback}
+    environment: ${MPESA_ENV:sandbox}
+
+# Frontend URL for email links
+frontend:
+  url: ${FRONTEND_URL:http://localhost:3000}
+
+logging:
+  level:
+    com.premisave: DEBUG
+    org.springframework.data.mongodb: WARN
