@@ -3,26 +3,48 @@ package com.premisave.wallet.service;
 import com.premisave.wallet.dto.DisbursementRequest;
 import com.premisave.wallet.dto.DisbursementResponse;
 import com.premisave.wallet.entity.Disbursement;
+import com.premisave.wallet.entity.Transaction;
+import com.premisave.wallet.entity.Wallet;
+import com.premisave.wallet.enums.DisbursementStatus;
+import com.premisave.wallet.enums.TransactionStatus;
+import com.premisave.wallet.enums.TransactionType;
+import com.premisave.wallet.exception.InsufficientFundsException;
+import com.premisave.wallet.exception.WalletFrozenException;
+import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.DisbursementRepository;
+import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class DisbursementService {
 
     private final WalletRepository walletRepository;
     private final DisbursementRepository disbursementRepository;
+    private final TransactionRepository transactionRepository;
     private final MpesaService mpesaService;
 
+    @Transactional
     public DisbursementResponse processDisbursement(String userId, DisbursementRequest request) {
-        var wallet = walletRepository.findByUserId(userId)
-                .orElseThrow(() -> new RuntimeException("Wallet not found"));
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
+
+        if (wallet.isFrozen()) {
+            throw new WalletFrozenException("Wallet is frozen and cannot disburse funds");
+        }
 
         if (wallet.getBalance().compareTo(request.getAmount()) < 0) {
-            throw new RuntimeException("Insufficient funds");
+            throw new InsufficientFundsException("Insufficient funds for disbursement");
         }
+
+        // Deduct balance immediately (hold funds before external call)
+        wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
+        walletRepository.save(wallet);
 
         Disbursement disbursement = new Disbursement();
         disbursement.setUserId(userId);
@@ -30,17 +52,40 @@ public class DisbursementService {
         disbursement.setAmount(request.getAmount());
         disbursement.setDestination(request.getDestination());
         disbursement.setProvider(request.getProvider());
+        disbursement.setStatus(DisbursementStatus.PENDING);
 
-        // For now, simulate M-Pesa B2C
         var mpesaResponse = mpesaService.sendB2C(request.getDestination(), request.getAmount());
 
-        disbursement.setStatus(mpesaResponse.isSuccess() ? 
-                com.premisave.wallet.enums.DisbursementStatus.SUCCESS : 
-                com.premisave.wallet.enums.DisbursementStatus.FAILED);
+        if (mpesaResponse.isSuccess()) {
+            disbursement.setStatus(DisbursementStatus.SUCCESS);
+            disbursement.setProviderReference(mpesaResponse.getConversationId());
+        } else {
+            // Refund wallet on failure
+            disbursement.setStatus(DisbursementStatus.FAILED);
+            wallet.setBalance(wallet.getBalance().add(request.getAmount()));
+            walletRepository.save(wallet);
+            log.warn("Disbursement failed for userId={}, refunding balance", userId);
+        }
 
         disbursementRepository.save(disbursement);
 
-        return new DisbursementResponse(disbursement.getId(), 
-                disbursement.getStatus().name(), mpesaResponse.getMessage());
+        // Record transaction only on success
+        if (disbursement.getStatus() == DisbursementStatus.SUCCESS) {
+            Transaction tx = new Transaction();
+            tx.setUserId(userId);
+            tx.setWalletId(wallet.getId());
+            tx.setType(TransactionType.DISBURSEMENT);
+            tx.setStatus(TransactionStatus.COMPLETED);
+            tx.setAmount(request.getAmount());
+            tx.setDescription("Disbursement to " + request.getDestination()
+                    + (request.getRemarks() != null ? " - " + request.getRemarks() : ""));
+            tx.setProviderReference(mpesaResponse.getConversationId());
+            transactionRepository.save(tx);
+        }
+
+        return new DisbursementResponse(
+                disbursement.getId(),
+                disbursement.getStatus().name(),
+                mpesaResponse.getMessage());
     }
 }
