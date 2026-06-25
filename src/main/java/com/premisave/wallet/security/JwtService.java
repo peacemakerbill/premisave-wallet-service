@@ -22,9 +22,24 @@ public class JwtService {
         return extractClaim(token, Claims::getSubject);
     }
 
+    /**
+     * Extracts the role claim embedded by the auth service.
+     * Returns e.g. "ROLE_CLIENT", "ROLE_ADMIN"
+     */
+    public String extractRole(String token) {
+        Claims claims = extractAllClaims(token);
+        String role = claims.get("role", String.class);
+        if (role == null) return null;
+        // Normalize: auth service may store "CLIENT" or "ROLE_CLIENT"
+        return role.startsWith("ROLE_") ? role : "ROLE_" + role;
+    }
+
+    public String extractUserId(String token) {
+        return extractClaim(token, claims -> claims.get("userId", String.class));
+    }
+
     public <T> T extractClaim(String token, Function<Claims, T> claimsResolver) {
-        final Claims claims = extractAllClaims(token);
-        return claimsResolver.apply(claims);
+        return claimsResolver.apply(extractAllClaims(token));
     }
 
     private Claims extractAllClaims(String token) {

@@ -1,6 +1,5 @@
 package com.premisave.wallet.security;
 
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -10,31 +9,28 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * Builds UserDetails purely from JWT claims already validated by JwtAuthFilter.
- * No Feign call to auth service needed — the shared JWT_SECRET means the token
- * is already trusted by the time this is called.
- *
- * Username is passed in as "email::ROLE_X" (packed by JwtAuthFilter).
+ * Builds UserDetails from the email passed by JwtAuthenticationFilter.
+ * The role is injected separately by the filter after extracting it from the JWT.
+ * No Feign call needed — the JWT is already verified against the shared secret.
  */
 @Service
 public class UserDetailsServiceImpl implements UserDetailsService {
 
-    private static final String DELIMITER = "::";
-
+    /**
+     * Called by JwtAuthenticationFilter with just the email (JWT subject).
+     * Returns a minimal UserDetails — authorities are set by the filter
+     * after extracting the role claim directly from the token.
+     */
     @Override
-    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        if (username == null || !username.contains(DELIMITER)) {
-            throw new UsernameNotFoundException("Invalid username format: " + username);
+    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+        if (email == null || email.isBlank()) {
+            throw new UsernameNotFoundException("Email must not be blank");
         }
-
-        String[] parts = username.split(DELIMITER, 2);
-        String email = parts[0];
-        String role  = parts[1]; // already prefixed e.g. ROLE_CLIENT
-
+        // Return a shell — the filter will override authorities from JWT claims
         return User.builder()
                 .username(email)
-                .password("")  // no password needed — JWT is already authenticated
-                .authorities(List.of(new SimpleGrantedAuthority(role)))
+                .password("")
+                .authorities(List.of())
                 .accountExpired(false)
                 .accountLocked(false)
                 .credentialsExpired(false)
