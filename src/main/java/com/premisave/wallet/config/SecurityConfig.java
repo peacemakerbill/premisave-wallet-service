@@ -17,7 +17,7 @@ import java.util.Arrays;
 import java.util.List;
 
 @Configuration
-@EnableMethodSecurity
+@EnableMethodSecurity // Enables @PreAuthorize on controllers
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
@@ -35,11 +35,25 @@ public class SecurityConfig {
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
-                // Public endpoints
-                .requestMatchers("/health", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
-                // M-Pesa callback must be public (Safaricom calls it directly)
+                // ==================== PUBLIC ENDPOINTS ====================
+                .requestMatchers("/health", 
+                               "/swagger-ui/**", 
+                               "/v3/api-docs/**",
+                               "/swagger-ui.html").permitAll()
+
+                // M-Pesa Callback (Safaricom calls this directly)
                 .requestMatchers("/payments/mpesa/callback").permitAll()
-                // All other endpoints require authentication
+
+                // ==================== AUTHENTICATED USER ENDPOINTS ====================
+                .requestMatchers("/wallet/**",
+                               "/payments/**",
+                               "/disbursements/**",
+                               "/transactions/**").authenticated()
+
+                // ==================== ADMIN & FINANCE ENDPOINTS ====================
+                .requestMatchers("/admin/**").hasAnyRole("ADMIN", "FINANCE", "OPERATIONS")
+
+                // Catch-all: Any other request must be authenticated
                 .anyRequest().authenticated()
             )
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -51,10 +65,9 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        // Restrict to known frontend origin instead of wildcard
         configuration.setAllowedOrigins(List.of(frontendUrl));
-        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "X-Requested-With"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
 
