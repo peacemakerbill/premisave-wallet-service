@@ -1,11 +1,6 @@
 package com.premisave.wallet.controller;
 
-import com.premisave.wallet.dto.ApiResponse;
-import com.premisave.wallet.dto.DepositRequest;
-import com.premisave.wallet.dto.PaymentResponse;
-import com.premisave.wallet.dto.TransferRequest;
-import com.premisave.wallet.dto.WalletBalanceResponse;
-import com.premisave.wallet.dto.WalletResponse;
+import com.premisave.wallet.dto.*;
 import com.premisave.wallet.service.DepositService;
 import com.premisave.wallet.service.TransferService;
 import com.premisave.wallet.service.WalletService;
@@ -73,6 +68,18 @@ public class WalletController {
         if (userId == null) userId = email;
         PaymentResponse response = transferService.transfer(userId, transferRequest);
         return ResponseEntity.ok(ApiResponse.success("Transfer successful", response));
+    }
+
+    /**
+     * Get Wallet Statement with date range and summary
+     */
+    @PostMapping("/statement")
+    public ResponseEntity<ApiResponse<WalletStatementResponse>> getStatement(
+            @Valid @RequestBody WalletStatementRequest request,
+            Authentication auth) {
+        String email = auth.getName();
+        WalletStatementResponse statement = walletService.getStatement(email, request);
+        return ResponseEntity.ok(ApiResponse.success("Wallet statement retrieved successfully", statement));
     }
 
     @PutMapping("/freeze")
