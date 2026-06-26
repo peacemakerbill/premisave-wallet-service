@@ -3,7 +3,8 @@
     {
       "name": "auth.service.url",
       "type": "java.lang.String",
-      "description": "Base URL of the authentication service (e.g. http://localhost:8080)."
+      "description": "Base URL of the authentication service (e.g. http://localhost:8080).",
+      "defaultValue": "http://localhost:8080"
     },
     {
       "name": "jwt.secret",
@@ -40,7 +41,7 @@
     {
       "name": "mpesa.daraja.callback-url",
       "type": "java.lang.String",
-      "description": "Publicly accessible URL that Safaricom will POST payment callbacks to."
+      "description": "Publicly accessible HTTPS URL that Safaricom will POST STK push and B2C callbacks to. Use ngrok locally."
     },
     {
       "name": "mpesa.daraja.environment",
@@ -49,18 +50,53 @@
       "defaultValue": "sandbox"
     },
     {
+      "name": "stripe.secret-key",
+      "type": "java.lang.String",
+      "description": "Stripe secret API key (sk_test_* for sandbox, sk_live_* for production). Found in the Stripe Dashboard under Developers → API keys."
+    },
+    {
+      "name": "stripe.webhook-secret",
+      "type": "java.lang.String",
+      "description": "Stripe webhook signing secret (whsec_*) used to verify incoming webhook payloads. Found in Stripe Dashboard → Webhooks → your endpoint → Signing secret."
+    },
+    {
+      "name": "paypal.client-id",
+      "type": "java.lang.String",
+      "description": "PayPal REST API client ID. Found in the PayPal Developer Dashboard under your app credentials."
+    },
+    {
+      "name": "paypal.client-secret",
+      "type": "java.lang.String",
+      "description": "PayPal REST API client secret. Found in the PayPal Developer Dashboard under your app credentials."
+    },
+    {
+      "name": "paypal.environment",
+      "type": "java.lang.String",
+      "description": "PayPal environment to target: 'sandbox' for testing, 'production' for live.",
+      "defaultValue": "sandbox"
+    },
+    {
       "name": "frontend.url",
       "type": "java.lang.String",
       "description": "Frontend application URL used for CORS allowed-origins configuration.",
       "defaultValue": "http://localhost:3000"
-    },
-    {
-      "name": "stripe.secret-key",
-      "type": "java.lang.String",
-      "description": "A description for 'stripe.secret-key'"
     }
   ],
   "hints": [
+    {
+      "name": "mpesa.daraja.environment.values",
+      "values": [
+        {"value": "sandbox", "description": "Safaricom Daraja sandbox environment for testing."},
+        {"value": "production", "description": "Safaricom Daraja live environment."}
+      ]
+    },
+    {
+      "name": "paypal.environment.values",
+      "values": [
+        {"value": "sandbox", "description": "PayPal sandbox environment for testing."},
+        {"value": "production", "description": "PayPal live environment."}
+      ]
+    },
     {
       "name": "logging.level.values",
       "values": [

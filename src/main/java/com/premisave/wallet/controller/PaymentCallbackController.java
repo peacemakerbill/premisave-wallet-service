@@ -3,6 +3,7 @@ package com.premisave.wallet.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.premisave.wallet.dto.ApiResponse;
+import com.premisave.wallet.dto.MpesaCallbackRequest;
 import com.premisave.wallet.service.DepositService;
 import com.stripe.model.Event;
 import com.stripe.model.PaymentIntent;
@@ -17,8 +18,10 @@ import com.premisave.wallet.service.StripeService;
 import java.math.BigDecimal;
 
 /**
- * Handles incoming webhooks from Stripe and PayPal.
- * Both endpoints are PUBLIC (no JWT) — secured by signature verification.
+ * Handles incoming webhooks/callbacks from all payment providers:
+ * M-Pesa (STK Push + B2C), Stripe, and PayPal.
+ * All endpoints are PUBLIC (no JWT) — secured by signature verification
+ * or IP allowlist at the gateway/firewall level.
  */
 @Slf4j
 @RestController
@@ -33,15 +36,38 @@ public class PaymentCallbackController {
     @Value("${stripe.webhook-secret:}")
     private String stripeWebhookSecret;
 
-    // ─── M-Pesa STK Push callback (existing endpoint, kept here for co-location) ──
+    // ─── M-Pesa STK Push Callback ────────────────────────────────────────────
 
-    // See MpesaCallbackController for /payments/mpesa/callback
+    /**
+     * Receives M-Pesa STK Push callback from Safaricom Daraja.
+     * Secured via IP allowlist at the gateway/firewall level (no JWT).
+     */
+    @PostMapping("/mpesa/callback")
+    public ResponseEntity<ApiResponse<Void>> handleMpesaCallback(@RequestBody MpesaCallbackRequest callback) {
+        log.info("M-Pesa STK callback received: transID={} amount={} msisdn={}",
+                callback.getTransID(), callback.getTransAmount(), callback.getMSISDN());
+
+        try {
+            BigDecimal amount = new BigDecimal(callback.getTransAmount());
+            String accountNumber = callback.getBillRefNumber(); // email used as account ref
+            String description = "M-Pesa deposit from " + callback.getFirstName()
+                    + " (" + callback.getMSISDN() + ")";
+
+            depositService.creditWalletFromCallback(accountNumber, amount,
+                    callback.getTransID(), description);
+
+            return ResponseEntity.ok(ApiResponse.success("Callback processed"));
+        } catch (Exception e) {
+            log.error("Failed to process M-Pesa callback: transID={}", callback.getTransID(), e);
+            // Always return 200 to Safaricom — they retry on non-200
+            return ResponseEntity.ok(ApiResponse.error("Callback processing failed: " + e.getMessage()));
+        }
+    }
 
     // ─── M-Pesa B2C Result (disbursement outcome) ────────────────────────────
 
     /**
      * M-Pesa sends the B2C result to this URL after processing.
-     * For now we log it; extend to update Disbursement status in DB.
      */
     @PostMapping("/mpesa/b2c/result")
     public ResponseEntity<Void> mpesaB2cResult(@RequestBody String payload) {
@@ -75,7 +101,6 @@ public class PaymentCallbackController {
                 PaymentIntent pi = (PaymentIntent) event.getDataObjectDeserializer()
                         .getObject().orElseThrow();
 
-                // userId is stored in PaymentIntent metadata when we create it
                 String userId = pi.getMetadata().get("user_id");
                 BigDecimal amount = BigDecimal.valueOf(pi.getAmount())
                         .divide(BigDecimal.valueOf(100)); // cents → major unit
@@ -102,7 +127,7 @@ public class PaymentCallbackController {
      * PayPal sends events here after order approval.
      * Key event: CHECKOUT.ORDER.APPROVED → capture + credit wallet.
      *
-     * PayPal webhook verification requires calling the PayPal Verify API — 
+     * PayPal webhook verification requires calling the PayPal Verify API —
      * for brevity we trust the event body here; add verification in production.
      */
     @PostMapping("/paypal/webhook")
@@ -116,15 +141,11 @@ public class PaymentCallbackController {
                 JsonNode resource = event.path("resource");
                 String orderId = resource.path("id").asText();
 
-                // Extract userId and amount from custom_id or purchase_units
                 JsonNode unit = resource.path("purchase_units").get(0);
-                String referenceId = unit.path("reference_id").asText(); // our idempotencyKey
+                String referenceId = unit.path("reference_id").asText();
                 String amountStr   = unit.path("amount").path("value").asText("0");
                 String currency    = unit.path("amount").path("currency_code").asText("USD");
 
-                // userId stored as custom_id in purchase_unit or passed via reference_id
-                // Here we look it up by reference (idempotency key matches pending TX reference)
-                // For a cleaner approach, store userId in PayPal custom_id at order creation time
                 String userId = resolveUserIdFromReference(referenceId);
 
                 if (userId != null) {
@@ -147,8 +168,6 @@ public class PaymentCallbackController {
      * or store userId directly in PayPal's custom_id at order creation time (recommended).
      */
     private String resolveUserIdFromReference(String reference) {
-        // Inject TransactionRepository here and do: transactionRepository.findByReference(reference)
-        // Returning null for now so the caller can handle the missing case gracefully.
         log.warn("resolveUserIdFromReference: implement userId lookup by reference={}", reference);
         return null;
     }
