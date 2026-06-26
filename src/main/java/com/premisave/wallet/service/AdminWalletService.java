@@ -4,9 +4,11 @@ import com.premisave.wallet.dto.*;
 import com.premisave.wallet.entity.Disbursement;
 import com.premisave.wallet.entity.Transaction;
 import com.premisave.wallet.entity.Wallet;
+import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.enums.DisbursementStatus;
 import com.premisave.wallet.enums.TransactionStatus;
 import com.premisave.wallet.enums.TransactionType;
+import com.premisave.wallet.exception.InsufficientFundsException;
 import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.DisbursementRepository;
 import com.premisave.wallet.repository.TransactionRepository;
@@ -14,6 +16,7 @@ import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +26,7 @@ import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -32,18 +36,18 @@ public class AdminWalletService {
     private final WalletRepository walletRepository;
     private final TransactionRepository transactionRepository;
     private final DisbursementRepository disbursementRepository;
-    private final WalletService walletService; // Reuse existing logic
+    private final WalletService walletService;
 
     public Page<WalletResponse> getAllWallets(Pageable pageable) {
         return walletRepository.findAll(pageable).map(this::mapToWalletResponse);
     }
 
     public List<WalletResponse> searchWallets(String query) {
-        // Simple search by accountNumber or userId
-        List<Wallet> wallets = walletRepository.findAll().stream()
-                .filter(w -> w.getAccountNumber().contains(query) || w.getUserId().contains(query))
+        return walletRepository.findAll().stream()
+                .filter(w -> w.getAccountNumber().toLowerCase().contains(query.toLowerCase()) ||
+                             w.getUserId().toLowerCase().contains(query.toLowerCase()))
+                .map(this::mapToWalletResponse)
                 .toList();
-        return wallets.stream().map(this::mapToWalletResponse).toList();
     }
 
     public WalletResponse getWalletByUserId(String userId) {
@@ -82,7 +86,7 @@ public class AdminWalletService {
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found"));
 
         if (wallet.getBalance().compareTo(request.getAmount()) < 0) {
-            throw new com.premisave.wallet.exception.InsufficientFundsException("Insufficient balance for debit");
+            throw new InsufficientFundsException("Insufficient balance for debit");
         }
 
         wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
@@ -96,18 +100,43 @@ public class AdminWalletService {
         return new PaymentResponse(true, tx.getId(), "Debit successful");
     }
 
+    /**
+     * FIXED: Proper filtered pagination with Spring Data Pageable
+     */
     public Page<TransactionResponse> getAllTransactions(String userId, TransactionType type,
                                                         TransactionStatus status, LocalDate fromDate,
                                                         LocalDate toDate, Pageable pageable) {
-        // Simplified for now - you can extend with custom queries
-        List<Transaction> txs = transactionRepository.findByUserIdOrderByCreatedAtDesc(userId != null ? userId : "");
-        // Add filtering logic as needed
-        return /* convert to page */ null; // TODO: Implement full pagination with filters
+
+        List<Transaction> transactions;
+
+        if (userId != null && !userId.isBlank()) {
+            transactions = transactionRepository.findByUserIdOrderByCreatedAtDesc(userId);
+        } else {
+            transactions = transactionRepository.findAll();
+        }
+
+        // Apply filters
+        List<Transaction> filtered = transactions.stream()
+                .filter(tx -> type == null || tx.getType() == type)
+                .filter(tx -> status == null || tx.getStatus() == status)
+                .filter(tx -> fromDate == null || tx.getCreatedAt().toLocalDate().isAfter(fromDate.minusDays(1)))
+                .filter(tx -> toDate == null || tx.getCreatedAt().toLocalDate().isBefore(toDate.plusDays(1)))
+                .collect(Collectors.toList());
+
+        // Convert to Page
+        int start = (int) pageable.getOffset();
+        int end = Math.min((start + pageable.getPageSize()), filtered.size());
+
+        List<TransactionResponse> content = filtered.subList(start, end).stream()
+                .map(this::mapToTransactionResponse)
+                .collect(Collectors.toList());
+
+        return new PageImpl<>(content, pageable, filtered.size());
     }
 
     public TransactionResponse getTransactionById(String transactionId) {
         Transaction tx = transactionRepository.findById(transactionId)
-                .orElseThrow(() -> new RuntimeException("Transaction not found"));
+                .orElseThrow(() -> new RuntimeException("Transaction not found: " + transactionId));
         return mapToTransactionResponse(tx);
     }
 
@@ -119,7 +148,6 @@ public class AdminWalletService {
 
     @Transactional
     public DisbursementResponse approveDisbursement(String disbursementId) {
-        // Implementation depends on your M-Pesa B2C logic
         log.info("Disbursement {} approved by admin", disbursementId);
         return new DisbursementResponse(disbursementId, "SUCCESS", "Approved by admin");
     }
@@ -139,8 +167,12 @@ public class AdminWalletService {
     }
 
     public Map<String, Object> getDailyReport(LocalDate date) {
-        // Placeholder
-        return Map.of("date", date, "totalDeposits", BigDecimal.ZERO, "totalWithdrawals", BigDecimal.ZERO);
+        return Map.of(
+            "date", date,
+            "totalDeposits", BigDecimal.ZERO,
+            "totalWithdrawals", BigDecimal.ZERO,
+            "totalTransfers", BigDecimal.ZERO
+        );
     }
 
     public Map<String, BigDecimal> getTotalBalanceOverview() {
@@ -158,6 +190,7 @@ public class AdminWalletService {
         tx.setType(type);
         tx.setStatus(TransactionStatus.COMPLETED);
         tx.setAmount(amount);
+        tx.setCurrency(Currency.KES);
         tx.setDescription(description);
         tx.setReference(reference != null ? reference : "ADMIN-ADJ-" + System.currentTimeMillis());
         return tx;
@@ -176,9 +209,13 @@ public class AdminWalletService {
 
     private TransactionResponse mapToTransactionResponse(Transaction tx) {
         return new TransactionResponse(
-                tx.getId(), tx.getType(), tx.getStatus(), tx.getAmount(),
+                tx.getId(),
+                tx.getType(),
+                tx.getStatus(),
+                tx.getAmount(),
                 tx.getCurrency() != null ? tx.getCurrency().name() : "KES",
-                tx.getDescription(), tx.getCreatedAt()
+                tx.getDescription(),
+                tx.getCreatedAt()
         );
     }
 }
