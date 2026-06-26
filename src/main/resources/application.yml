@@ -9,7 +9,7 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       repositories:
-        enabled: false  # Prevents Redis from claiming MongoDB repositories
+        enabled: false
 
   mail:
     host: ${MAIL_HOST:smtp.gmail.com}
@@ -44,15 +44,30 @@ jwt:
 rate-limit:
   requests-per-minute: 60
 
-# M-Pesa Daraja Configuration
+# ─── M-Pesa Daraja ────────────────────────────────────────────────────────────
 mpesa:
   daraja:
     consumer-key: ${MPESA_CONSUMER_KEY:your_consumer_key}
     consumer-secret: ${MPESA_CONSUMER_SECRET:your_consumer_secret}
     shortcode: ${MPESA_SHORTCODE:174379}
     passkey: ${MPESA_PASSKEY:your_passkey}
-    callback-url: ${MPESA_CALLBACK_URL:https://your-domain.com/wallet/payments/mpesa/callback}
+    # STK push callback — must be HTTPS and publicly reachable (use ngrok locally)
+    callback-url: ${MPESA_CALLBACK_URL:https://your-domain.com/payments/mpesa/callback}
     environment: ${MPESA_ENV:sandbox}
+    # B2C initiator credentials (for disbursements)
+    # Set MPESA_INITIATOR_PASSWORD env var in production
+
+# ─── Stripe ───────────────────────────────────────────────────────────────────
+stripe:
+  secret-key: ${STRIPE_SECRET_KEY:sk_test_your_stripe_secret_key}
+  # Get this from Stripe Dashboard → Webhooks → your endpoint → Signing secret
+  webhook-secret: ${STRIPE_WEBHOOK_SECRET:whsec_your_webhook_signing_secret}
+
+# ─── PayPal ───────────────────────────────────────────────────────────────────
+paypal:
+  client-id: ${PAYPAL_CLIENT_ID:your_paypal_client_id}
+  client-secret: ${PAYPAL_CLIENT_SECRET:your_paypal_client_secret}
+  environment: ${PAYPAL_ENV:sandbox}   # "sandbox" or "production"
 
 # Frontend URL for CORS
 frontend:

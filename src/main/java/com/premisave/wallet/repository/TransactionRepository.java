@@ -1,18 +1,22 @@
 package com.premisave.wallet.repository;
 
 import com.premisave.wallet.entity.Transaction;
-import com.premisave.wallet.enums.TransactionStatus;
-import com.premisave.wallet.enums.TransactionType;
 import org.springframework.data.mongodb.repository.MongoRepository;
+import org.springframework.stereotype.Repository;
 
 import java.util.List;
-import java.util.Optional;
 
+@Repository
 public interface TransactionRepository extends MongoRepository<Transaction, String> {
+
     List<Transaction> findByUserIdOrderByCreatedAtDesc(String userId);
-    List<Transaction> findByWalletIdOrderByCreatedAtDesc(String walletId);
-    Optional<Transaction> findByReference(String reference);
-    List<Transaction> findByUserIdAndTypeOrderByCreatedAtDesc(String userId, TransactionType type);
-    List<Transaction> findByUserIdAndStatusOrderByCreatedAtDesc(String userId, TransactionStatus status);
+
+    /** Used by IdempotencyService to detect duplicate references. */
     boolean existsByReference(String reference);
+
+    /**
+     * Used by MpesaC2BService to detect duplicate M-Pesa TransIDs.
+     * providerReference stores the M-Pesa TransID (e.g. "RCA71X5MJ4").
+     */
+    boolean existsByProviderReference(String providerReference);
 }

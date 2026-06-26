@@ -1,26 +1,33 @@
 package com.premisave.wallet.dto;
 
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Positive;
 import lombok.Data;
 
 import java.math.BigDecimal;
 
-/**
- * Enhanced Deposit Request with idempotency support
- */
 @Data
 public class DepositRequest {
 
-    @NotNull(message = "Amount is required")
-    @Positive(message = "Amount must be greater than zero")
+    @NotNull
+    @DecimalMin("1.00")
     private BigDecimal amount;
 
-    private String provider = "MPESA";
+    /**
+     * Payment provider: MPESA | STRIPE | PAYPAL
+     * Defaults to MPESA if omitted.
+     */
+    private String provider;
 
     /**
-     * Optional reference for idempotency
-     * Useful when retrying deposit initiation
+     * Required for M-Pesa STK push — the customer's Safaricom number.
+     * Format: 07xxxxxxxx or 254xxxxxxxx
      */
-    private String reference;
+    private String phoneNumber;
+
+    /**
+     * ISO 4217 currency code (e.g. KES, USD, EUR).
+     * Defaults to KES for M-Pesa, USD for PayPal.
+     */
+    private String currency;
 }

@@ -91,13 +91,33 @@
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>2.6.0</version>
         </dependency>
-
-        <!-- Generates spring-configuration-metadata.json from @ConfigurationProperties classes -->
-        <!-- Also makes the IDE recognise additional-spring-configuration-metadata.json        -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-configuration-processor</artifactId>
             <optional>true</optional>
+        </dependency>
+
+        <!-- ==================== PAYMENT PROVIDERS ==================== -->
+
+        <!-- Stripe Java SDK -->
+        <dependency>
+            <groupId>com.stripe</groupId>
+            <artifactId>stripe-java</artifactId>
+            <version>26.3.0</version>
+        </dependency>
+
+        <!-- OkHttp — used for M-Pesa Daraja HTTP calls -->
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>okhttp</artifactId>
+            <version>4.12.0</version>
+        </dependency>
+
+        <!-- PayPal REST SDK (v2 Orders + Payouts) -->
+        <dependency>
+            <groupId>com.paypal.sdk</groupId>
+            <artifactId>rest-api-sdk</artifactId>
+            <version>1.14.0</version>
         </dependency>
 
         <!-- Test -->
@@ -126,7 +146,6 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <!-- Exclude compile-only tools from the fat jar -->
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>

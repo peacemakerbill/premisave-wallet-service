@@ -1,37 +1,40 @@
 package com.premisave.wallet.dto;
 
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Positive;
 import lombok.Data;
 
 import java.math.BigDecimal;
 
-/**
- * Enhanced Disbursement Request with idempotency support
- */
 @Data
 public class DisbursementRequest {
 
-    @NotNull(message = "Amount is required")
-    @Positive(message = "Amount must be greater than zero")
+    @NotNull
+    @DecimalMin("1.00")
     private BigDecimal amount;
 
-    @NotBlank(message = "Destination (phone number or email) is required")
+    /**
+     * Destination identifier:
+     *  - MPESA  → phone number (07xxxxxxxx or 254xxxxxxxx)
+     *  - PAYPAL → PayPal email address
+     *  - STRIPE → Stripe external account ID (ba_xxxx)
+     */
+    @NotBlank
     private String destination;
 
-    private String provider = "MPESA";
-
-    private String remarks;
-
     /**
-     * Optional reference for idempotency (highly recommended)
-     * Prevents duplicate disbursements if the request is retried
+     * Provider: MPESA | STRIPE | PAYPAL
+     * Defaults to MPESA if omitted.
      */
+    private String provider;
+
+    /** ISO 4217 currency code. Defaults to KES for M-Pesa, USD for PayPal/Stripe. */
+    private String currency;
+
+    /** Optional idempotency key — generated if not provided. */
     private String reference;
 
-    /**
-     * Optional field for additional context or internal tracking
-     */
-    private String purpose;
+    /** Optional human-readable note. */
+    private String remarks;
 }
