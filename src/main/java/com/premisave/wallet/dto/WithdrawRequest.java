@@ -7,14 +7,25 @@ import lombok.Data;
 
 import java.math.BigDecimal;
 
+/**
+ * Enhanced Withdraw Request
+ */
 @Data
 public class WithdrawRequest {
-    @NotNull
-    @Positive
+
+    @NotNull(message = "Amount is required")
+    @Positive(message = "Amount must be greater than zero")
     private BigDecimal amount;
 
-    @NotBlank
-    private String destination; // phone number or email
+    @NotBlank(message = "Destination is required")
+    private String destination;
 
     private String provider = "MPESA";
+
+    private String remarks;
+
+    /**
+     * Reference for idempotency
+     */
+    private String reference;
 }

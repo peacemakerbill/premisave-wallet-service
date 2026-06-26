@@ -7,14 +7,22 @@ import lombok.Data;
 
 import java.math.BigDecimal;
 
+/**
+ * Enhanced Payment Request with strong idempotency support
+ */
 @Data
 public class PaymentInitiateRequest {
-    @NotNull
-    @Positive
+
+    @NotNull(message = "Amount is required")
+    @Positive(message = "Amount must be greater than zero")
     private BigDecimal amount;
 
-    @NotBlank
-    private String service; // e.g., "booking"
+    @NotBlank(message = "Service name is required (e.g., booking, subscription)")
+    private String service;
 
+    /**
+     * Reference is highly recommended for idempotency
+     * Prevents duplicate deductions on retry
+     */
     private String reference;
 }

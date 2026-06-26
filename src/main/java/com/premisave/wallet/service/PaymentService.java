@@ -7,7 +7,6 @@ import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.enums.TransactionStatus;
 import com.premisave.wallet.enums.TransactionType;
-import com.premisave.wallet.exception.DuplicateTransactionException;
 import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
@@ -24,19 +23,16 @@ public class PaymentService {
     private final WalletRepository walletRepository;
     private final TransactionRepository transactionRepository;
     private final WalletService walletService;
+    private final IdempotencyService idempotencyService;
 
     @Transactional
     public PaymentResponse deductFromWallet(String userId, PaymentInitiateRequest request) {
-        // Strong idempotency check using repository method
-        if (request.getReference() != null && transactionRepository.existsByReference(request.getReference())) {
-            throw new DuplicateTransactionException(
-                    "Transaction with reference " + request.getReference() + " already processed");
-        }
+        // Use dedicated idempotency service
+        idempotencyService.checkIdempotency(request.getReference());
 
         Wallet wallet = walletRepository.findByUserId(userId)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
 
-        // Use shared validation
         walletService.validateWalletForTransaction(userId, request.getAmount());
 
         wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
@@ -53,7 +49,7 @@ public class PaymentService {
         tx.setReference(request.getReference());
         transactionRepository.save(tx);
 
-        log.info("Payment processed successfully: userId={} amount={} service={} ref={}",
+        log.info("Payment deducted successfully: userId={} | amount={} | service={} | ref={}",
                 userId, request.getAmount(), request.getService(), request.getReference());
 
         return new PaymentResponse(true, tx.getId(), "Payment successful");
