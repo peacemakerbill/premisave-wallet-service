@@ -41,9 +41,19 @@ public class UserProfileController {
      */
     @GetMapping("/{userId}/profile")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getProfile(@PathVariable String userId) {
-        userProfileClient.recordProfileView(userId); // fire-and-forget; errors are swallowed below
         Map<String, Object> profile = userProfileClient.getPublicProfile(userId);
         return ResponseEntity.ok(ApiResponse.success("Profile retrieved", profile));
+    }
+
+    /**
+     * Explicitly record a profile view — caller decides when to trigger this,
+     * e.g. after the user has actually seen the profile card.
+     * POST /users/{userId}/profile/view
+     */
+    @PostMapping("/{userId}/profile/view")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> recordProfileView(@PathVariable String userId) {
+        Map<String, Object> result = userProfileClient.recordProfileView(userId);
+        return ResponseEntity.ok(ApiResponse.success("Profile view recorded", result));
     }
 
     /**
