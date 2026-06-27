@@ -3,17 +3,15 @@ package com.premisave.wallet.config;
 import org.modelmapper.ModelMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 
 @Configuration
 public class ApplicationConfig {
 
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
-    }
-
+    /**
+     * ModelMapper for DTO ↔ entity conversions where manual mapping is verbose.
+     * PasswordEncoder is intentionally omitted — this service never handles passwords;
+     * authentication is delegated entirely to the Auth Service via JWT.
+     */
     @Bean
     public ModelMapper modelMapper() {
         return new ModelMapper();

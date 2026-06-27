@@ -17,7 +17,7 @@ import java.util.Arrays;
 import java.util.List;
 
 @Configuration
-@EnableMethodSecurity // Enables @PreAuthorize on controllers
+@EnableMethodSecurity
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
@@ -35,28 +35,48 @@ public class SecurityConfig {
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
-                // ==================== PUBLIC ENDPOINTS ====================
-                .requestMatchers("/health", 
-                               "/swagger-ui/**", 
-                               "/v3/api-docs/**",
-                               "/swagger-ui.html").permitAll()
 
-                // M-Pesa Callback (Safaricom calls this directly)
-                .requestMatchers("/payments/mpesa/callback").permitAll()
+                // ── Public: health & docs ──────────────────────────────────
+                .requestMatchers(
+                    "/system/health",
+                    "/system/health/details",
+                    "/swagger-ui/**",
+                    "/v3/api-docs/**",
+                    "/swagger-ui.html"
+                ).permitAll()
 
-                // ==================== AUTHENTICATED USER ENDPOINTS ====================
-                .requestMatchers("/wallet/**",
-                               "/payments/**",
-                               "/disbursements/**",
-                               "/transactions/**").authenticated()
+                // ── Public: payment provider callbacks (no JWT — IP-secured at gateway) ──
+                .requestMatchers(
+                    "/payments/mpesa/callback",
+                    "/payments/mpesa/b2c/result",
+                    "/payments/mpesa/b2c/timeout",
+                    "/payments/mpesa/c2b/validation",
+                    "/payments/mpesa/c2b/confirmation",
+                    "/payments/stripe/webhook",
+                    "/payments/paypal/webhook"
+                ).permitAll()
 
-                // ==================== ADMIN & FINANCE ENDPOINTS ====================
-                .requestMatchers("/admin/**").hasAnyRole("ADMIN", "FINANCE", "OPERATIONS")
+                // ── Authenticated users ────────────────────────────────────
+                .requestMatchers(
+                    "/wallet/**",
+                    "/payments/**",
+                    "/disbursements/**",
+                    "/transactions/**",
+                    "/system/test-token"
+                ).authenticated()
 
-                // Catch-all: Any other request must be authenticated
+                // ── Admin / Finance / Operations only ──────────────────────
+                .requestMatchers("/admin/**")
+                    .hasAnyRole("ADMIN", "FINANCE", "OPERATIONS")
+
+                // ── C2B URL registration — admin-triggered, requires auth ──
+                .requestMatchers("/payments/mpesa/c2b/register-urls")
+                    .hasAnyRole("ADMIN", "OPERATIONS")
+
                 .anyRequest().authenticated()
             )
-            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .sessionManagement(session -> session
+                .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

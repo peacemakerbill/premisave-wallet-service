@@ -18,6 +18,20 @@ public class WebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(rateLimiterInterceptor)
                 .addPathPatterns("/**")
-                .excludePathPatterns("/health", "/swagger-ui/**", "/v3/api-docs/**");
+                .excludePathPatterns(
+                    "/system/health",
+                    "/system/health/details",
+                    "/swagger-ui/**",
+                    "/v3/api-docs/**",
+                    // Payment provider callbacks should bypass rate limiting
+                    // — they come from Safaricom/Stripe/PayPal servers, not end users
+                    "/payments/mpesa/callback",
+                    "/payments/mpesa/b2c/result",
+                    "/payments/mpesa/b2c/timeout",
+                    "/payments/mpesa/c2b/validation",
+                    "/payments/mpesa/c2b/confirmation",
+                    "/payments/stripe/webhook",
+                    "/payments/paypal/webhook"
+                );
     }
 }
