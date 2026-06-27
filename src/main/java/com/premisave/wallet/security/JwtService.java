@@ -24,13 +24,19 @@ public class JwtService {
 
     /**
      * Extracts the role claim embedded by the auth service.
-     * Returns e.g. "ROLE_CLIENT", "ROLE_ADMIN"
+     * Auth service stores the role under "roles" (e.g. "CLIENT", "ADMIN").
+     * We normalise it to "ROLE_CLIENT" / "ROLE_ADMIN" for Spring Security.
      */
     public String extractRole(String token) {
         Claims claims = extractAllClaims(token);
-        String role = claims.get("role", String.class);
+
+        // Auth service writes the key as "roles" — check that first, fall back to "role"
+        String role = claims.get("roles", String.class);
+        if (role == null) {
+            role = claims.get("role", String.class);
+        }
         if (role == null) return null;
-        // Normalize: auth service may store "CLIENT" or "ROLE_CLIENT"
+
         return role.startsWith("ROLE_") ? role : "ROLE_" + role;
     }
 
@@ -50,9 +56,28 @@ public class JwtService {
                 .getPayload();
     }
 
+    /**
+     * Mirrors the auth service key derivation exactly:
+     * truncate/pad to 32 bytes so tokens are cross-verifiable between services.
+     */
     private SecretKey getSignInKey() {
-        byte[] keyBytes = Decoders.BASE64.decode(secret);
-        return Keys.hmacShaKeyFor(keyBytes);
+        try {
+            byte[] keyBytes = Decoders.BASE64.decode(secret);
+
+            if (keyBytes.length < 32) {
+                byte[] padded = new byte[32];
+                System.arraycopy(keyBytes, 0, padded, 0, keyBytes.length);
+                keyBytes = padded;
+            } else if (keyBytes.length > 32) {
+                byte[] truncated = new byte[32];
+                System.arraycopy(keyBytes, 0, truncated, 0, 32);
+                keyBytes = truncated;
+            }
+
+            return Keys.hmacShaKeyFor(keyBytes);
+        } catch (Exception e) {
+            return Keys.hmacShaKeyFor(secret.getBytes());
+        }
     }
 
     public boolean isTokenValid(String token, UserDetails userDetails) {

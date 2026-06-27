@@ -36,7 +36,7 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
 
-                // ── Public: health & docs ──────────────────────────────────
+                // ── 1. Public: health & docs ───────────────────────────────
                 .requestMatchers(
                     "/system/health",
                     "/system/health/details",
@@ -45,7 +45,8 @@ public class SecurityConfig {
                     "/swagger-ui.html"
                 ).permitAll()
 
-                // ── Public: payment provider callbacks (no JWT — IP-secured at gateway) ──
+                // ── 2. Public: payment provider callbacks ──────────────────
+                //    (no JWT — Safaricom/Stripe/PayPal servers; IP-secured at gateway)
                 .requestMatchers(
                     "/payments/mpesa/callback",
                     "/payments/mpesa/b2c/result",
@@ -56,22 +57,21 @@ public class SecurityConfig {
                     "/payments/paypal/webhook"
                 ).permitAll()
 
-                // ── Authenticated users ────────────────────────────────────
-                .requestMatchers(
-                    "/wallet/**",
-                    "/payments/**",
-                    "/disbursements/**",
-                    "/transactions/**",
-                    "/system/test-token"
-                ).authenticated()
-
-                // ── Admin / Finance / Operations only ──────────────────────
+                // ── 3. Role-restricted: must come BEFORE the broad wildcards ──
                 .requestMatchers("/admin/**")
                     .hasAnyRole("ADMIN", "FINANCE", "OPERATIONS")
 
-                // ── C2B URL registration — admin-triggered, requires auth ──
                 .requestMatchers("/payments/mpesa/c2b/register-urls")
                     .hasAnyRole("ADMIN", "OPERATIONS")
+
+                // ── 4. Authenticated users ─────────────────────────────────
+                .requestMatchers(
+                    "/system/test-token",
+                    "/wallet/**",
+                    "/payments/**",
+                    "/disbursements/**",
+                    "/transactions/**"
+                ).authenticated()
 
                 .anyRequest().authenticated()
             )
