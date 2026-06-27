@@ -2,6 +2,7 @@ package com.premisave.wallet.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.premisave.wallet.client.AuthServiceClient;
 import com.premisave.wallet.config.MpesaConfig;
 import com.premisave.wallet.dto.MpesaC2BCallbackRequest;
 import com.premisave.wallet.entity.Transaction;
@@ -30,6 +31,7 @@ public class MpesaC2BService {
     private final MpesaService mpesaService;   // reuse getAccessToken()
     private final WalletRepository walletRepository;
     private final TransactionRepository transactionRepository;
+    private final AuthServiceClient authServiceClient;
 
     private final OkHttpClient http = new OkHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -86,14 +88,52 @@ public class MpesaC2BService {
     // ─── Validation ───────────────────────────────────────────────────────────
 
     /**
-     * Checks whether a wallet exists for the given email (account number).
-     * Called before Safaricom processes the payment — reject unknown accounts
-     * so the customer gets an immediate failure on their phone instead of
-     * paying into a void.
+     * Dual-layer account validation for M-Pesa C2B (external validation enabled).
+     *
+     * Layer 1 — Auth Service: confirms the email belongs to a real, active,
+     *            verified, non-archived user. Calls the internal endpoint via
+     *            Feign with X-API-Key. Fail-safe: if auth service is unreachable,
+     *            we REJECT (fail closed) — better to decline than accept an unknown account.
+     *
+     * Layer 2 — Wallet Service: confirms a wallet actually exists locally for
+     *            that email, so we have somewhere to credit the funds.
+     *
+     * Safaricom must receive a response within 8 seconds — both checks are
+     * fast indexed lookups designed to stay well within that window.
      */
     public boolean validateAccount(String email) {
-        if (email == null || email.isBlank()) return false;
-        return walletRepository.findByAccountNumber(email.trim().toLowerCase()).isPresent();
+        if (email == null || email.isBlank()) {
+            log.warn("C2B validation: empty account number received");
+            return false;
+        }
+
+        String normalizedEmail = email.trim().toLowerCase();
+
+        // ── Layer 1: Verify user exists and is active in auth service ──────
+        try {
+            Map<String, Object> result = authServiceClient.validateEmail(normalizedEmail);
+            boolean valid = Boolean.TRUE.equals(result.get("valid"));
+
+            if (!valid) {
+                String reason = (String) result.getOrDefault("reason", "UNKNOWN");
+                log.warn("C2B validation: auth service rejected email={} reason={}", normalizedEmail, reason);
+                return false;
+            }
+
+            log.debug("C2B validation: auth service confirmed email={}", normalizedEmail);
+        } catch (Exception e) {
+            // Auth service is down — FAIL CLOSED (reject payment)
+            log.error("C2B validation: auth service unreachable for email={} — rejecting (fail-safe). Error: {}",
+                    normalizedEmail, e.getMessage());
+            return false;
+        }
+
+        // ── Layer 2: Verify a wallet exists locally to receive funds ───────
+        boolean walletExists = walletRepository.findByAccountNumber(normalizedEmail).isPresent();
+        if (!walletExists) {
+            log.warn("C2B validation: auth account valid but no wallet found for email={}", normalizedEmail);
+        }
+        return walletExists;
     }
 
     // ─── Confirmation ─────────────────────────────────────────────────────────

@@ -70,7 +70,8 @@ public class SecurityConfig {
                     "/wallet/**",
                     "/payments/**",
                     "/disbursements/**",
-                    "/transactions/**"
+                    "/transactions/**",
+                    "/users/**" 
                 ).authenticated()
 
                 .anyRequest().authenticated()
@@ -87,7 +88,7 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(List.of(frontendUrl));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "X-Requested-With"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "X-Requested-With", "X-API-Key"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
 

@@ -35,6 +35,8 @@ server:
 auth:
   service:
     url: ${AUTH_SERVICE_URL:http://localhost:8080}
+    # Must match the API_KEY set in the auth service .env
+    api-key: ${AUTH_SERVICE_API_KEY:replace-this-in-production}
 
 # JWT Configuration (must match other services)
 jwt:
