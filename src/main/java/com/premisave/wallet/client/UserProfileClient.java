@@ -88,4 +88,32 @@ public interface UserProfileClient {
 
     @GetMapping("/profile/views/stats/{userId}")
     Map<String, Object> getUserViewStats(@PathVariable("userId") String userId);
+
+    // ── Inbound: who liked / follows / reviewed me ────────────────────────────
+
+    @GetMapping("/social/my-likers")
+    List<Map<String, Object>> getMyLikers();
+
+    @GetMapping("/social/my-followers")
+    List<Map<String, Object>> getMyFollowers();
+
+    @GetMapping("/social/my-reviews")
+    List<Map<String, Object>> getMyReviews();
+
+    @GetMapping("/social/my-written-reviews")
+    List<Map<String, Object>> getMyWrittenReviews();
+
+    // ── Relationship status checks ────────────────────────────────────────────
+
+    @GetMapping("/social/like/status/{targetId}")
+    Map<String, Object> getLikeStatus(@PathVariable("targetId") String targetId);
+
+    @GetMapping("/social/follow/status/{targetId}")
+    Map<String, Object> getFollowStatus(@PathVariable("targetId") String targetId);
+
+    @GetMapping("/social/review/status/{targetId}")
+    Map<String, Object> getReviewStatus(@PathVariable("targetId") String targetId);
+
+    @GetMapping("/social/follow/mutual/{targetId}")
+    Map<String, Object> getMutualFollowStatus(@PathVariable("targetId") String targetId);
 }

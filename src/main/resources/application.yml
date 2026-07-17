@@ -38,6 +38,14 @@ auth:
     # Must match the API_KEY set in the auth service .env
     api-key: ${AUTH_SERVICE_API_KEY:replace-this-in-production}
 
+# Shared secret internal services present via X-API-Key when calling
+# wallet-service's /internal/** endpoints (see InternalApiKeyFilter).
+# Must match property-service's app.api-key (INTERNAL_API_KEY env var) —
+# both services read the same INTERNAL_API_KEY name, but from their own
+# separate .env files, so the actual value must be copied to both.
+internal:
+  api-key: ${INTERNAL_API_KEY:}
+
 # JWT Configuration (must match other services)
 jwt:
   secret: ${JWT_SECRET:eW91ci12ZXJ5LXNlY3VyZS1qd3Qtc2VjcmV0LWtleS0zMi1ieXRlcyE=}

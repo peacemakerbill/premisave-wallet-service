@@ -41,19 +41,9 @@ public class UserProfileController {
      */
     @GetMapping("/{userId}/profile")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getProfile(@PathVariable String userId) {
+        userProfileClient.recordProfileView(userId); // fire-and-forget; errors are swallowed below
         Map<String, Object> profile = userProfileClient.getPublicProfile(userId);
         return ResponseEntity.ok(ApiResponse.success("Profile retrieved", profile));
-    }
-
-    /**
-     * Explicitly record a profile view — caller decides when to trigger this,
-     * e.g. after the user has actually seen the profile card.
-     * POST /users/{userId}/profile/view
-     */
-    @PostMapping("/{userId}/profile/view")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> recordProfileView(@PathVariable String userId) {
-        Map<String, Object> result = userProfileClient.recordProfileView(userId);
-        return ResponseEntity.ok(ApiResponse.success("Profile view recorded", result));
     }
 
     /**
@@ -195,5 +185,57 @@ public class UserProfileController {
     @GetMapping("/{userId}/view-stats")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getUserViewStats(@PathVariable String userId) {
         return ResponseEntity.ok(ApiResponse.success("View stats retrieved", userProfileClient.getUserViewStats(userId)));
+    }
+
+    // ── Inbound social ────────────────────────────────────────────────────────
+
+    /** GET /users/me/likers — who liked me */
+    @GetMapping("/me/likers")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getMyLikers() {
+        return ResponseEntity.ok(ApiResponse.success("Users who liked me", userProfileClient.getMyLikers()));
+    }
+
+    /** GET /users/me/followers — who follows me */
+    @GetMapping("/me/followers")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getMyFollowers() {
+        return ResponseEntity.ok(ApiResponse.success("Followers retrieved", userProfileClient.getMyFollowers()));
+    }
+
+    /** GET /users/me/reviews — reviews written about me */
+    @GetMapping("/me/reviews")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getMyReviews() {
+        return ResponseEntity.ok(ApiResponse.success("My reviews retrieved", userProfileClient.getMyReviews()));
+    }
+
+    /** GET /users/me/written-reviews — reviews I wrote */
+    @GetMapping("/me/written-reviews")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getMyWrittenReviews() {
+        return ResponseEntity.ok(ApiResponse.success("Written reviews retrieved", userProfileClient.getMyWrittenReviews()));
+    }
+
+    // ── Relationship status checks ────────────────────────────────────────────
+
+    /** GET /users/{targetId}/like-status */
+    @GetMapping("/{targetId}/like-status")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getLikeStatus(@PathVariable String targetId) {
+        return ResponseEntity.ok(ApiResponse.success("Like status", userProfileClient.getLikeStatus(targetId)));
+    }
+
+    /** GET /users/{targetId}/follow-status */
+    @GetMapping("/{targetId}/follow-status")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getFollowStatus(@PathVariable String targetId) {
+        return ResponseEntity.ok(ApiResponse.success("Follow status", userProfileClient.getFollowStatus(targetId)));
+    }
+
+    /** GET /users/{targetId}/review-status */
+    @GetMapping("/{targetId}/review-status")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getReviewStatus(@PathVariable String targetId) {
+        return ResponseEntity.ok(ApiResponse.success("Review status", userProfileClient.getReviewStatus(targetId)));
+    }
+
+    /** GET /users/{targetId}/mutual-follow */
+    @GetMapping("/{targetId}/mutual-follow")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getMutualFollowStatus(@PathVariable String targetId) {
+        return ResponseEntity.ok(ApiResponse.success("Mutual follow status", userProfileClient.getMutualFollowStatus(targetId)));
     }
 }

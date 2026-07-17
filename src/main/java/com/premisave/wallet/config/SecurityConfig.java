@@ -1,5 +1,6 @@
 package com.premisave.wallet.config;
 
+import com.premisave.wallet.security.InternalApiKeyFilter;
 import com.premisave.wallet.security.JwtAuthenticationFilter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -21,12 +22,14 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
+    private final InternalApiKeyFilter internalApiKeyFilter;
 
     @Value("${frontend.url:http://localhost:3000}")
     private String frontendUrl;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthFilter) {
+    public SecurityConfig(JwtAuthenticationFilter jwtAuthFilter, InternalApiKeyFilter internalApiKeyFilter) {
         this.jwtAuthFilter = jwtAuthFilter;
+        this.internalApiKeyFilter = internalApiKeyFilter;
     }
 
     @Bean
@@ -57,27 +60,35 @@ public class SecurityConfig {
                     "/payments/paypal/webhook"
                 ).permitAll()
 
-                // ── 3. Role-restricted: must come BEFORE the broad wildcards ──
+                // ── 3. Internal, service-to-service calls (API key, not JWT) ──
+                //    Authenticated by InternalApiKeyFilter, not JwtAuthenticationFilter.
+                //    Must come before the broad "authenticated()" wildcards below,
+                //    same reasoning as the role-restricted matchers.
+                .requestMatchers("/internal/**")
+                    .hasRole("INTERNAL_SERVICE")
+
+                // ── 4. Role-restricted: must come BEFORE the broad wildcards ──
                 .requestMatchers("/admin/**")
                     .hasAnyRole("ADMIN", "FINANCE", "OPERATIONS")
 
                 .requestMatchers("/payments/mpesa/c2b/register-urls")
                     .hasAnyRole("ADMIN", "OPERATIONS")
 
-                // ── 4. Authenticated users ─────────────────────────────────
+                // ── 5. Authenticated users ─────────────────────────────────
                 .requestMatchers(
                     "/system/test-token",
                     "/wallet/**",
                     "/payments/**",
                     "/disbursements/**",
                     "/transactions/**",
-                    "/users/**" 
+                    "/users/**"
                 ).authenticated()
 
                 .anyRequest().authenticated()
             )
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .addFilterBefore(internalApiKeyFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
