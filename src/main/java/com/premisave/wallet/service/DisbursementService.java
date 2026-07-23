@@ -1,5 +1,6 @@
 package com.premisave.wallet.service;
 
+import com.premisave.wallet.dto.B2CTopUpRequest;
 import com.premisave.wallet.dto.DisbursementRequest;
 import com.premisave.wallet.dto.DisbursementResponse;
 import com.premisave.wallet.dto.MpesaB2BRequest;
@@ -156,12 +157,58 @@ public class DisbursementService {
         return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), result.getMessage());
     }
 
+    // ─── B2C Account Top Up (admin/finance-initiated) ───────────────────────
+
+    /**
+     * Tops up a B2C shortcode's utility account from Premisave's working
+     * account (CommandID BusinessPayToBulk). Purely an internal float-management
+     * operation — no end-user wallet is touched, so no refund logic applies on
+     * failure. We still record a Disbursement for audit trail;
+     * completeMpesaDisbursement() will mark it SUCCESS/FAILED via the existing
+     * B2B result callback, and correctly skips creating a wallet Transaction
+     * since channel != "B2C".
+     *
+     * See https://developer.safaricom.co.ke/apis/B2CAccountTopUp
+     */
+    @Transactional
+    public DisbursementResponse processB2CTopUp(String initiatedByUserId, B2CTopUpRequest request) {
+        idempotencyService.checkIdempotency(request.getReference());
+        String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
+
+        var result = mpesaService.topUpB2CAccount(request.getAmount(), request.getReceivingShortcode(),
+                request.getRequester(), request.getAccountReference(), request.getRemarks());
+
+        Disbursement disbursement = new Disbursement();
+        disbursement.setUserId(initiatedByUserId);
+        disbursement.setAmount(request.getAmount());
+        disbursement.setCurrency(Currency.KES);
+        disbursement.setDestination(request.getReceivingShortcode() != null
+                ? request.getReceivingShortcode() : "B2C-DEFAULT");
+        disbursement.setProvider("MPESA");
+        disbursement.setChannel("B2C_TOPUP");
+        disbursement.setReference(reference);
+
+        if (result.isSuccess()) {
+            disbursement.setStatus(DisbursementStatus.PENDING);
+            disbursement.setProviderReference(result.getConversationId());
+        } else {
+            disbursement.setStatus(DisbursementStatus.FAILED);
+            disbursement.setFailureReason(result.getMessage());
+        }
+
+        disbursementRepository.save(disbursement);
+        return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), result.getMessage());
+    }
+
     // ─── Reconciliation from Safaricom's ResultURL callback ─────────────────
 
     /**
      * Called by PaymentCallbackController when Safaricom's real B2C/B2B
      * result arrives. This is the ONLY place a disbursement should be marked
      * SUCCESS or given a completed Transaction record for M-Pesa payouts.
+     * Also used to reconcile B2C Account Top Ups (channel="B2C_TOPUP") — those
+     * intentionally never get a wallet Transaction since no user wallet is
+     * involved.
      */
     @Transactional
     public void completeMpesaDisbursement(String conversationId, boolean success,
@@ -182,8 +229,9 @@ public class DisbursementService {
             d.setStatus(DisbursementStatus.SUCCESS);
             disbursementRepository.save(d);
 
-            // B2B disbursements have no user wallet (userId is the admin who triggered it) —
-            // only create a wallet-side Transaction for user-initiated (B2C) payouts.
+            // B2B/B2C_TOPUP disbursements have no user wallet (userId is the admin
+            // who triggered it) — only create a wallet-side Transaction for
+            // user-initiated (B2C) payouts.
             if ("B2C".equals(d.getChannel()) && d.getWalletId() != null) {
                 saveDisbursementTransaction(d.getUserId(), d.getWalletId(), d.getAmount(), d, d.getReference());
             }

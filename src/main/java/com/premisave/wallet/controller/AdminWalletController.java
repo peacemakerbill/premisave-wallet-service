@@ -124,7 +124,8 @@ public class AdminWalletController {
 
     /**
      * Triggers an M-Pesa B2B payment from Premisave's shortcode to another
-     * paybill/till (e.g. settling with a vendor or partner business).
+     * paybill/till (e.g. settling with a vendor or partner business, or
+     * BusinessBuyGoods to pay a till/store number — set via request.commandId).
      * Restricted to ADMIN/FINANCE/OPERATIONS via the class-level @PreAuthorize.
      * B2B is a permissioned Safaricom API — must be enabled for the shortcode.
      */
@@ -134,6 +135,23 @@ public class AdminWalletController {
             Authentication auth) {
         return ResponseEntity.ok(ApiResponse.success("B2B payment initiated",
                 adminWalletService.processB2BPayment(auth.getName(), request)));
+    }
+
+    // ==================== B2C ACCOUNT TOP UP ====================
+
+    /**
+     * Tops up a B2C shortcode's utility account from Premisave's working
+     * account (CommandID BusinessPayToBulk) — internal float management so
+     * disbursements don't run dry. Restricted to ADMIN/FINANCE/OPERATIONS
+     * via the class-level @PreAuthorize.
+     * See https://developer.safaricom.co.ke/apis/B2CAccountTopUp
+     */
+    @PostMapping("/b2c/top-up")
+    public ResponseEntity<ApiResponse<DisbursementResponse>> topUpB2CAccount(
+            @Valid @RequestBody B2CTopUpRequest request,
+            Authentication auth) {
+        return ResponseEntity.ok(ApiResponse.success("B2C top-up initiated",
+                adminWalletService.processB2CTopUp(auth.getName(), request)));
     }
 
     // ==================== REPORTS & ANALYTICS ====================

@@ -168,6 +168,18 @@ public class AdminWalletService {
         return disbursementService.processB2BPayment(initiatedByUserId, request);
     }
 
+    // ==================== B2C ACCOUNT TOP UP ====================
+
+    /**
+     * Delegates to DisbursementService, which owns the M-Pesa B2C Account
+     * Top Up call (CommandID BusinessPayToBulk), Disbursement record
+     * creation, and async result reconciliation via the existing B2B
+     * result/timeout callbacks.
+     */
+    public DisbursementResponse processB2CTopUp(String initiatedByUserId, B2CTopUpRequest request) {
+        return disbursementService.processB2CTopUp(initiatedByUserId, request);
+    }
+
     // ==================== REPORTS ====================
 
     public Map<String, Object> getSystemSummary() {

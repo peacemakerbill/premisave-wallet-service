@@ -3,6 +3,7 @@ package com.premisave.wallet.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.premisave.wallet.dto.ApiResponse;
+import com.premisave.wallet.dto.B2BExpressCheckoutCallbackRequest;
 import com.premisave.wallet.dto.MpesaResultCallbackRequest;
 import com.premisave.wallet.dto.MpesaStkCallbackRequest;
 import com.premisave.wallet.service.DepositService;
@@ -23,7 +24,7 @@ import java.util.Map;
 
 /**
  * Handles incoming webhooks/callbacks from all payment providers:
- * M-Pesa (STK Push, B2C, B2B), Stripe, and PayPal.
+ * M-Pesa (STK Push, B2C, B2B, B2B Express Checkout), Stripe, and PayPal.
  * All endpoints are PUBLIC (no JWT) — secured by signature verification
  * or IP allowlist at the gateway/firewall level.
  */
@@ -133,6 +134,10 @@ public class PaymentCallbackController {
     }
 
     // ─── M-Pesa B2B Result (business-to-business payment outcome) ───────────
+    // Covers BusinessPayBill, BusinessBuyGoods, and B2C Account Top Up
+    // (BusinessPayToBulk) — all three go through the same result/timeout
+    // callback shape; DisbursementService.completeMpesaDisbursement()
+    // distinguishes them by the Disbursement's `channel` field.
 
     @PostMapping("/mpesa/b2b/result")
     public ResponseEntity<Void> mpesaB2bResult(@RequestBody MpesaResultCallbackRequest callback) {
@@ -160,6 +165,36 @@ public class PaymentCallbackController {
         } catch (Exception e) {
             log.error("Failed to process M-Pesa B2B timeout: conversationId={}", conversationId, e);
         }
+        return ResponseEntity.ok().build();
+    }
+
+    // ─── M-Pesa B2B Express Checkout (USSD Push to Till) Result ─────────────
+
+    /**
+     * Flatter callback shape than the standard Result envelope used by the
+     * other B2B/B2C flows — see B2BExpressCheckoutCallbackRequest. Matched
+     * back to the pending deposit transaction via the RequestRefID we
+     * generated at initiation (see DepositService.creditWalletFromExpressCheckout),
+     * since this payload carries no account/email either.
+     * Public — secured via IP allowlist at the gateway, same as every other
+     * M-Pesa callback here.
+     */
+    @PostMapping("/mpesa/b2b/express-checkout/result")
+    public ResponseEntity<Void> mpesaB2BExpressCheckoutResult(
+            @RequestBody B2BExpressCheckoutCallbackRequest callback) {
+        String requestId = callback.getRequestId();
+        boolean success = "0".equals(callback.getResultCode());
+        log.info("B2B Express Checkout result: requestId={} resultCode={} status={}",
+                requestId, callback.getResultCode(), callback.getStatus());
+
+        try {
+            BigDecimal amount = callback.getAmount() != null ? new BigDecimal(callback.getAmount()) : BigDecimal.ZERO;
+            depositService.creditWalletFromExpressCheckout(
+                    requestId, amount, callback.getTransactionId(), callback.getResultDesc(), success);
+        } catch (Exception e) {
+            log.error("Failed to process B2B Express Checkout callback: requestId={}", requestId, e);
+        }
+
         return ResponseEntity.ok().build();
     }
 

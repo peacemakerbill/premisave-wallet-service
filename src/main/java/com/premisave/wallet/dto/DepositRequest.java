@@ -14,16 +14,24 @@ public class DepositRequest {
     private BigDecimal amount;
 
     /**
-     * Payment provider: MPESA | STRIPE | PAYPAL
+     * Payment provider: MPESA | MPESA_TILL | STRIPE | PAYPAL
      * Defaults to MPESA if omitted.
      */
     private String provider;
 
     /**
-     * Required for M-Pesa STK push — the customer's Safaricom number.
-     * Format: 07xxxxxxxx or 254xxxxxxxx
+     * Required for M-Pesa STK push (provider=MPESA) — the customer's
+     * Safaricom number. Format: 07xxxxxxxx or 254xxxxxxxx
      */
     private String phoneNumber;
+
+    /**
+     * Required for provider=MPESA_TILL (B2B Express Checkout) — the paying
+     * merchant's own till number. The USSD PIN prompt is sent to whichever
+     * phone is registered as that till's nominated operator number, not to
+     * a number you supply directly.
+     */
+    private String payerTillNumber;
 
     /**
      * ISO 4217 currency code (e.g. KES, USD, EUR).

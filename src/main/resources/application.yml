@@ -89,13 +89,14 @@ mpesa:
     # ── B2B (Business to Business) ──
     # NOTE: B2B is a permissioned API — confirm it's enabled for your
     # shortcode with Safaricom (account manager / Daraja portal) before
-    # relying on this in production.
+    # relying on this in production. commandId here defaults BusinessPayBill /
+    # BusinessBuyGoods / etc. calls that don't specify their own commandId.
     b2b:
       initiator-name: ${MPESA_B2B_INITIATOR_NAME:your_initiator_name}
       initiator-password: ${MPESA_B2B_INITIATOR_PASSWORD:your_initiator_password}
       shortcode: ${MPESA_B2B_SHORTCODE:600000}
       receiver-shortcode: ${MPESA_B2B_RECEIVER_SHORTCODE:600001}
-      command-id: ${MPESA_B2B_COMMAND_ID:BusinessPayBill}   # BusinessPayBill | BusinessBuyGoods | MerchantToMerchantTransfer
+      command-id: ${MPESA_B2B_COMMAND_ID:BusinessPayBill}   # BusinessPayBill | BusinessBuyGoods | MerchantToMerchantTransfer | ...
       sender-identifier-type: ${MPESA_B2B_SENDER_IDENTIFIER_TYPE:4}
       receiver-identifier-type: ${MPESA_B2B_RECEIVER_IDENTIFIER_TYPE:4}
       queue-timeout-url: ${MPESA_B2B_TIMEOUT_URL:https://your-domain.com/payments/mpesa/b2b/timeout}
@@ -109,6 +110,29 @@ mpesa:
       response-type: ${MPESA_C2B_RESPONSE_TYPE:Completed}   # Completed | Cancelled
       validation-url: ${MPESA_C2B_VALIDATION_URL:https://your-domain.com/payments/mpesa/c2b/validation}
       confirmation-url: ${MPESA_C2B_CONFIRMATION_URL:https://your-domain.com/payments/mpesa/c2b/confirmation}
+
+    # ── B2B Express Checkout (USSD Push to Till) ──
+    # Prompts a merchant to pay one of our shortcodes directly from their own
+    # till, via a USSD PIN prompt (as opposed to STK Push to a personal line).
+    # No initiator/security credential needed — auth is via the normal OAuth
+    # bearer token. See https://developer.safaricom.co.ke/apis/B2BExpressCheckout
+    express-checkout:
+      receiver-shortcode: ${MPESA_EXPRESS_CHECKOUT_RECEIVER_SHORTCODE:174379}
+      partner-name: ${MPESA_EXPRESS_CHECKOUT_PARTNER_NAME:Premisave}
+      callback-url: ${MPESA_EXPRESS_CHECKOUT_CALLBACK_URL:https://your-domain.com/payments/mpesa/b2b/express-checkout/result}
+
+    # ── B2C Account Top Up (CommandID BusinessPayToBulk) ──
+    # Loads funds from our working/MMF account into a B2C shortcode's utility
+    # account so disbursements don't run dry. Hits the same /mpesa/b2b/v1/paymentrequest
+    # endpoint as the generic B2B calls above, but is a distinct Safaricom
+    # product with its own initiator credentials.
+    # See https://developer.safaricom.co.ke/apis/B2CAccountTopUp
+    account-top-up:
+      initiator-name: ${MPESA_TOPUP_INITIATOR_NAME:your_initiator_name}
+      initiator-password: ${MPESA_TOPUP_INITIATOR_PASSWORD:your_initiator_password}
+      party-a: ${MPESA_TOPUP_PARTY_A:600000}
+      queue-timeout-url: ${MPESA_TOPUP_TIMEOUT_URL:https://your-domain.com/payments/mpesa/b2b/timeout}
+      result-url: ${MPESA_TOPUP_RESULT_URL:https://your-domain.com/payments/mpesa/b2b/result}
 
     # ── Transaction Status API ──
     # Not yet wired to a service — reserved for full automatic reconciliation

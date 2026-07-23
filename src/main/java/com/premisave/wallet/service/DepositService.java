@@ -1,5 +1,6 @@
 package com.premisave.wallet.service;
 
+import com.premisave.wallet.dto.B2BExpressCheckoutResponse;
 import com.premisave.wallet.dto.DepositRequest;
 import com.premisave.wallet.dto.MpesaStkPushRequest;
 import com.premisave.wallet.dto.PaymentResponse;
@@ -35,9 +36,10 @@ public class DepositService {
      * Routes deposit initiation to the correct payment provider.
      *
      * Response meanings by provider:
-     *  - MPESA  → reference = CheckoutRequestID (STK push sent to phone)
-     *  - STRIPE → reference = Stripe client_secret (frontend confirms with Stripe.js)
-     *  - PAYPAL → reference = PayPal approveUrl (redirect user to PayPal)
+     *  - MPESA      → reference = CheckoutRequestID (STK push sent to phone)
+     *  - MPESA_TILL → reference = our generated RequestRefID (USSD push sent to till)
+     *  - STRIPE     → reference = Stripe client_secret (frontend confirms with Stripe.js)
+     *  - PAYPAL     → reference = PayPal approveUrl (redirect user to PayPal)
      */
     public PaymentResponse initiateDeposit(String userId, String userEmail, DepositRequest request) {
         Wallet wallet = walletRepository.findByUserId(userId)
@@ -48,19 +50,17 @@ public class DepositService {
 
         return switch (provider) {
             case "MPESA" -> initiateMpesaDeposit(userId, request, wallet, idempotencyKey);
+            case "MPESA_TILL" -> initiateExpressCheckoutDeposit(userId, request, wallet);
             case "STRIPE" -> initiateStripeDeposit(userId, request, wallet, idempotencyKey);
             case "PAYPAL" -> initiatePaypalDeposit(userId, request, wallet, idempotencyKey);
             default -> new PaymentResponse(false, null, "Unsupported deposit provider: " + provider);
         };
     }
 
-    // ─── M-Pesa ──────────────────────────────────────────────────────────────
+    // ─── M-Pesa STK Push ─────────────────────────────────────────────────────
 
     private PaymentResponse initiateMpesaDeposit(String userId, DepositRequest request,
                                                    Wallet wallet, String idempotencyKey) {
-        // phoneNumber is required — previously this silently fell back to the
-        // wallet's accountNumber (the user's EMAIL), which would get sent to
-        // Safaricom as the PartyA/PhoneNumber and fail the STK push outright.
         if (request.getPhoneNumber() == null || request.getPhoneNumber().isBlank()) {
             throw new IllegalArgumentException("phoneNumber is required for M-Pesa deposits");
         }
@@ -73,14 +73,41 @@ public class DepositService {
         String checkoutId = mpesaService.initiateStkPush(stkRequest);
         log.info("M-Pesa STK push: userId={} checkoutId={}", userId, checkoutId);
 
-        // Save PENDING transaction, keyed by CheckoutRequestID — this is how the
-        // callback (which carries no account/email) gets matched back to this
-        // wallet later. See creditWalletFromStkCallback().
         savePendingTransaction(userId, wallet.getId(), TransactionType.DEPOSIT,
                 request.getAmount(), "M-Pesa deposit (pending STK confirmation)", checkoutId);
 
         return new PaymentResponse(true, checkoutId,
                 "M-Pesa STK push sent. Enter your PIN to complete the deposit.");
+    }
+
+    // ─── M-Pesa B2B Express Checkout (USSD Push to Till) ────────────────────
+
+    /**
+     * Deposit via B2B Express Checkout — the customer pays from their own
+     * till number (not a personal M-Pesa line) via a USSD PIN prompt.
+     * We generate our own RequestRefID up front since the callback (which
+     * carries no account/email either) is matched back purely by that value.
+     */
+    private PaymentResponse initiateExpressCheckoutDeposit(String userId, DepositRequest request, Wallet wallet) {
+        if (request.getPayerTillNumber() == null || request.getPayerTillNumber().isBlank()) {
+            throw new IllegalArgumentException("payerTillNumber is required for MPESA_TILL deposits");
+        }
+
+        String requestRefId = UUID.randomUUID().toString();
+        String paymentRef = "PREMISAVE-" + userId;
+
+        B2BExpressCheckoutResponse result = mpesaService.initiateExpressCheckout(
+                request.getPayerTillNumber(), request.getAmount(), paymentRef, requestRefId);
+
+        if (!result.isSuccess()) {
+            return new PaymentResponse(false, requestRefId, result.getMessage());
+        }
+
+        savePendingTransaction(userId, wallet.getId(), TransactionType.DEPOSIT,
+                request.getAmount(), "M-Pesa till deposit (pending USSD confirmation)", requestRefId);
+
+        return new PaymentResponse(true, requestRefId,
+                "USSD push sent to your till. Approve on your phone to complete the deposit.");
     }
 
     // ─── Stripe ──────────────────────────────────────────────────────────────
@@ -92,7 +119,6 @@ public class DepositService {
 
         log.info("Stripe PaymentIntent created: userId={}", userId);
 
-        // Save PENDING transaction — completed by Stripe webhook (payment_intent.succeeded)
         savePendingTransaction(userId, wallet.getId(), TransactionType.DEPOSIT,
                 request.getAmount(), "Stripe deposit (pending payment confirmation)", idempotencyKey);
 
@@ -112,7 +138,6 @@ public class DepositService {
 
         log.info("PayPal Order created: userId={} orderId={}", userId, orderId);
 
-        // Save PENDING transaction — completed by PayPal webhook (CHECKOUT.ORDER.APPROVED)
         savePendingTransaction(userId, wallet.getId(), TransactionType.DEPOSIT,
                 request.getAmount(), "PayPal deposit (pending approval)", orderId);
 
@@ -122,14 +147,6 @@ public class DepositService {
 
     // ─── Callbacks ───────────────────────────────────────────────────────────
 
-    /**
-     * Called by PaymentCallbackController after a successful STK Push callback
-     * (ResultCode == 0) from Safaricom Daraja.
-     *
-     * The STK callback does NOT include an account number or email — it only
-     * carries the CheckoutRequestID, so we look up the PENDING transaction we
-     * created in initiateMpesaDeposit() by that reference to find the wallet.
-     */
     @Transactional
     public void creditWalletFromStkCallback(String checkoutRequestId, BigDecimal amount,
                                              String mpesaReceiptNumber, String phoneNumber) {
@@ -159,11 +176,6 @@ public class DepositService {
                 checkoutRequestId, amount, mpesaReceiptNumber);
     }
 
-    /**
-     * Called by PaymentCallbackController when the STK callback reports a
-     * non-zero ResultCode (user cancelled, entered wrong PIN, timed out, etc.).
-     * Marks the pending transaction FAILED instead of leaving it PENDING forever.
-     */
     @Transactional
     public void markStkTransactionFailed(String checkoutRequestId, String resultDesc) {
         transactionRepository.findByReference(checkoutRequestId).ifPresentOrElse(tx -> {
@@ -175,9 +187,48 @@ public class DepositService {
     }
 
     /**
-     * Called by the Stripe webhook handler when payment_intent.succeeded fires.
-     * providerReference = Stripe PaymentIntent ID.
+     * Called by PaymentCallbackController when a B2B Express Checkout (USSD
+     * Push) callback arrives. Matched back to the pending transaction via the
+     * RequestRefID generated at initiation time — the callback carries no
+     * account/email, same constraint as the STK callback.
      */
+    @Transactional
+    public void creditWalletFromExpressCheckout(String requestRefId, BigDecimal amount,
+                                                 String transactionId, String resultDesc, boolean success) {
+        Transaction tx = transactionRepository.findByReference(requestRefId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "No pending transaction found for RequestRefID=" + requestRefId));
+
+        if (tx.getStatus() == TransactionStatus.COMPLETED) {
+            log.warn("Express Checkout callback already processed for RequestRefID={} — skipping duplicate credit",
+                    requestRefId);
+            return;
+        }
+
+        if (!success) {
+            tx.setStatus(TransactionStatus.FAILED);
+            tx.setDescription("M-Pesa till deposit failed: " + resultDesc);
+            transactionRepository.save(tx);
+            log.warn("Express Checkout deposit failed: requestRefId={} reason={}", requestRefId, resultDesc);
+            return;
+        }
+
+        Wallet wallet = walletRepository.findById(tx.getWalletId())
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + tx.getWalletId()));
+
+        wallet.setBalance(wallet.getBalance().add(amount));
+        walletRepository.save(wallet);
+
+        tx.setStatus(TransactionStatus.COMPLETED);
+        tx.setAmount(amount);
+        tx.setProviderReference(transactionId);
+        tx.setDescription("M-Pesa till deposit (receipt " + transactionId + ")");
+        transactionRepository.save(tx);
+
+        log.info("Wallet credited via B2B Express Checkout: requestRefId={} amount={} receipt={}",
+                requestRefId, amount, transactionId);
+    }
+
     @Transactional
     public void creditWalletFromStripe(String userId, BigDecimal amount,
                                         String paymentIntentId, String currency) {
@@ -201,14 +252,9 @@ public class DepositService {
         log.info("Wallet credited via Stripe: userId={} amount={} piId={}", userId, amount, paymentIntentId);
     }
 
-    /**
-     * Called by the PayPal webhook handler when CHECKOUT.ORDER.APPROVED fires.
-     * Captures the order and credits the wallet.
-     */
     @Transactional
     public void creditWalletFromPaypal(String userId, BigDecimal amount,
                                         String orderId, String currency) {
-        // Capture the PayPal order first
         String captureId = paypalService.captureOrder(orderId);
 
         Wallet wallet = walletRepository.findByUserId(userId)

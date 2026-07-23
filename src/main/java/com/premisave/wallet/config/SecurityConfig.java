@@ -56,6 +56,7 @@ public class SecurityConfig {
                     "/payments/mpesa/b2c/timeout",
                     "/payments/mpesa/b2b/result",
                     "/payments/mpesa/b2b/timeout",
+                    "/payments/mpesa/b2b/express-checkout/result",
                     "/payments/mpesa/c2b/validation",
                     "/payments/mpesa/c2b/confirmation",
                     "/payments/stripe/webhook",
