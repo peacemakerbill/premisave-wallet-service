@@ -64,8 +64,61 @@ mpesa:
     # STK push callback — must be HTTPS and publicly reachable (use ngrok locally)
     callback-url: ${MPESA_CALLBACK_URL:https://your-domain.com/payments/mpesa/callback}
     environment: ${MPESA_ENV:sandbox}
-    # B2C initiator credentials (for disbursements)
-    # Set MPESA_INITIATOR_PASSWORD env var in production
+
+    # ── B2C (Business to Customer — disbursements/payouts) ──
+    b2c:
+      initiator-name: ${MPESA_B2C_INITIATOR_NAME:your_initiator_name}
+      # Set MPESA_B2C_INITIATOR_PASSWORD env var in production
+      initiator-password: ${MPESA_B2C_INITIATOR_PASSWORD:your_initiator_password}
+      # Base64 X.509-encrypted initiator password — generate with Daraja public cert
+      security-credential: ${MPESA_B2C_SECURITY_CREDENTIAL:your_security_credential}
+      shortcode: ${MPESA_B2C_SHORTCODE:600000}
+      command-id: ${MPESA_B2C_COMMAND_ID:BusinessPayment}   # SalaryPayment | BusinessPayment | PromotionPayment
+      queue-timeout-url: ${MPESA_B2C_TIMEOUT_URL:https://your-domain.com/payments/mpesa/b2c/timeout}
+      result-url: ${MPESA_B2C_RESULT_URL:https://your-domain.com/payments/mpesa/b2c/result}
+
+    # ── B2B (Business to Business) ──
+    b2b:
+      initiator-name: ${MPESA_B2B_INITIATOR_NAME:your_initiator_name}
+      initiator-password: ${MPESA_B2B_INITIATOR_PASSWORD:your_initiator_password}
+      security-credential: ${MPESA_B2B_SECURITY_CREDENTIAL:your_security_credential}
+      shortcode: ${MPESA_B2B_SHORTCODE:600000}
+      receiver-shortcode: ${MPESA_B2B_RECEIVER_SHORTCODE:600001}
+      command-id: ${MPESA_B2B_COMMAND_ID:BusinessPayBill}   # BusinessPayBill | BusinessBuyGoods | MerchantToMerchantTransfer | BusinessTransferFromMMFToUtility
+      sender-identifier-type: ${MPESA_B2B_SENDER_IDENTIFIER_TYPE:4}
+      receiver-identifier-type: ${MPESA_B2B_RECEIVER_IDENTIFIER_TYPE:4}
+      queue-timeout-url: ${MPESA_B2B_TIMEOUT_URL:https://your-domain.com/payments/mpesa/b2b/timeout}
+      result-url: ${MPESA_B2B_RESULT_URL:https://your-domain.com/payments/mpesa/b2b/result}
+
+    # ── C2B (Customer to Business — Register URL, Validation & Confirmation) ──
+    c2b:
+      shortcode: ${MPESA_C2B_SHORTCODE:174379}
+      response-type: ${MPESA_C2B_RESPONSE_TYPE:Completed}   # Completed | Cancelled
+      validation-url: ${MPESA_C2B_VALIDATION_URL:https://your-domain.com/payments/mpesa/c2b/validation}
+      confirmation-url: ${MPESA_C2B_CONFIRMATION_URL:https://your-domain.com/payments/mpesa/c2b/confirmation}
+
+    # ── Transaction Status API ──
+    transaction-status:
+      initiator-name: ${MPESA_STATUS_INITIATOR_NAME:your_initiator_name}
+      initiator-password: ${MPESA_STATUS_INITIATOR_PASSWORD:your_initiator_password}
+      security-credential: ${MPESA_STATUS_SECURITY_CREDENTIAL:your_security_credential}
+      party-a: ${MPESA_STATUS_PARTY_A:600000}
+      identifier-type: ${MPESA_STATUS_IDENTIFIER_TYPE:4}   # 1=MSISDN, 2=Till, 4=Shortcode
+      queue-timeout-url: ${MPESA_STATUS_TIMEOUT_URL:https://your-domain.com/payments/mpesa/status/timeout}
+      result-url: ${MPESA_STATUS_RESULT_URL:https://your-domain.com/payments/mpesa/status/result}
+
+    # ── Account Balance / Pull Transactions API ──
+    pull-transactions:
+      initiator-name: ${MPESA_PULL_INITIATOR_NAME:your_initiator_name}
+      initiator-password: ${MPESA_PULL_INITIATOR_PASSWORD:your_initiator_password}
+      security-credential: ${MPESA_PULL_SECURITY_CREDENTIAL:your_security_credential}
+      shortcode: ${MPESA_PULL_SHORTCODE:600000}
+      # Pull API onboarding is a one-time registration with Safaricom
+      register-url: ${MPESA_PULL_REGISTER_URL:https://your-domain.com/payments/mpesa/pull/register}
+      callback-url: ${MPESA_PULL_CALLBACK_URL:https://your-domain.com/payments/mpesa/pull/callback}
+      # How far back to pull, e.g. "1" for last 1 day
+      pull-days: ${MPESA_PULL_DAYS:1}
+      offset-value: ${MPESA_PULL_OFFSET:0}
 
 # ─── Stripe ───────────────────────────────────────────────────────────────────
 stripe:

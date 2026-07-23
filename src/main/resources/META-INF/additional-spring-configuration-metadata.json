@@ -12,6 +12,11 @@
       "description": "Shared secret injected as X-API-Key on internal service-to-service calls (e.g. C2B email validation). Must match AUTH_SERVICE_API_KEY on the auth service. Never used for user-facing Feign calls — those forward the caller's Bearer JWT instead."
     },
     {
+      "name": "internal.api-key",
+      "type": "java.lang.String",
+      "description": "Shared secret internal services present via X-API-Key when calling wallet-service's /internal/** endpoints (see InternalApiKeyFilter). Must match property-service's app.api-key (INTERNAL_API_KEY env var) — both services read the same INTERNAL_API_KEY name, but from their own separate .env files."
+    },
+    {
       "name": "jwt.secret",
       "type": "java.lang.String",
       "description": "Base64-encoded secret key used to sign and verify JWT tokens. Must match across all services."
@@ -55,6 +60,200 @@
       "defaultValue": "sandbox"
     },
     {
+      "name": "mpesa.daraja.b2c.initiator-name",
+      "type": "java.lang.String",
+      "description": "M-Pesa B2C API operator username used to initiate business-to-customer disbursements/payouts."
+    },
+    {
+      "name": "mpesa.daraja.b2c.initiator-password",
+      "type": "java.lang.String",
+      "description": "Plaintext M-Pesa B2C API operator password, used to derive the security-credential. Never sent to Safaricom directly."
+    },
+    {
+      "name": "mpesa.daraja.b2c.security-credential",
+      "type": "java.lang.String",
+      "description": "Base64 string of the initiator password encrypted with Safaricom's public X.509 certificate for the target environment."
+    },
+    {
+      "name": "mpesa.daraja.b2c.shortcode",
+      "type": "java.lang.String",
+      "description": "M-Pesa organization shortcode that money is disbursed from in B2C transactions.",
+      "defaultValue": "600000"
+    },
+    {
+      "name": "mpesa.daraja.b2c.command-id",
+      "type": "java.lang.String",
+      "description": "B2C transaction type: 'SalaryPayment', 'BusinessPayment', or 'PromotionPayment'.",
+      "defaultValue": "BusinessPayment"
+    },
+    {
+      "name": "mpesa.daraja.b2c.queue-timeout-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom calls if the B2C request times out in the queue."
+    },
+    {
+      "name": "mpesa.daraja.b2c.result-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom POSTs the final B2C transaction result to."
+    },
+    {
+      "name": "mpesa.daraja.b2b.initiator-name",
+      "type": "java.lang.String",
+      "description": "M-Pesa B2B API operator username used to initiate business-to-business transfers."
+    },
+    {
+      "name": "mpesa.daraja.b2b.initiator-password",
+      "type": "java.lang.String",
+      "description": "Plaintext M-Pesa B2B API operator password, used to derive the security-credential. Never sent to Safaricom directly."
+    },
+    {
+      "name": "mpesa.daraja.b2b.security-credential",
+      "type": "java.lang.String",
+      "description": "Base64 string of the initiator password encrypted with Safaricom's public X.509 certificate for the target environment."
+    },
+    {
+      "name": "mpesa.daraja.b2b.shortcode",
+      "type": "java.lang.String",
+      "description": "M-Pesa organization shortcode that funds move from (payer) in B2B transactions.",
+      "defaultValue": "600000"
+    },
+    {
+      "name": "mpesa.daraja.b2b.receiver-shortcode",
+      "type": "java.lang.String",
+      "description": "M-Pesa shortcode of the receiving organization in a B2B transaction.",
+      "defaultValue": "600001"
+    },
+    {
+      "name": "mpesa.daraja.b2b.command-id",
+      "type": "java.lang.String",
+      "description": "B2B transaction type: 'BusinessPayBill', 'BusinessBuyGoods', 'MerchantToMerchantTransfer', or 'BusinessTransferFromMMFToUtility'.",
+      "defaultValue": "BusinessPayBill"
+    },
+    {
+      "name": "mpesa.daraja.b2b.sender-identifier-type",
+      "type": "java.lang.Integer",
+      "description": "Type of shortcode sending funds in a B2B transaction. 4 = organization shortcode.",
+      "defaultValue": 4
+    },
+    {
+      "name": "mpesa.daraja.b2b.receiver-identifier-type",
+      "type": "java.lang.Integer",
+      "description": "Type of shortcode receiving funds in a B2B transaction. 4 = organization shortcode.",
+      "defaultValue": 4
+    },
+    {
+      "name": "mpesa.daraja.b2b.queue-timeout-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom calls if the B2B request times out in the queue."
+    },
+    {
+      "name": "mpesa.daraja.b2b.result-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom POSTs the final B2B transaction result to."
+    },
+    {
+      "name": "mpesa.daraja.c2b.shortcode",
+      "type": "java.lang.String",
+      "description": "M-Pesa business shortcode that C2B validation/confirmation URLs are registered against.",
+      "defaultValue": "174379"
+    },
+    {
+      "name": "mpesa.daraja.c2b.response-type",
+      "type": "java.lang.String",
+      "description": "Default action Safaricom takes if the validation URL is unreachable: 'Completed' auto-accepts the payment, 'Cancelled' rejects it.",
+      "defaultValue": "Completed"
+    },
+    {
+      "name": "mpesa.daraja.c2b.validation-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom calls before completing a C2B payment, allowing the transaction to be accepted or rejected. Requires validation to be enabled on the shortcode via Safaricom support."
+    },
+    {
+      "name": "mpesa.daraja.c2b.confirmation-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom POSTs completed C2B payment details to."
+    },
+    {
+      "name": "mpesa.daraja.transaction-status.initiator-name",
+      "type": "java.lang.String",
+      "description": "M-Pesa API operator username used to query the status of a prior transaction."
+    },
+    {
+      "name": "mpesa.daraja.transaction-status.initiator-password",
+      "type": "java.lang.String",
+      "description": "Plaintext M-Pesa API operator password, used to derive the security-credential. Never sent to Safaricom directly."
+    },
+    {
+      "name": "mpesa.daraja.transaction-status.security-credential",
+      "type": "java.lang.String",
+      "description": "Base64 string of the initiator password encrypted with Safaricom's public X.509 certificate for the target environment."
+    },
+    {
+      "name": "mpesa.daraja.transaction-status.party-a",
+      "type": "java.lang.String",
+      "description": "Shortcode or MSISDN that the transaction being queried belongs to.",
+      "defaultValue": "600000"
+    },
+    {
+      "name": "mpesa.daraja.transaction-status.identifier-type",
+      "type": "java.lang.Integer",
+      "description": "Type of organization receiving the transaction being queried. 1 = MSISDN, 2 = Till Number, 4 = Shortcode.",
+      "defaultValue": 4
+    },
+    {
+      "name": "mpesa.daraja.transaction-status.queue-timeout-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom calls if the Transaction Status request times out in the queue."
+    },
+    {
+      "name": "mpesa.daraja.transaction-status.result-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom POSTs the Transaction Status query result to."
+    },
+    {
+      "name": "mpesa.daraja.pull-transactions.initiator-name",
+      "type": "java.lang.String",
+      "description": "M-Pesa API operator username used for Account Balance / Pull Transactions API requests."
+    },
+    {
+      "name": "mpesa.daraja.pull-transactions.initiator-password",
+      "type": "java.lang.String",
+      "description": "Plaintext M-Pesa API operator password, used to derive the security-credential. Never sent to Safaricom directly."
+    },
+    {
+      "name": "mpesa.daraja.pull-transactions.security-credential",
+      "type": "java.lang.String",
+      "description": "Base64 string of the initiator password encrypted with Safaricom's public X.509 certificate for the target environment."
+    },
+    {
+      "name": "mpesa.daraja.pull-transactions.shortcode",
+      "type": "java.lang.String",
+      "description": "M-Pesa organization shortcode whose account balance or transactions are being queried.",
+      "defaultValue": "600000"
+    },
+    {
+      "name": "mpesa.daraja.pull-transactions.register-url",
+      "type": "java.lang.String",
+      "description": "One-time registration URL submitted to Safaricom to enroll the shortcode for the Pull Transactions API."
+    },
+    {
+      "name": "mpesa.daraja.pull-transactions.callback-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom POSTs pulled transaction batches to."
+    },
+    {
+      "name": "mpesa.daraja.pull-transactions.pull-days",
+      "type": "java.lang.Integer",
+      "description": "Number of days back from today to pull transactions for.",
+      "defaultValue": 1
+    },
+    {
+      "name": "mpesa.daraja.pull-transactions.offset-value",
+      "type": "java.lang.Integer",
+      "description": "Number of records to skip in the pull transactions result set, used for pagination.",
+      "defaultValue": 0
+    },
+    {
       "name": "stripe.secret-key",
       "type": "java.lang.String",
       "description": "Stripe secret API key (sk_test_* for sandbox, sk_live_* for production). Found in the Stripe Dashboard under Developers → API keys."
@@ -93,6 +292,38 @@
       "values": [
         {"value": "sandbox", "description": "Safaricom Daraja sandbox environment for testing."},
         {"value": "production", "description": "Safaricom Daraja live environment."}
+      ]
+    },
+    {
+      "name": "mpesa.daraja.b2c.command-id.values",
+      "values": [
+        {"value": "SalaryPayment", "description": "Payment of salaries to employees."},
+        {"value": "BusinessPayment", "description": "General business disbursement to a customer."},
+        {"value": "PromotionPayment", "description": "Promotional or reward payment to a customer."}
+      ]
+    },
+    {
+      "name": "mpesa.daraja.b2b.command-id.values",
+      "values": [
+        {"value": "BusinessPayBill", "description": "Pay bill from one business shortcode to another."},
+        {"value": "BusinessBuyGoods", "description": "Buy goods from one business shortcode to another (till payment)."},
+        {"value": "MerchantToMerchantTransfer", "description": "Transfer funds between merchant accounts."},
+        {"value": "BusinessTransferFromMMFToUtility", "description": "Transfer from Merchant Mobile Fund to Utility account."}
+      ]
+    },
+    {
+      "name": "mpesa.daraja.c2b.response-type.values",
+      "values": [
+        {"value": "Completed", "description": "Auto-accept the payment if the validation URL is unreachable."},
+        {"value": "Cancelled", "description": "Auto-reject the payment if the validation URL is unreachable."}
+      ]
+    },
+    {
+      "name": "mpesa.daraja.transaction-status.identifier-type.values",
+      "values": [
+        {"value": 1, "description": "MSISDN (phone number)."},
+        {"value": 2, "description": "Till Number."},
+        {"value": 4, "description": "Organization Shortcode."}
       ]
     },
     {
