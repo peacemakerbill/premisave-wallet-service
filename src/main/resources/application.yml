@@ -65,17 +65,17 @@ mpesa:
     callback-url: ${MPESA_CALLBACK_URL:https://your-domain.com/payments/mpesa/callback}
     environment: ${MPESA_ENV:sandbox}
 
-    # Safaricom's public certificate (.cer), used to RSA-encrypt initiator
-    # passwords into a SecurityCredential for B2C/B2B (see
-    # MpesaSecurityCredentialService). Sandbox and production use DIFFERENT
-    # certificate files — download both from https://developer.safaricom.co.ke
-    # and point this at the right one per environment.
-    certificate-path: ${MPESA_CERT_PATH:certs/sandbox-cert.cer}
+    # Safaricom's public certificate, used to RSA-encrypt initiator passwords
+    # into a SecurityCredential for B2C/B2B (see MpesaSecurityCredentialService).
+    # Bundled at src/main/resources/certs/ — resolved via classpath, so no
+    # scheme prefix needed. Sandbox and production certs are DIFFERENT files;
+    # set MPESA_CERT_PATH=certs/ProductionCertificate.cer in production.
+    certificate-path: ${MPESA_CERT_PATH:certs/SandboxCertificate.cer}
 
     # ── B2C (Business to Customer — disbursements/payouts to a phone number) ──
     b2c:
       initiator-name: ${MPESA_B2C_INITIATOR_NAME:your_initiator_name}
-      # Plaintext initiator password — encrypted at runtime with certificate-path,
+      # Plaintext initiator password — encrypted at runtime via certificate-path,
       # never sent to Safaricom in this form. Set MPESA_B2C_INITIATOR_PASSWORD in production.
       initiator-password: ${MPESA_B2C_INITIATOR_PASSWORD:your_initiator_password}
       shortcode: ${MPESA_B2C_SHORTCODE:600000}

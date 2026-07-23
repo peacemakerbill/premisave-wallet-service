@@ -51,13 +51,19 @@
     {
       "name": "mpesa.daraja.callback-url",
       "type": "java.lang.String",
-      "description": "Publicly accessible HTTPS URL that Safaricom will POST STK push and B2C callbacks to. Use ngrok locally."
+      "description": "Publicly accessible HTTPS URL that Safaricom will POST STK push callbacks to. Use ngrok locally."
     },
     {
       "name": "mpesa.daraja.environment",
       "type": "java.lang.String",
       "description": "Daraja environment to target: 'sandbox' for testing, 'production' for live.",
       "defaultValue": "sandbox"
+    },
+    {
+      "name": "mpesa.daraja.certificate-path",
+      "type": "java.lang.String",
+      "description": "Path to Safaricom's public X.509 certificate (.cer) used to RSA-encrypt initiator passwords into a SecurityCredential for B2C and B2B (see MpesaSecurityCredentialService). Bare paths (e.g. 'certs/SandboxCertificate.cer') resolve from the classpath — place files under src/main/resources/certs/. Prefix with 'file:' to load from an external path instead (e.g. a mounted secret). Sandbox and production use DIFFERENT certificate files.",
+      "defaultValue": "certs/SandboxCertificate.cer"
     },
     {
       "name": "mpesa.daraja.b2c.initiator-name",
@@ -67,12 +73,7 @@
     {
       "name": "mpesa.daraja.b2c.initiator-password",
       "type": "java.lang.String",
-      "description": "Plaintext M-Pesa B2C API operator password, used to derive the security-credential. Never sent to Safaricom directly."
-    },
-    {
-      "name": "mpesa.daraja.b2c.security-credential",
-      "type": "java.lang.String",
-      "description": "Base64 string of the initiator password encrypted with Safaricom's public X.509 certificate for the target environment."
+      "description": "Plaintext M-Pesa B2C API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService — never sent to Safaricom directly, and no separate security-credential property is needed."
     },
     {
       "name": "mpesa.daraja.b2c.shortcode",
@@ -94,7 +95,19 @@
     {
       "name": "mpesa.daraja.b2c.result-url",
       "type": "java.lang.String",
-      "description": "Publicly accessible HTTPS URL Safaricom POSTs the final B2C transaction result to."
+      "description": "Publicly accessible HTTPS URL Safaricom POSTs the final B2C transaction result to. This — not the initial paymentrequest response — is the actual source of truth for success/failure."
+    },
+    {
+      "name": "mpesa.daraja.b2c.min-amount",
+      "type": "java.math.BigDecimal",
+      "description": "Minimum KES amount accepted for a single B2C disbursement. Confirm actual tier limits with Safaricom for your shortcode.",
+      "defaultValue": 10
+    },
+    {
+      "name": "mpesa.daraja.b2c.max-amount",
+      "type": "java.math.BigDecimal",
+      "description": "Maximum KES amount accepted for a single B2C disbursement. Confirm actual tier limits with Safaricom for your shortcode.",
+      "defaultValue": 150000
     },
     {
       "name": "mpesa.daraja.b2b.initiator-name",
@@ -104,12 +117,7 @@
     {
       "name": "mpesa.daraja.b2b.initiator-password",
       "type": "java.lang.String",
-      "description": "Plaintext M-Pesa B2B API operator password, used to derive the security-credential. Never sent to Safaricom directly."
-    },
-    {
-      "name": "mpesa.daraja.b2b.security-credential",
-      "type": "java.lang.String",
-      "description": "Base64 string of the initiator password encrypted with Safaricom's public X.509 certificate for the target environment."
+      "description": "Plaintext M-Pesa B2B API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService — never sent to Safaricom directly, and no separate security-credential property is needed."
     },
     {
       "name": "mpesa.daraja.b2b.shortcode",
@@ -126,7 +134,7 @@
     {
       "name": "mpesa.daraja.b2b.command-id",
       "type": "java.lang.String",
-      "description": "B2B transaction type: 'BusinessPayBill', 'BusinessBuyGoods', 'MerchantToMerchantTransfer', or 'BusinessTransferFromMMFToUtility'.",
+      "description": "B2B transaction type: 'BusinessPayBill', 'BusinessBuyGoods', or 'MerchantToMerchantTransfer'.",
       "defaultValue": "BusinessPayBill"
     },
     {
@@ -149,7 +157,19 @@
     {
       "name": "mpesa.daraja.b2b.result-url",
       "type": "java.lang.String",
-      "description": "Publicly accessible HTTPS URL Safaricom POSTs the final B2B transaction result to."
+      "description": "Publicly accessible HTTPS URL Safaricom POSTs the final B2B transaction result to. This — not the initial paymentrequest response — is the actual source of truth for success/failure. Note: B2B is a permissioned Safaricom API; confirm it's enabled for your shortcode before relying on it in production."
+    },
+    {
+      "name": "mpesa.daraja.b2b.min-amount",
+      "type": "java.math.BigDecimal",
+      "description": "Minimum KES amount accepted for a single B2B payment. Confirm actual tier limits with Safaricom for your shortcode.",
+      "defaultValue": 10
+    },
+    {
+      "name": "mpesa.daraja.b2b.max-amount",
+      "type": "java.math.BigDecimal",
+      "description": "Maximum KES amount accepted for a single B2B payment. Confirm actual tier limits with Safaricom for your shortcode.",
+      "defaultValue": 150000
     },
     {
       "name": "mpesa.daraja.c2b.shortcode",
@@ -176,7 +196,7 @@
     {
       "name": "mpesa.daraja.transaction-status.initiator-name",
       "type": "java.lang.String",
-      "description": "M-Pesa API operator username used to query the status of a prior transaction."
+      "description": "M-Pesa API operator username used to query the status of a prior transaction. Not yet wired to a service — reserved for automatic reconciliation of stuck B2C/B2B disbursements."
     },
     {
       "name": "mpesa.daraja.transaction-status.initiator-password",

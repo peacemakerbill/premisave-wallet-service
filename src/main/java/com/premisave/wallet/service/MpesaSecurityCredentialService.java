@@ -1,10 +1,12 @@
 package com.premisave.wallet.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.DefaultResourceLoader;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.Cipher;
-import java.io.FileInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.PublicKey;
@@ -22,10 +24,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * NOT the same as base64(plainPassword) — that will be rejected outright in
  * production and can behave inconsistently in sandbox.
  *
- * Sandbox and production certificates are DIFFERENT files — download both
- * from https://developer.safaricom.co.ke/test_credentials and
- * https://developer.safaricom.co.ke (production onboarding) and point
- * mpesa.daraja.certificate-path at the correct one per environment.
+ * Certificates live in src/main/resources/certs/ (bundled into the jar) and
+ * are loaded via Spring's ResourceLoader, so classpath, file:, and absolute
+ * paths all work:
+ *   - "certs/SandboxCertificate.cer"        → classpath (bundled in jar)
+ *   - "classpath:certs/SandboxCertificate.cer" → same, explicit
+ *   - "file:/etc/premisave/ProductionCertificate.cer" → external, e.g. a
+ *     mounted secret you want to swap without rebuilding the jar
+ *
+ * Sandbox and production certificates are DIFFERENT files — verify
+ * mpesa.daraja.certificate-path points at the correct one per environment.
  *
  * Result is cached per (certPath, password) pair since it never changes
  * unless the initiator password itself is rotated.
@@ -34,6 +42,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class MpesaSecurityCredentialService {
 
+    private final ResourceLoader resourceLoader = new DefaultResourceLoader();
     private final Map<String, String> cache = new ConcurrentHashMap<>();
 
     public String encrypt(String plainInitiatorPassword, String certificatePath) {
@@ -50,7 +59,13 @@ public class MpesaSecurityCredentialService {
     }
 
     private String doEncrypt(String plainPassword, String certificatePath) {
-        try (InputStream is = new FileInputStream(certificatePath)) {
+        // Bare paths (no scheme prefix) are resolved against the classpath —
+        // this is what makes src/main/resources/certs/*.cer work once packaged
+        // into a jar. Paths starting with "file:" or "classpath:" are honoured as-is.
+        Resource resource = resourceLoader.getResource(
+                certificatePath.contains(":") ? certificatePath : "classpath:" + certificatePath);
+
+        try (InputStream is = resource.getInputStream()) {
             CertificateFactory cf = CertificateFactory.getInstance("X.509");
             X509Certificate cert = (X509Certificate) cf.generateCertificate(is);
             PublicKey publicKey = cert.getPublicKey();
@@ -65,7 +80,7 @@ public class MpesaSecurityCredentialService {
         } catch (Exception e) {
             throw new IllegalStateException(
                     "Failed to generate M-Pesa SecurityCredential from certificate at " + certificatePath +
-                    " — check the file exists, is a valid X.509 .cer, and matches your environment (sandbox vs production)", e);
+                    " — check it exists, is a valid X.509 .cer, and matches your environment (sandbox vs production)", e);
         }
     }
 }
