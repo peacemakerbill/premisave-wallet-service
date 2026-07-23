@@ -42,22 +42,19 @@ public class MpesaC2BService {
      * Registers validation + confirmation URLs with Safaricom.
      * Call this ONCE after deployment (or on every startup — Safaricom is idempotent).
      *
-     * ResponseType options: "Completed" (skip validation, confirm directly)
-     *                       "Cancelled" (reject if validation URL is down)
-     * Use "Completed" in production unless you have strict validation needs.
+     * Uses mpesa.daraja.c2b.* directly (shortcode, response-type, validation-url,
+     * confirmation-url) instead of deriving paths from the STK callback URL —
+     * the C2B test shortcode is different from the STK Push test shortcode
+     * in Daraja sandbox, so they must be configured independently.
      */
     public Map<String, Object> registerUrls() {
         String token = mpesaService.getAccessToken();
 
-        // Derive C2B URLs from the base callback URL in config
-        String base = config.getCallbackUrl()
-                .replace("/payments/mpesa/callback", ""); // strip STK suffix
-
         Map<String, Object> body = Map.of(
-                "ShortCode",        config.getShortcode(),
-                "ResponseType",     "Completed",   // or "Cancelled"
-                "ConfirmationURL",  base + "/payments/mpesa/c2b/confirmation",
-                "ValidationURL",    base + "/payments/mpesa/c2b/validation"
+                "ShortCode",        config.getC2b().getShortcode(),
+                "ResponseType",     config.getC2b().getResponseType(),
+                "ConfirmationURL",  config.getC2b().getConfirmationUrl(),
+                "ValidationURL",    config.getC2b().getValidationUrl()
         );
 
         try {

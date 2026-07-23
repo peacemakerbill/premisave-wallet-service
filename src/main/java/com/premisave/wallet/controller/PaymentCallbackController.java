@@ -3,7 +3,7 @@ package com.premisave.wallet.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.premisave.wallet.dto.ApiResponse;
-import com.premisave.wallet.dto.MpesaCallbackRequest;
+import com.premisave.wallet.dto.MpesaStkCallbackRequest;
 import com.premisave.wallet.service.DepositService;
 import com.stripe.model.Event;
 import com.stripe.model.PaymentIntent;
@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.*;
 import com.premisave.wallet.service.StripeService;
 
 import java.math.BigDecimal;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Handles incoming webhooks/callbacks from all payment providers:
@@ -41,24 +43,44 @@ public class PaymentCallbackController {
     /**
      * Receives M-Pesa STK Push callback from Safaricom Daraja.
      * Secured via IP allowlist at the gateway/firewall level (no JWT).
+     *
+     * Safaricom's payload is nested under Body.stkCallback — see
+     * MpesaStkCallbackRequest for the exact shape. On success (ResultCode == 0)
+     * the paid amount, receipt number, and phone are inside CallbackMetadata.Item;
+     * there is no account number or email in this payload, so the transaction is
+     * matched back to a wallet via CheckoutRequestID (see DepositService).
      */
     @PostMapping("/mpesa/callback")
-    public ResponseEntity<ApiResponse<Void>> handleMpesaCallback(@RequestBody MpesaCallbackRequest callback) {
-        log.info("M-Pesa STK callback received: transID={} amount={} msisdn={}",
-                callback.getTransID(), callback.getTransAmount(), callback.getMSISDN());
+    public ResponseEntity<ApiResponse<Void>> handleMpesaCallback(@RequestBody MpesaStkCallbackRequest callback) {
+        MpesaStkCallbackRequest.StkCallback stk = callback.getBody().getStkCallback();
+        String checkoutRequestId = stk.getCheckoutRequestID();
+
+        log.info("M-Pesa STK callback received: checkoutRequestId={} resultCode={} resultDesc={}",
+                checkoutRequestId, stk.getResultCode(), stk.getResultDesc());
 
         try {
-            BigDecimal amount = new BigDecimal(callback.getTransAmount());
-            String accountNumber = callback.getBillRefNumber(); // email used as account ref
-            String description = "M-Pesa deposit from " + callback.getFirstName()
-                    + " (" + callback.getMSISDN() + ")";
+            if (stk.getResultCode() != 0) {
+                // Not an error on our side — user cancelled, wrong PIN, timed out, etc.
+                depositService.markStkTransactionFailed(checkoutRequestId, stk.getResultDesc());
+                return ResponseEntity.ok(ApiResponse.success("Callback processed (payment not completed)"));
+            }
 
-            depositService.creditWalletFromCallback(accountNumber, amount,
-                    callback.getTransID(), description);
+            Map<String, Object> values = new HashMap<>();
+            if (stk.getCallbackMetadata() != null && stk.getCallbackMetadata().getItem() != null) {
+                for (MpesaStkCallbackRequest.CallbackItem item : stk.getCallbackMetadata().getItem()) {
+                    values.put(item.getName(), item.getValue());
+                }
+            }
+
+            BigDecimal amount = new BigDecimal(String.valueOf(values.get("Amount")));
+            String mpesaReceipt = String.valueOf(values.get("MpesaReceiptNumber"));
+            String phoneNumber = String.valueOf(values.get("PhoneNumber"));
+
+            depositService.creditWalletFromStkCallback(checkoutRequestId, amount, mpesaReceipt, phoneNumber);
 
             return ResponseEntity.ok(ApiResponse.success("Callback processed"));
         } catch (Exception e) {
-            log.error("Failed to process M-Pesa callback: transID={}", callback.getTransID(), e);
+            log.error("Failed to process M-Pesa STK callback: checkoutRequestId={}", checkoutRequestId, e);
             // Always return 200 to Safaricom — they retry on non-200
             return ResponseEntity.ok(ApiResponse.error("Callback processing failed: " + e.getMessage()));
         }

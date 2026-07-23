@@ -58,18 +58,24 @@ public class DepositService {
 
     private PaymentResponse initiateMpesaDeposit(String userId, DepositRequest request,
                                                    Wallet wallet, String idempotencyKey) {
+        // phoneNumber is required — previously this silently fell back to the
+        // wallet's accountNumber (the user's EMAIL), which would get sent to
+        // Safaricom as the PartyA/PhoneNumber and fail the STK push outright.
+        if (request.getPhoneNumber() == null || request.getPhoneNumber().isBlank()) {
+            throw new IllegalArgumentException("phoneNumber is required for M-Pesa deposits");
+        }
+
         MpesaStkPushRequest stkRequest = new MpesaStkPushRequest();
-        // Phone number should be in the request; fall back to accountNumber (email) placeholder
-        stkRequest.setPhoneNumber(request.getPhoneNumber() != null
-                ? request.getPhoneNumber()
-                : wallet.getAccountNumber());
+        stkRequest.setPhoneNumber(request.getPhoneNumber());
         stkRequest.setAmount(request.getAmount());
         stkRequest.setAccountReference("PREMISAVE-" + userId);
 
         String checkoutId = mpesaService.initiateStkPush(stkRequest);
         log.info("M-Pesa STK push: userId={} checkoutId={}", userId, checkoutId);
 
-        // Save PENDING transaction — it is completed by the callback
+        // Save PENDING transaction, keyed by CheckoutRequestID — this is how the
+        // callback (which carries no account/email) gets matched back to this
+        // wallet later. See creditWalletFromStkCallback().
         savePendingTransaction(userId, wallet.getId(), TransactionType.DEPOSIT,
                 request.getAmount(), "M-Pesa deposit (pending STK confirmation)", checkoutId);
 
@@ -117,30 +123,55 @@ public class DepositService {
     // ─── Callbacks ───────────────────────────────────────────────────────────
 
     /**
-     * Called by the M-Pesa callback controller after a successful STK push confirmation.
-     * Credits the wallet and marks the transaction COMPLETED.
+     * Called by PaymentCallbackController after a successful STK Push callback
+     * (ResultCode == 0) from Safaricom Daraja.
+     *
+     * The STK callback does NOT include an account number or email — it only
+     * carries the CheckoutRequestID, so we look up the PENDING transaction we
+     * created in initiateMpesaDeposit() by that reference to find the wallet.
      */
     @Transactional
-    public void creditWalletFromCallback(String accountNumber, BigDecimal amount,
-                                          String mpesaRef, String description) {
-        Wallet wallet = walletRepository.findByAccountNumber(accountNumber)
-                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for: " + accountNumber));
+    public void creditWalletFromStkCallback(String checkoutRequestId, BigDecimal amount,
+                                             String mpesaReceiptNumber, String phoneNumber) {
+        Transaction tx = transactionRepository.findByReference(checkoutRequestId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "No pending transaction found for CheckoutRequestID=" + checkoutRequestId));
+
+        if (tx.getStatus() == TransactionStatus.COMPLETED) {
+            log.warn("STK callback already processed for CheckoutRequestID={} — skipping duplicate credit",
+                    checkoutRequestId);
+            return;
+        }
+
+        Wallet wallet = walletRepository.findById(tx.getWalletId())
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + tx.getWalletId()));
 
         wallet.setBalance(wallet.getBalance().add(amount));
         walletRepository.save(wallet);
 
-        Transaction tx = new Transaction();
-        tx.setUserId(wallet.getUserId());
-        tx.setWalletId(wallet.getId());
-        tx.setType(TransactionType.DEPOSIT);
         tx.setStatus(TransactionStatus.COMPLETED);
         tx.setAmount(amount);
-        tx.setCurrency(Currency.KES);
-        tx.setDescription(description != null ? description : "M-Pesa deposit");
-        tx.setProviderReference(mpesaRef);
+        tx.setProviderReference(mpesaReceiptNumber);
+        tx.setDescription("M-Pesa STK deposit from " + phoneNumber + " (receipt " + mpesaReceiptNumber + ")");
         transactionRepository.save(tx);
 
-        log.info("Wallet credited via M-Pesa: account={} amount={} ref={}", accountNumber, amount, mpesaRef);
+        log.info("Wallet credited via M-Pesa STK: checkoutRequestId={} amount={} receipt={}",
+                checkoutRequestId, amount, mpesaReceiptNumber);
+    }
+
+    /**
+     * Called by PaymentCallbackController when the STK callback reports a
+     * non-zero ResultCode (user cancelled, entered wrong PIN, timed out, etc.).
+     * Marks the pending transaction FAILED instead of leaving it PENDING forever.
+     */
+    @Transactional
+    public void markStkTransactionFailed(String checkoutRequestId, String resultDesc) {
+        transactionRepository.findByReference(checkoutRequestId).ifPresentOrElse(tx -> {
+            tx.setStatus(TransactionStatus.FAILED);
+            tx.setDescription("M-Pesa STK push failed: " + resultDesc);
+            transactionRepository.save(tx);
+            log.warn("STK push failed: checkoutRequestId={} reason={}", checkoutRequestId, resultDesc);
+        }, () -> log.warn("STK failure callback for unknown CheckoutRequestID={}: {}", checkoutRequestId, resultDesc));
     }
 
     /**

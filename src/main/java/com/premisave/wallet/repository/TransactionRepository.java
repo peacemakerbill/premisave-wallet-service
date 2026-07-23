@@ -5,6 +5,7 @@ import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface TransactionRepository extends MongoRepository<Transaction, String> {
@@ -13,6 +14,14 @@ public interface TransactionRepository extends MongoRepository<Transaction, Stri
 
     /** Used by IdempotencyService to detect duplicate references. */
     boolean existsByReference(String reference);
+
+    /**
+     * Used by the M-Pesa STK callback handler to find the PENDING transaction
+     * that was created when the STK push was initiated (reference = CheckoutRequestID),
+     * so the callback can be matched back to the correct wallet/user without
+     * relying on the callback carrying an account number (it doesn't).
+     */
+    Optional<Transaction> findByReference(String reference);
 
     /**
      * Used by MpesaC2BService to detect duplicate M-Pesa TransIDs.
