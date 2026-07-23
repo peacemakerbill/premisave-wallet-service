@@ -11,6 +11,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -117,6 +118,22 @@ public class AdminWalletController {
             @RequestParam String reason) {
         return ResponseEntity.ok(ApiResponse.success("Disbursement rejected", 
                 adminWalletService.rejectDisbursement(disbursementId, reason)));
+    }
+
+    // ==================== B2B (BUSINESS TO BUSINESS) ====================
+
+    /**
+     * Triggers an M-Pesa B2B payment from Premisave's shortcode to another
+     * paybill/till (e.g. settling with a vendor or partner business).
+     * Restricted to ADMIN/FINANCE/OPERATIONS via the class-level @PreAuthorize.
+     * B2B is a permissioned Safaricom API — must be enabled for the shortcode.
+     */
+    @PostMapping("/b2b/pay")
+    public ResponseEntity<ApiResponse<DisbursementResponse>> payB2B(
+            @Valid @RequestBody MpesaB2BRequest request,
+            Authentication auth) {
+        return ResponseEntity.ok(ApiResponse.success("B2B payment initiated",
+                adminWalletService.processB2BPayment(auth.getName(), request)));
     }
 
     // ==================== REPORTS & ANALYTICS ====================

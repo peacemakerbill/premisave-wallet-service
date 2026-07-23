@@ -2,6 +2,7 @@ package com.premisave.wallet.service;
 
 import com.premisave.wallet.dto.DisbursementRequest;
 import com.premisave.wallet.dto.DisbursementResponse;
+import com.premisave.wallet.dto.MpesaB2BRequest;
 import com.premisave.wallet.entity.Disbursement;
 import com.premisave.wallet.entity.Transaction;
 import com.premisave.wallet.entity.Wallet;
@@ -17,10 +18,13 @@ import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Slf4j
@@ -36,6 +40,8 @@ public class DisbursementService {
     private final PaypalService paypalService;
     private final IdempotencyService idempotencyService;
 
+    // ─── User-facing disbursement (phone / PayPal / Stripe) ─────────────────
+
     @Transactional
     public DisbursementResponse processDisbursement(String userId, DisbursementRequest request) {
         idempotencyService.checkIdempotency(request.getReference());
@@ -47,49 +53,192 @@ public class DisbursementService {
         if (wallet.getBalance().compareTo(request.getAmount()) < 0)
             throw new InsufficientFundsException("Insufficient funds for disbursement");
 
-        // Deduct balance upfront — refund on failure
+        String provider = request.getProvider() != null ? request.getProvider().toUpperCase() : "MPESA";
+
+        // M-Pesa payouts are KES-only via Daraja — reject mismatched currency instead
+        // of silently sending the wrong amount.
+        if ("MPESA".equals(provider) && request.getCurrency() != null
+                && !"KES".equalsIgnoreCase(request.getCurrency())) {
+            throw new IllegalArgumentException("M-Pesa disbursements must be in KES");
+        }
+
+        // Deduct upfront — refunded on outright rejection or async failure.
         wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
         walletRepository.save(wallet);
 
         String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
-        String provider  = request.getProvider() != null ? request.getProvider().toUpperCase() : "MPESA";
 
-        Disbursement disbursement = buildDisbursement(userId, wallet.getId(), request, reference, provider);
+        Disbursement disbursement = new Disbursement();
+        disbursement.setUserId(userId);
+        disbursement.setWalletId(wallet.getId());
+        disbursement.setAmount(request.getAmount());
+        disbursement.setDestination(request.getDestination());
+        disbursement.setProvider(provider);
+        disbursement.setReference(reference);
+        disbursement.setStatus(DisbursementStatus.PENDING);
 
+        if ("MPESA".equals(provider)) {
+            disbursement.setChannel("B2C");
+            var result = mpesaService.sendB2C(request.getDestination(), request.getAmount());
+
+            if (!result.isSuccess()) {
+                // Rejected outright (bad params, amount out of range, etc.) — refund now.
+                refund(wallet, request.getAmount());
+                disbursement.setStatus(DisbursementStatus.FAILED);
+                disbursement.setFailureReason(result.getMessage());
+                disbursementRepository.save(disbursement);
+                return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), result.getMessage());
+            }
+
+            // Accepted for processing — stays PENDING. Do NOT record a completed
+            // transaction yet; that happens in completeMpesaDisbursement() once
+            // the real ResultURL callback arrives.
+            disbursement.setProviderReference(result.getConversationId());
+            disbursementRepository.save(disbursement);
+            return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
+                    "Disbursement queued with M-Pesa — awaiting confirmation");
+        }
+
+        // Stripe/PayPal payout APIs here are treated as synchronous per the
+        // existing provider service methods. (Their real APIs are also async in
+        // production — same PENDING/callback pattern applies if/when those get
+        // wired to webhooks; out of scope for this pass.)
         ProviderResult result = switch (provider) {
-            case "MPESA"  -> disburseMpesa(request);
             case "STRIPE" -> disburseStripe(request);
             case "PAYPAL" -> disbursePaypal(request);
             default -> new ProviderResult(false, "Unsupported provider: " + provider, null);
         };
+
+        disbursement.setChannel(provider + "_PAYOUT");
 
         if (result.success()) {
             disbursement.setStatus(DisbursementStatus.SUCCESS);
             disbursement.setProviderReference(result.providerRef());
             saveDisbursementTransaction(userId, wallet.getId(), request.getAmount(), disbursement, reference);
         } else {
-            // Refund
-            wallet.setBalance(wallet.getBalance().add(request.getAmount()));
-            walletRepository.save(wallet);
+            refund(wallet, request.getAmount());
             disbursement.setStatus(DisbursementStatus.FAILED);
+            disbursement.setFailureReason(result.message());
             log.warn("Disbursement failed for userId={}, refunded. Reason: {}", userId, result.message());
         }
 
         disbursementRepository.save(disbursement);
-
         return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), result.message());
     }
 
-    // ─── Provider dispatch ────────────────────────────────────────────────────
+    // ─── B2B (admin/finance-initiated, business-to-business payment) ───────
 
-    private ProviderResult disburseMpesa(DisbursementRequest request) {
-        try {
-            var response = mpesaService.sendB2C(request.getDestination(), request.getAmount());
-            return new ProviderResult(response.isSuccess(), response.getMessage(), response.getConversationId());
-        } catch (Exception e) {
-            return new ProviderResult(false, e.getMessage(), null);
+    @Transactional
+    public DisbursementResponse processB2BPayment(String initiatedByUserId, MpesaB2BRequest request) {
+        idempotencyService.checkIdempotency(request.getReference());
+        String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
+
+        var result = mpesaService.sendB2B(request);
+
+        Disbursement disbursement = new Disbursement();
+        disbursement.setUserId(initiatedByUserId);
+        disbursement.setAmount(request.getAmount());
+        disbursement.setCurrency(Currency.KES);
+        disbursement.setDestination(request.getReceiverShortcode());
+        disbursement.setProvider("MPESA");
+        disbursement.setChannel("B2B");
+        disbursement.setReference(reference);
+
+        if (result.isSuccess()) {
+            disbursement.setStatus(DisbursementStatus.PENDING);
+            disbursement.setProviderReference(result.getConversationId());
+        } else {
+            disbursement.setStatus(DisbursementStatus.FAILED);
+            disbursement.setFailureReason(result.getMessage());
+        }
+
+        disbursementRepository.save(disbursement);
+        return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), result.getMessage());
+    }
+
+    // ─── Reconciliation from Safaricom's ResultURL callback ─────────────────
+
+    /**
+     * Called by PaymentCallbackController when Safaricom's real B2C/B2B
+     * result arrives. This is the ONLY place a disbursement should be marked
+     * SUCCESS or given a completed Transaction record for M-Pesa payouts.
+     */
+    @Transactional
+    public void completeMpesaDisbursement(String conversationId, boolean success,
+                                           String resultDesc, String mpesaTransactionId) {
+        Disbursement d = disbursementRepository.findByProviderReference(conversationId).orElse(null);
+        if (d == null) {
+            log.warn("M-Pesa result callback for unknown ConversationID={} — ignoring", conversationId);
+            return;
+        }
+
+        if (d.getStatus() != DisbursementStatus.PENDING) {
+            log.warn("M-Pesa result callback for already-finalized disbursement id={} status={} — ignoring duplicate",
+                    d.getId(), d.getStatus());
+            return;
+        }
+
+        if (success) {
+            d.setStatus(DisbursementStatus.SUCCESS);
+            disbursementRepository.save(d);
+
+            // B2B disbursements have no user wallet (userId is the admin who triggered it) —
+            // only create a wallet-side Transaction for user-initiated (B2C) payouts.
+            if ("B2C".equals(d.getChannel()) && d.getWalletId() != null) {
+                saveDisbursementTransaction(d.getUserId(), d.getWalletId(), d.getAmount(), d, d.getReference());
+            }
+            log.info("M-Pesa {} disbursement completed: id={} conversationId={} mpesaTxId={}",
+                    d.getChannel(), d.getId(), conversationId, mpesaTransactionId);
+        } else {
+            if (d.getWalletId() != null) {
+                Wallet wallet = walletRepository.findById(d.getWalletId())
+                        .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + d.getWalletId()));
+                refund(wallet, d.getAmount());
+            }
+            d.setStatus(DisbursementStatus.FAILED);
+            d.setFailureReason(resultDesc);
+            disbursementRepository.save(d);
+            log.warn("M-Pesa {} disbursement failed, refunded where applicable: id={} conversationId={} reason={}",
+                    d.getChannel(), d.getId(), conversationId, resultDesc);
         }
     }
+
+    /**
+     * Called on M-Pesa's timeout URL — Safaricom couldn't reach the result URL
+     * in time. Leaves the disbursement PENDING (money stays held); the sweeper
+     * below will flag it for manual reconciliation if it's still stuck later.
+     */
+    public void markMpesaDisbursementTimedOut(String conversationId) {
+        disbursementRepository.findByProviderReference(conversationId).ifPresentOrElse(d -> {
+            log.warn("M-Pesa disbursement queue timeout: id={} conversationId={} — awaiting eventual result or manual reconciliation",
+                    d.getId(), conversationId);
+        }, () -> log.warn("Timeout callback for unknown ConversationID={}", conversationId));
+    }
+
+    // ─── Stuck-disbursement sweeper ──────────────────────────────────────────
+
+    /**
+     * Safety net: if Safaricom's ResultURL callback never arrives (network
+     * issue, misconfigured URL, etc.), a disbursement could stay PENDING
+     * forever with funds held. This doesn't auto-resolve it — resolving
+     * definitively requires the M-Pesa Transaction Status API (not yet wired,
+     * see MpesaConfig TODO) — but it surfaces anything stuck past 30 minutes
+     * so ops can check manually or via Safaricom's portal instead of it going
+     * unnoticed.
+     */
+    @Scheduled(fixedDelay = 15 * 60 * 1000) // every 15 minutes
+    public void flagStuckDisbursements() {
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(30);
+        List<Disbursement> stuck = disbursementRepository.findByStatusAndCreatedAtBefore(
+                DisbursementStatus.PENDING, cutoff);
+
+        if (!stuck.isEmpty()) {
+            log.warn("{} disbursement(s) stuck in PENDING beyond 30 minutes — needs manual reconciliation: {}",
+                    stuck.size(), stuck.stream().map(Disbursement::getId).toList());
+        }
+    }
+
+    // ─── Provider dispatch (Stripe/PayPal) ───────────────────────────────────
 
     private ProviderResult disburseStripe(DisbursementRequest request) {
         try {
@@ -113,17 +262,9 @@ public class DisbursementService {
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    private Disbursement buildDisbursement(String userId, String walletId,
-                                            DisbursementRequest request, String reference, String provider) {
-        Disbursement d = new Disbursement();
-        d.setUserId(userId);
-        d.setWalletId(walletId);
-        d.setAmount(request.getAmount());
-        d.setDestination(request.getDestination());
-        d.setProvider(provider);
-        d.setStatus(DisbursementStatus.PENDING);
-        d.setReference(reference);
-        return d;
+    private void refund(Wallet wallet, BigDecimal amount) {
+        wallet.setBalance(wallet.getBalance().add(amount));
+        walletRepository.save(wallet);
     }
 
     private void saveDisbursementTransaction(String userId, String walletId, BigDecimal amount,

@@ -3,8 +3,10 @@ package com.premisave.wallet.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.premisave.wallet.dto.ApiResponse;
+import com.premisave.wallet.dto.MpesaResultCallbackRequest;
 import com.premisave.wallet.dto.MpesaStkCallbackRequest;
 import com.premisave.wallet.service.DepositService;
+import com.premisave.wallet.service.DisbursementService;
 import com.stripe.model.Event;
 import com.stripe.model.PaymentIntent;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +23,7 @@ import java.util.Map;
 
 /**
  * Handles incoming webhooks/callbacks from all payment providers:
- * M-Pesa (STK Push + B2C), Stripe, and PayPal.
+ * M-Pesa (STK Push, B2C, B2B), Stripe, and PayPal.
  * All endpoints are PUBLIC (no JWT) — secured by signature verification
  * or IP allowlist at the gateway/firewall level.
  */
@@ -32,6 +34,7 @@ import java.util.Map;
 public class PaymentCallbackController {
 
     private final DepositService depositService;
+    private final DisbursementService disbursementService;
     private final StripeService stripeService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -89,18 +92,74 @@ public class PaymentCallbackController {
     // ─── M-Pesa B2C Result (disbursement outcome) ────────────────────────────
 
     /**
-     * M-Pesa sends the B2C result to this URL after processing.
+     * Safaricom sends the real B2C outcome here — the initial paymentrequest
+     * acceptance is NOT the final result. ResultCode == 0 means the payout
+     * actually succeeded; anything else means it failed and must be refunded.
+     * See DisbursementService.completeMpesaDisbursement().
      */
     @PostMapping("/mpesa/b2c/result")
-    public ResponseEntity<Void> mpesaB2cResult(@RequestBody String payload) {
-        log.info("M-Pesa B2C result received: {}", payload);
-        // TODO: parse result, update Disbursement.status in DB
+    public ResponseEntity<Void> mpesaB2cResult(@RequestBody MpesaResultCallbackRequest callback) {
+        var result = callback.getResult();
+        log.info("M-Pesa B2C result: conversationId={} resultCode={} resultDesc={}",
+                result.getConversationID(), result.getResultCode(), result.getResultDesc());
+
+        try {
+            boolean success = result.getResultCode() == 0;
+            disbursementService.completeMpesaDisbursement(
+                    result.getConversationID(), success, result.getResultDesc(), result.getTransactionID());
+        } catch (Exception e) {
+            log.error("Failed to process M-Pesa B2C result: conversationId={}", result.getConversationID(), e);
+        }
+
+        // Always 200 — Safaricom does not expect a meaningful body here.
         return ResponseEntity.ok().build();
     }
 
+    /**
+     * Fired when Safaricom couldn't reach the ResultURL in time. The
+     * disbursement stays PENDING — money remains held pending manual
+     * reconciliation or a later result (see DisbursementService's sweeper).
+     */
     @PostMapping("/mpesa/b2c/timeout")
-    public ResponseEntity<Void> mpesaB2cTimeout(@RequestBody String payload) {
-        log.warn("M-Pesa B2C timeout: {}", payload);
+    public ResponseEntity<Void> mpesaB2cTimeout(@RequestBody MpesaResultCallbackRequest callback) {
+        String conversationId = callback.getResult() != null ? callback.getResult().getConversationID() : null;
+        log.warn("M-Pesa B2C timeout: conversationId={}", conversationId);
+        try {
+            disbursementService.markMpesaDisbursementTimedOut(conversationId);
+        } catch (Exception e) {
+            log.error("Failed to process M-Pesa B2C timeout: conversationId={}", conversationId, e);
+        }
+        return ResponseEntity.ok().build();
+    }
+
+    // ─── M-Pesa B2B Result (business-to-business payment outcome) ───────────
+
+    @PostMapping("/mpesa/b2b/result")
+    public ResponseEntity<Void> mpesaB2bResult(@RequestBody MpesaResultCallbackRequest callback) {
+        var result = callback.getResult();
+        log.info("M-Pesa B2B result: conversationId={} resultCode={} resultDesc={}",
+                result.getConversationID(), result.getResultCode(), result.getResultDesc());
+
+        try {
+            boolean success = result.getResultCode() == 0;
+            disbursementService.completeMpesaDisbursement(
+                    result.getConversationID(), success, result.getResultDesc(), result.getTransactionID());
+        } catch (Exception e) {
+            log.error("Failed to process M-Pesa B2B result: conversationId={}", result.getConversationID(), e);
+        }
+
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/mpesa/b2b/timeout")
+    public ResponseEntity<Void> mpesaB2bTimeout(@RequestBody MpesaResultCallbackRequest callback) {
+        String conversationId = callback.getResult() != null ? callback.getResult().getConversationID() : null;
+        log.warn("M-Pesa B2B timeout: conversationId={}", conversationId);
+        try {
+            disbursementService.markMpesaDisbursementTimedOut(conversationId);
+        } catch (Exception e) {
+            log.error("Failed to process M-Pesa B2B timeout: conversationId={}", conversationId, e);
+        }
         return ResponseEntity.ok().build();
     }
 

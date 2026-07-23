@@ -37,6 +37,7 @@ public class AdminWalletService {
     private final TransactionRepository transactionRepository;
     private final DisbursementRepository disbursementRepository;
     private final WalletService walletService;
+    private final DisbursementService disbursementService;
 
     public Page<WalletResponse> getAllWallets(Pageable pageable) {
         return walletRepository.findAll(pageable).map(this::mapToWalletResponse);
@@ -156,6 +157,18 @@ public class AdminWalletService {
         log.info("Disbursement {} rejected. Reason: {}", disbursementId, reason);
         return new DisbursementResponse(disbursementId, "FAILED", "Rejected: " + reason);
     }
+
+    // ==================== B2B ====================
+
+    /**
+     * Delegates to DisbursementService, which owns the M-Pesa B2B call,
+     * Disbursement record creation, and async result reconciliation.
+     */
+    public DisbursementResponse processB2BPayment(String initiatedByUserId, MpesaB2BRequest request) {
+        return disbursementService.processB2BPayment(initiatedByUserId, request);
+    }
+
+    // ==================== REPORTS ====================
 
     public Map<String, Object> getSystemSummary() {
         Map<String, Object> summary = new HashMap<>();

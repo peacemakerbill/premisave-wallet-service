@@ -65,30 +65,43 @@ mpesa:
     callback-url: ${MPESA_CALLBACK_URL:https://your-domain.com/payments/mpesa/callback}
     environment: ${MPESA_ENV:sandbox}
 
-    # ── B2C (Business to Customer — disbursements/payouts) ──
+    # Safaricom's public certificate (.cer), used to RSA-encrypt initiator
+    # passwords into a SecurityCredential for B2C/B2B (see
+    # MpesaSecurityCredentialService). Sandbox and production use DIFFERENT
+    # certificate files — download both from https://developer.safaricom.co.ke
+    # and point this at the right one per environment.
+    certificate-path: ${MPESA_CERT_PATH:certs/sandbox-cert.cer}
+
+    # ── B2C (Business to Customer — disbursements/payouts to a phone number) ──
     b2c:
       initiator-name: ${MPESA_B2C_INITIATOR_NAME:your_initiator_name}
-      # Set MPESA_B2C_INITIATOR_PASSWORD env var in production
+      # Plaintext initiator password — encrypted at runtime with certificate-path,
+      # never sent to Safaricom in this form. Set MPESA_B2C_INITIATOR_PASSWORD in production.
       initiator-password: ${MPESA_B2C_INITIATOR_PASSWORD:your_initiator_password}
-      # Base64 X.509-encrypted initiator password — generate with Daraja public cert
-      security-credential: ${MPESA_B2C_SECURITY_CREDENTIAL:your_security_credential}
       shortcode: ${MPESA_B2C_SHORTCODE:600000}
       command-id: ${MPESA_B2C_COMMAND_ID:BusinessPayment}   # SalaryPayment | BusinessPayment | PromotionPayment
       queue-timeout-url: ${MPESA_B2C_TIMEOUT_URL:https://your-domain.com/payments/mpesa/b2c/timeout}
       result-url: ${MPESA_B2C_RESULT_URL:https://your-domain.com/payments/mpesa/b2c/result}
+      # Confirm actual tier limits with Safaricom for your shortcode.
+      min-amount: 10
+      max-amount: 150000
 
     # ── B2B (Business to Business) ──
+    # NOTE: B2B is a permissioned API — confirm it's enabled for your
+    # shortcode with Safaricom (account manager / Daraja portal) before
+    # relying on this in production.
     b2b:
       initiator-name: ${MPESA_B2B_INITIATOR_NAME:your_initiator_name}
       initiator-password: ${MPESA_B2B_INITIATOR_PASSWORD:your_initiator_password}
-      security-credential: ${MPESA_B2B_SECURITY_CREDENTIAL:your_security_credential}
       shortcode: ${MPESA_B2B_SHORTCODE:600000}
       receiver-shortcode: ${MPESA_B2B_RECEIVER_SHORTCODE:600001}
-      command-id: ${MPESA_B2B_COMMAND_ID:BusinessPayBill}   # BusinessPayBill | BusinessBuyGoods | MerchantToMerchantTransfer | BusinessTransferFromMMFToUtility
+      command-id: ${MPESA_B2B_COMMAND_ID:BusinessPayBill}   # BusinessPayBill | BusinessBuyGoods | MerchantToMerchantTransfer
       sender-identifier-type: ${MPESA_B2B_SENDER_IDENTIFIER_TYPE:4}
       receiver-identifier-type: ${MPESA_B2B_RECEIVER_IDENTIFIER_TYPE:4}
       queue-timeout-url: ${MPESA_B2B_TIMEOUT_URL:https://your-domain.com/payments/mpesa/b2b/timeout}
       result-url: ${MPESA_B2B_RESULT_URL:https://your-domain.com/payments/mpesa/b2b/result}
+      min-amount: 10
+      max-amount: 150000
 
     # ── C2B (Customer to Business — Register URL, Validation & Confirmation) ──
     c2b:
@@ -98,6 +111,8 @@ mpesa:
       confirmation-url: ${MPESA_C2B_CONFIRMATION_URL:https://your-domain.com/payments/mpesa/c2b/confirmation}
 
     # ── Transaction Status API ──
+    # Not yet wired to a service — reserved for full automatic reconciliation
+    # of stuck B2C/B2B disbursements (see DisbursementService.flagStuckDisbursements).
     transaction-status:
       initiator-name: ${MPESA_STATUS_INITIATOR_NAME:your_initiator_name}
       initiator-password: ${MPESA_STATUS_INITIATOR_PASSWORD:your_initiator_password}
