@@ -624,19 +624,9 @@ public class MpesaService {
      * unlike every other operational API here, the answer comes back in the
      * HTTP response itself, no ResultURL involved.
      * See https://developer.safaricom.co.ke/apis/QueryOrgInfo
-     *
-     * @throws IllegalStateException if mpesa.daraja.query-org-info.query-url
-     *         hasn't been configured with a real endpoint (see MpesaConfig.QueryOrgInfo).
      */
     public QueryOrgInfoResponse queryOrgInfo(QueryOrgInfoRequest req) {
-        String queryUrl = config.getQueryOrgInfo().getQueryUrl();
-        if (queryUrl == null || queryUrl.isBlank() || queryUrl.startsWith("REPLACE_WITH_")) {
-            throw new IllegalStateException(
-                    "mpesa.daraja.query-org-info.query-url is not configured — Safaricom's published docs for " +
-                    "this API don't show the endpoint path (only visible via the 'Use API' button in your Daraja " +
-                    "sandbox). Set the real URL before calling queryOrgInfo().");
-        }
-
+        String queryUrl = config.queryOrgInfoUrl();
         String token = getAccessToken();
 
         Map<String, Object> body = new LinkedHashMap<>();

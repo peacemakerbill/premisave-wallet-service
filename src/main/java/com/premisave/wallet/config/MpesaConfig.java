@@ -34,7 +34,6 @@ public class MpesaConfig {
     private final Reversal reversal = new Reversal();
     private final B2Pochi b2Pochi = new B2Pochi();
     private final PullTransactions pullTransactions = new PullTransactions();
-    private final QueryOrgInfo queryOrgInfo = new QueryOrgInfo();
 
     public String baseUrl() {
         return "sandbox".equalsIgnoreCase(environment)
@@ -237,16 +236,14 @@ public class MpesaConfig {
      * (no ResultURL/QueueTimeOutURL — response comes back immediately) and
      * needs no initiator/SecurityCredential, just the OAuth bearer token.
      *
-     * queryUrl has NO safe default: Safaricom's published docs for this API
-     * don't show the actual endpoint path (only visible via the "Use API"
-     * button in your Daraja sandbox, behind login) — MpesaService throws a
-     * clear error rather than silently calling a guessed URL if this is left
-     * at its placeholder value.
+     * Unlike the rest of this config, there's no per-environment sub-block:
+     * the endpoint isn't published under mpesa.daraja.* — it's derived from
+     * baseUrl() below, same as every other Safaricom-side operation
+     * (STK push, B2C, B2B, Account Balance, etc.).
      * See https://developer.safaricom.co.ke/apis/QueryOrgInfo
      */
-    @Data
-    public static class QueryOrgInfo {
-        private String queryUrl = "REPLACE_WITH_URL_FROM_DARAJA_SANDBOX_USE_API_PANEL";
+    public String queryOrgInfoUrl() {
+        return baseUrl() + "/sfcverify/v1/query/info";
     }
 
     // TODO: registration of PullTransactions is a one-time step per shortcode —
