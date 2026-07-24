@@ -41,6 +41,7 @@ public class WebConfig implements WebMvcConfigurer {
                     "/payments/mpesa/reversal/timeout",
                     "/payments/mpesa/b2pochi/result",
                     "/payments/mpesa/b2pochi/timeout",
+                    "/payments/mpesa/pull/callback",
                     "/payments/stripe/webhook",
                     "/payments/paypal/webhook"
                 );

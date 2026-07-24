@@ -8,6 +8,7 @@ import com.premisave.wallet.enums.TransactionType;
 import com.premisave.wallet.service.AdminWalletService;
 import com.premisave.wallet.service.DisbursementService;
 import com.premisave.wallet.service.MpesaOperationsService;
+import com.premisave.wallet.service.PullTransactionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -32,6 +33,7 @@ public class AdminWalletController {
     private final AdminWalletService adminWalletService;
     private final DisbursementService disbursementService;
     private final MpesaOperationsService mpesaOperationsService;
+    private final PullTransactionService pullTransactionService;
 
     // ==================== WALLET MANAGEMENT ====================
 
@@ -240,6 +242,38 @@ public class AdminWalletController {
                     .body(ApiResponse.error("No operation found for conversationId: " + conversationId));
         }
         return ResponseEntity.ok(ApiResponse.success("Operation retrieved", operation));
+    }
+
+    // ==================== M-PESA PULL TRANSACTIONS (C2B RECONCILIATION) ====================
+
+    /**
+     * One-time registration of our shortcode for the Pull Transactions API.
+     * Safe to call more than once — Safaricom returns ResponseStatus 1001
+     * ("already registered") rather than erroring, which is treated as success.
+     * See https://developer.safaricom.co.ke/apis/PullTransaction
+     */
+    @PostMapping("/mpesa/pull/register")
+    public ResponseEntity<ApiResponse<PullTransactionResponse>> registerPullTransactions() {
+        return ResponseEntity.ok(ApiResponse.success("Pull Transactions registration submitted",
+                pullTransactionService.register()));
+    }
+
+    /**
+     * Pulls C2B transactions for the given window (or the last 24h if
+     * startDate/endDate are omitted — Safaricom retains up to 48h) and
+     * reconciles each one against local Transaction records, crediting any
+     * wallet whose missed C2B confirmation is recovered this way.
+     */
+    @PostMapping("/mpesa/pull/query")
+    public ResponseEntity<ApiResponse<PullTransactionResponse>> queryPullTransactions(
+            @RequestBody(required = false) PullTransactionQueryRequest request) {
+        PullTransactionResponse result = (request == null
+                || request.getStartDate() == null || request.getEndDate() == null)
+                ? pullTransactionService.queryAndReconcileDefault()
+                : pullTransactionService.queryAndReconcile(request.getStartDate(), request.getEndDate(),
+                        request.getOffsetValue() != null ? request.getOffsetValue() : 0);
+
+        return ResponseEntity.ok(ApiResponse.success("Pull Transactions query and reconciliation complete", result));
     }
 
     // ==================== REPORTS & ANALYTICS ====================

@@ -11,6 +11,8 @@ import com.premisave.wallet.dto.MpesaB2BResponse;
 import com.premisave.wallet.dto.MpesaB2CResponse;
 import com.premisave.wallet.dto.MpesaReversalRequest;
 import com.premisave.wallet.dto.MpesaStkPushRequest;
+import com.premisave.wallet.dto.PullTransactionRecord;
+import com.premisave.wallet.dto.PullTransactionResponse;
 import com.premisave.wallet.dto.TransactionStatusRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,7 +25,9 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -502,6 +506,111 @@ public class MpesaService {
             log.error("B2Pochi initiation failed", e);
             return new MpesaAsyncResponse(false, "B2Pochi initiation failed: " + e.getMessage(), null, null);
         }
+    }
+
+    // ─── Pull Transactions (C2B reconciliation) ─────────────────────────────
+
+    /**
+     * One-time registration of our shortcode for the Pull Transactions API.
+     * Unlike B2C/B2B/Reversal/Balance/TransactionStatus, this needs no
+     * initiator/SecurityCredential — just the OAuth bearer token, same as
+     * STK Push and C2B Register URL.
+     * See https://developer.safaricom.co.ke/apis/PullTransaction
+     */
+    public PullTransactionResponse registerPullTransactions() {
+        MpesaConfig.PullTransactions cfg = config.getPullTransactions();
+        String token = getAccessToken();
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("ShortCode", cfg.getShortcode() != null ? cfg.getShortcode() : config.getShortcode());
+        body.put("RequestType", "Pull");
+        body.put("NominatedNumber", cfg.getNominatedNumber());
+        body.put("CallBackURL", cfg.getCallbackUrl());
+
+        try {
+            String respBody = post(config.baseUrl() + "/pulltransactions/v1/register", token, body);
+            log.info("Pull Transactions registration response: {}", respBody);
+            JsonNode node = objectMapper.readTree(respBody);
+
+            String status = node.path("ResponseStatus").asText("");
+            // 1000 = registered now, 1001 = already registered — both are fine to treat as success.
+            boolean success = "1000".equals(status) || "1001".equals(status);
+            String message = node.path("ResponseDescription").asText("Unknown");
+            String refId = node.path("ResponseRefID").asText("");
+            String shortCode = node.path("ShortCode").asText("");
+
+            return new PullTransactionResponse(success, message, refId, shortCode, null, null, null, null);
+        } catch (Exception e) {
+            log.error("Pull Transactions registration failed", e);
+            return new PullTransactionResponse(false, "Pull Transactions registration failed: " + e.getMessage(),
+                    null, null, null, null, null, null);
+        }
+    }
+
+    /**
+     * Queries all C2B transactions on our shortcode within the given window
+     * (Safaricom retains up to 48 hours). Returns the raw list of records —
+     * reconciliation against our own Transaction records happens in
+     * PullTransactionService, not here.
+     *
+     * NOTE on HTTP method: Safaricom's docs state "Method is ... GET for
+     * Pull transaction" but the documented request is a JSON body, which
+     * standard HTTP GET can't carry (OkHttp explicitly rejects a body on
+     * GET). Every working implementation of this endpoint we could verify
+     * sends it as POST, same as Register Pull, so that's what's implemented
+     * here. If your sandbox testing shows Safaricom rejects POST for this
+     * specific endpoint, switch the method below — the request/response
+     * shape stays the same either way.
+     */
+    public PullTransactionResponse queryPullTransactions(LocalDateTime startDate, LocalDateTime endDate, int offsetValue) {
+        MpesaConfig.PullTransactions cfg = config.getPullTransactions();
+        String token = getAccessToken();
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("ShortCode", cfg.getShortcode() != null ? cfg.getShortcode() : config.getShortcode());
+        body.put("StartDate", startDate.format(fmt));
+        body.put("EndDate", endDate.format(fmt));
+        body.put("OffSetValue", String.valueOf(offsetValue));
+
+        try {
+            String respBody = post(config.baseUrl() + "/pulltransactions/v1/query", token, body);
+            log.info("Pull Transactions query response: {}", respBody);
+            return parsePullTransactionsResponse(respBody);
+        } catch (Exception e) {
+            log.error("Pull Transactions query failed", e);
+            return new PullTransactionResponse(false, "Pull Transactions query failed: " + e.getMessage(),
+                    null, null, List.of(), null, null, null);
+        }
+    }
+
+    /**
+     * Shared parser for the Query Pull Transaction response — also reusable
+     * for whatever Safaricom posts to our CallBackURL, since the per-record
+     * field shape should be the same (see PullTransactionService).
+     */
+    public PullTransactionResponse parsePullTransactionsResponse(String respBody) throws Exception {
+        JsonNode node = objectMapper.readTree(respBody);
+
+        String responseCode = node.path("ResponseCode").asText(node.path("ResponseStatus").asText(""));
+        boolean success = "0".equals(responseCode) || "1000".equals(responseCode);
+        String message = node.path("ResponseMessage").asText(node.path("ResponseDescription").asText("Unknown"));
+        String refId = node.path("ResponseRefID").asText("");
+
+        List<PullTransactionRecord> records = new ArrayList<>();
+        JsonNode txArray = node.has("Transaction") ? node.path("Transaction") : node.path("transactions");
+        if (txArray.isArray()) {
+            for (JsonNode txNode : txArray) {
+                // Safaricom's sample shows a possible extra nesting level for
+                // empty results ("Transaction": "[[]]") — skip anything that
+                // isn't itself an object.
+                if (txNode.isObject()) {
+                    records.add(objectMapper.treeToValue(txNode, PullTransactionRecord.class));
+                }
+            }
+        }
+
+        return new PullTransactionResponse(success, message, refId, null, records, null, null, null);
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────

@@ -184,16 +184,20 @@ mpesa:
       min-amount: 10
       max-amount: 250000
 
-    # ── Account Balance / Pull Transactions API ──
+    # ── Pull Transactions API (C2B reconciliation) ──
+    # Lets us query all C2B transactions on our shortcode from the last 48
+    # hours, to recover any that missed our confirmation callback. Unlike
+    # every other "operational" API above, this needs NO initiator
+    # name/password/SecurityCredential — just the OAuth bearer token, same
+    # as STK Push and C2B Register URL.
+    # https://developer.safaricom.co.ke/apis/PullTransaction
     pull-transactions:
-      initiator-name: ${MPESA_PULL_INITIATOR_NAME:your_initiator_name}
-      initiator-password: ${MPESA_PULL_INITIATOR_PASSWORD:your_initiator_password}
-      security-credential: ${MPESA_PULL_SECURITY_CREDENTIAL:your_security_credential}
-      shortcode: ${MPESA_PULL_SHORTCODE:600000}
-      # Pull API onboarding is a one-time registration with Safaricom
-      register-url: ${MPESA_PULL_REGISTER_URL:https://your-domain.com/payments/mpesa/pull/register}
+      shortcode: ${MPESA_PULL_SHORTCODE:174379}
+      # The Safaricom MSISDN tied to this shortcode's KYC — found on the
+      # M-PESA portal, NOT something you choose arbitrarily.
+      nominated-number: ${MPESA_PULL_NOMINATED_NUMBER:254722000000}
       callback-url: ${MPESA_PULL_CALLBACK_URL:https://your-domain.com/payments/mpesa/pull/callback}
-      # How far back to pull, e.g. "1" for last 1 day
+      # Default lookback window (days) when a query doesn't specify dates. Max 2 (48h retention).
       pull-days: ${MPESA_PULL_DAYS:1}
       offset-value: ${MPESA_PULL_OFFSET:0}
 

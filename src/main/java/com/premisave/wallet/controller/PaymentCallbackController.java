@@ -9,6 +9,7 @@ import com.premisave.wallet.dto.MpesaStkCallbackRequest;
 import com.premisave.wallet.service.DepositService;
 import com.premisave.wallet.service.DisbursementService;
 import com.premisave.wallet.service.MpesaOperationsService;
+import com.premisave.wallet.service.PullTransactionService;
 import com.stripe.model.Event;
 import com.stripe.model.PaymentIntent;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +40,7 @@ public class PaymentCallbackController {
     private final DepositService depositService;
     private final DisbursementService disbursementService;
     private final MpesaOperationsService mpesaOperationsService;
+    private final PullTransactionService pullTransactionService;
     private final StripeService stripeService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -345,6 +347,25 @@ public class PaymentCallbackController {
             disbursementService.markMpesaDisbursementTimedOut(conversationId);
         } catch (Exception e) {
             log.error("Failed to process B2Pochi timeout: conversationId={}", conversationId, e);
+        }
+        return ResponseEntity.ok().build();
+    }
+
+    // ─── M-Pesa Pull Transactions Callback ────────────────────────────────────
+
+    /**
+     * Whatever Safaricom posts here after Register Pull is set up. The exact
+     * payload shape isn't documented (only the Query response shape is) —
+     * PullTransactionService.handleCallback logs the raw body and attempts
+     * best-effort reconciliation assuming the same shape as the Query
+     * response. See https://developer.safaricom.co.ke/apis/PullTransaction
+     */
+    @PostMapping("/mpesa/pull/callback")
+    public ResponseEntity<Void> mpesaPullTransactionsCallback(@RequestBody String payload) {
+        try {
+            pullTransactionService.handleCallback(payload);
+        } catch (Exception e) {
+            log.error("Failed to process Pull Transactions callback", e);
         }
         return ResponseEntity.ok().build();
     }

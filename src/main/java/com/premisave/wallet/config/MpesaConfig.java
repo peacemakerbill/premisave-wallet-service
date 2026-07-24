@@ -33,6 +33,7 @@ public class MpesaConfig {
     private final AccountBalance accountBalance = new AccountBalance();
     private final Reversal reversal = new Reversal();
     private final B2Pochi b2Pochi = new B2Pochi();
+    private final PullTransactions pullTransactions = new PullTransactions();
 
     public String baseUrl() {
         return "sandbox".equalsIgnoreCase(environment)
@@ -202,7 +203,32 @@ public class MpesaConfig {
         private java.math.BigDecimal maxAmount = new java.math.BigDecimal("250000");
     }
 
-    // TODO: add nested PullTransactions config class once that flow gets a
-    // service/controller implementation — application.yml already defines
-    // mpesa.daraja.pull-transactions.*.
+    /**
+     * Pull Transactions — reconciliation API that lets us query all C2B
+     * transactions performed under our shortcode within the last 48 hours,
+     * to recover any that failed to reach our C2B confirmation callback.
+     * Unlike every other "operational" M-Pesa API in this config, this one
+     * needs NO initiator name/password/SecurityCredential — auth is via the
+     * normal OAuth bearer token only, same as STK Push and C2B Register URL.
+     * See https://developer.safaricom.co.ke/apis/PullTransaction
+     */
+    @Data
+    public static class PullTransactions {
+        /** Defaults to the root shortcode if unset. */
+        private String shortcode;
+        /**
+         * The Safaricom MSISDN associated with the organization account,
+         * found on the M-PESA portal under the shortcode's KYC details.
+         * Required by Safaricom's Register Pull request.
+         */
+        private String nominatedNumber;
+        /** Our own webhook — required by Register Pull; exact push payload is undocumented by Safaricom. */
+        private String callbackUrl;
+        /** Default lookback window (days) when a query doesn't specify start/end dates. Max 2 (48h retention). */
+        private int pullDays = 1;
+        private int offsetValue = 0;
+    }
+
+    // TODO: registration of PullTransactions is a one-time step per shortcode —
+    // see MpesaService.registerPullTransactions() / PullTransactionService.
 }
