@@ -6,6 +6,8 @@ import com.premisave.wallet.dto.DisbursementRequest;
 import com.premisave.wallet.dto.DisbursementResponse;
 import com.premisave.wallet.dto.MpesaAsyncResponse;
 import com.premisave.wallet.dto.MpesaB2BRequest;
+import com.premisave.wallet.dto.QueryOrgInfoRequest;
+import com.premisave.wallet.dto.QueryOrgInfoResponse;
 import com.premisave.wallet.entity.Disbursement;
 import com.premisave.wallet.entity.Transaction;
 import com.premisave.wallet.entity.Wallet;
@@ -136,6 +138,45 @@ public class DisbursementService {
         idempotencyService.checkIdempotency(request.getReference());
         String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
 
+        String verifiedRecipientName = null;
+        String verifiedChargeProfileId = null;
+
+        if (request.isVerifyRecipient()) {
+            QueryOrgInfoRequest orgInfoRequest = new QueryOrgInfoRequest();
+            orgInfoRequest.setIdentifierType(request.getReceiverIdentifierTypeForVerification());
+            orgInfoRequest.setIdentifier(request.getReceiverShortcode());
+
+            QueryOrgInfoResponse orgInfo = mpesaService.queryOrgInfo(orgInfoRequest);
+
+            if (!orgInfo.isSuccess()) {
+                // Hakikisha couldn't confirm the recipient — abort before Safaricom's
+                // B2B endpoint is ever called, rather than sending money to an
+                // unverified shortcode/till.
+                log.warn("B2B Hakikisha check failed for receiverShortcode={} — aborting payment. reason={}",
+                        request.getReceiverShortcode(), orgInfo.getResponseMessage());
+
+                Disbursement aborted = new Disbursement();
+                aborted.setUserId(initiatedByUserId);
+                aborted.setAmount(request.getAmount());
+                aborted.setCurrency(Currency.KES);
+                aborted.setDestination(request.getReceiverShortcode());
+                aborted.setProvider("MPESA");
+                aborted.setChannel("B2B");
+                aborted.setReference(reference);
+                aborted.setStatus(DisbursementStatus.FAILED);
+                aborted.setFailureReason("B2B Hakikisha verification failed: " + orgInfo.getResponseMessage());
+                disbursementRepository.save(aborted);
+
+                return new DisbursementResponse(aborted.getId(), aborted.getStatus().name(),
+                        "Recipient could not be verified — payment not sent: " + orgInfo.getResponseMessage());
+            }
+
+            verifiedRecipientName = orgInfo.getOrganizationName();
+            verifiedChargeProfileId = orgInfo.getChargeProfileId();
+            log.info("B2B Hakikisha verified receiverShortcode={} as organizationName={}",
+                    request.getReceiverShortcode(), verifiedRecipientName);
+        }
+
         var result = mpesaService.sendB2B(request);
 
         Disbursement disbursement = new Disbursement();
@@ -146,6 +187,8 @@ public class DisbursementService {
         disbursement.setProvider("MPESA");
         disbursement.setChannel("B2B");
         disbursement.setReference(reference);
+        disbursement.setVerifiedRecipientName(verifiedRecipientName);
+        disbursement.setVerifiedChargeProfileId(verifiedChargeProfileId);
 
         if (result.isSuccess()) {
             disbursement.setStatus(DisbursementStatus.PENDING);
@@ -156,7 +199,10 @@ public class DisbursementService {
         }
 
         disbursementRepository.save(disbursement);
-        return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), result.getMessage());
+        String message = verifiedRecipientName != null
+                ? result.getMessage() + " (recipient verified as: " + verifiedRecipientName + ")"
+                : result.getMessage();
+        return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), message);
     }
 
     // ─── B2C Account Top Up (admin/finance-initiated) ───────────────────────

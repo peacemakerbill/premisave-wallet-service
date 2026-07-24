@@ -13,6 +13,8 @@ import com.premisave.wallet.dto.MpesaReversalRequest;
 import com.premisave.wallet.dto.MpesaStkPushRequest;
 import com.premisave.wallet.dto.PullTransactionRecord;
 import com.premisave.wallet.dto.PullTransactionResponse;
+import com.premisave.wallet.dto.QueryOrgInfoRequest;
+import com.premisave.wallet.dto.QueryOrgInfoResponse;
 import com.premisave.wallet.dto.TransactionStatusRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -611,6 +613,63 @@ public class MpesaService {
         }
 
         return new PullTransactionResponse(success, message, refId, null, records, null, null, null);
+    }
+
+    // ─── B2B Hakikisha (Query Org Info) ─────────────────────────────────────
+
+    /**
+     * Looks up the registered name and charge/tariff profile for a given
+     * shortcode/till — meant to be called before a B2B payment so the
+     * recipient can be confirmed and fees estimated up front. Synchronous:
+     * unlike every other operational API here, the answer comes back in the
+     * HTTP response itself, no ResultURL involved.
+     * See https://developer.safaricom.co.ke/apis/QueryOrgInfo
+     *
+     * @throws IllegalStateException if mpesa.daraja.query-org-info.query-url
+     *         hasn't been configured with a real endpoint (see MpesaConfig.QueryOrgInfo).
+     */
+    public QueryOrgInfoResponse queryOrgInfo(QueryOrgInfoRequest req) {
+        String queryUrl = config.getQueryOrgInfo().getQueryUrl();
+        if (queryUrl == null || queryUrl.isBlank() || queryUrl.startsWith("REPLACE_WITH_")) {
+            throw new IllegalStateException(
+                    "mpesa.daraja.query-org-info.query-url is not configured — Safaricom's published docs for " +
+                    "this API don't show the endpoint path (only visible via the 'Use API' button in your Daraja " +
+                    "sandbox). Set the real URL before calling queryOrgInfo().");
+        }
+
+        String token = getAccessToken();
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("IdentifierType", req.getIdentifierType());
+        body.put("Identifier", req.getIdentifier());
+
+        try {
+            String respBody = post(queryUrl, token, body);
+            log.info("Query Org Info response: {}", respBody);
+            JsonNode node = objectMapper.readTree(respBody);
+
+            String organizationName = node.path("OrganizationName").asText("");
+            // Safaricom's own docs are inconsistent about what ResponseCode means for
+            // this API (sample success shows "4000"; the Error Codes table says "0" is
+            // success). Deriving success from OrganizationName being present sidesteps
+            // that ambiguity rather than trusting either convention blindly.
+            boolean success = !organizationName.isBlank();
+
+            return new QueryOrgInfoResponse(
+                    success,
+                    node.path("ConversationID").asText(""),
+                    node.path("ResponseCode").asText(""),
+                    node.path("ResponseMessage").asText("Unknown"),
+                    node.path("DetailedMessage").asText(""),
+                    node.path("OrganizationShortCode").asText(""),
+                    organizationName,
+                    node.path("ChargeProfileID").asText("")
+            );
+        } catch (Exception e) {
+            log.error("Query Org Info failed", e);
+            return new QueryOrgInfoResponse(false, null, null,
+                    "Query Org Info failed: " + e.getMessage(), null, null, null, null);
+        }
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────

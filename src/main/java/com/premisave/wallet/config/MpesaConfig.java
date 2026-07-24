@@ -34,6 +34,7 @@ public class MpesaConfig {
     private final Reversal reversal = new Reversal();
     private final B2Pochi b2Pochi = new B2Pochi();
     private final PullTransactions pullTransactions = new PullTransactions();
+    private final QueryOrgInfo queryOrgInfo = new QueryOrgInfo();
 
     public String baseUrl() {
         return "sandbox".equalsIgnoreCase(environment)
@@ -227,6 +228,25 @@ public class MpesaConfig {
         /** Default lookback window (days) when a query doesn't specify start/end dates. Max 2 (48h retention). */
         private int pullDays = 1;
         private int offsetValue = 0;
+    }
+
+    /**
+     * "B2B Hakikisha" (Query Org Info) — returns an organization's registered
+     * name and tariff/charge profile for a given shortcode/till, so a B2B
+     * payment's recipient can be confirmed before money moves. Synchronous
+     * (no ResultURL/QueueTimeOutURL — response comes back immediately) and
+     * needs no initiator/SecurityCredential, just the OAuth bearer token.
+     *
+     * queryUrl has NO safe default: Safaricom's published docs for this API
+     * don't show the actual endpoint path (only visible via the "Use API"
+     * button in your Daraja sandbox, behind login) — MpesaService throws a
+     * clear error rather than silently calling a guessed URL if this is left
+     * at its placeholder value.
+     * See https://developer.safaricom.co.ke/apis/QueryOrgInfo
+     */
+    @Data
+    public static class QueryOrgInfo {
+        private String queryUrl = "REPLACE_WITH_URL_FROM_DARAJA_SANDBOX_USE_API_PANEL";
     }
 
     // TODO: registration of PullTransactions is a one-time step per shortcode —

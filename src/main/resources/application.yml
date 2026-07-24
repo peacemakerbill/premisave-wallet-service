@@ -184,6 +184,21 @@ mpesa:
       min-amount: 10
       max-amount: 250000
 
+    # ── B2B Hakikisha (Query Org Info) ──
+    # Confirms an organization's registered name and tariff/charge profile
+    # for a shortcode/till before a B2B payment — synchronous, no
+    # initiator/SecurityCredential needed, just the OAuth bearer token.
+    #
+    # IMPORTANT: query-url has NO safe default. Safaricom's published docs
+    # for this API don't show the endpoint path — it's only visible via the
+    # "Use API" button inside your Daraja sandbox (behind login). Replace
+    # the placeholder below with that real URL before using verifyRecipient
+    # on a B2B payment or calling POST /admin/wallet/mpesa/b2b/query-org-info
+    # — MpesaService throws a clear error if this is left unconfigured.
+    # https://developer.safaricom.co.ke/apis/QueryOrgInfo
+    query-org-info:
+      query-url: ${MPESA_QUERY_ORG_INFO_URL:REPLACE_WITH_URL_FROM_DARAJA_SANDBOX_USE_API_PANEL}
+
     # ── Pull Transactions API (C2B reconciliation) ──
     # Lets us query all C2B transactions on our shortcode from the last 48
     # hours, to recover any that missed our confirmation callback. Unlike

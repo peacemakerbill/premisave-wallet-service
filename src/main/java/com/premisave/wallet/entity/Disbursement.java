@@ -37,6 +37,17 @@ public class Disbursement {
 
     private String failureReason;
 
+    /**
+     * Populated for B2B payments where MpesaB2BRequest.verifyRecipient=true —
+     * the organization name Safaricom's "B2B Hakikisha" (Query Org Info)
+     * check confirmed for the receiverShortcode before the payment was sent.
+     * Null if verification wasn't requested or wasn't applicable (non-B2B channels).
+     */
+    private String verifiedRecipientName;
+
+    /** Charge/tariff profile ID returned by the same Hakikisha check, if any. */
+    private String verifiedChargeProfileId;
+
     @CreatedDate
     private LocalDateTime createdAt;
 }

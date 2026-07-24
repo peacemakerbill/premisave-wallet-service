@@ -8,6 +8,7 @@ import com.premisave.wallet.enums.TransactionType;
 import com.premisave.wallet.service.AdminWalletService;
 import com.premisave.wallet.service.DisbursementService;
 import com.premisave.wallet.service.MpesaOperationsService;
+import com.premisave.wallet.service.MpesaService;
 import com.premisave.wallet.service.PullTransactionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +35,7 @@ public class AdminWalletController {
     private final DisbursementService disbursementService;
     private final MpesaOperationsService mpesaOperationsService;
     private final PullTransactionService pullTransactionService;
+    private final MpesaService mpesaService;
 
     // ==================== WALLET MANAGEMENT ====================
 
@@ -136,6 +138,12 @@ public class AdminWalletController {
      * BusinessBuyGoods to pay a till/store number — set via request.commandId).
      * Restricted to ADMIN/FINANCE/OPERATIONS via the class-level @PreAuthorize.
      * B2B is a permissioned Safaricom API — must be enabled for the shortcode.
+     *
+     * Set request.verifyRecipient=true to run a "B2B Hakikisha" (Query Org
+     * Info) check against receiverShortcode first — the payment is aborted
+     * before Safaricom's B2B endpoint is ever called if the org name can't
+     * be confirmed. See POST /mpesa/b2b/query-org-info to check ad-hoc
+     * without committing to a payment.
      */
     @PostMapping("/b2b/pay")
     public ResponseEntity<ApiResponse<DisbursementResponse>> payB2B(
@@ -143,6 +151,20 @@ public class AdminWalletController {
             Authentication auth) {
         return ResponseEntity.ok(ApiResponse.success("B2B payment initiated",
                 adminWalletService.processB2BPayment(auth.getName(), request)));
+    }
+
+    /**
+     * Ad-hoc "B2B Hakikisha" (Query Org Info) lookup — confirms the
+     * registered name and tariff/charge profile for a shortcode/till without
+     * committing to a payment. Useful for reviewing a recipient before
+     * deciding whether to pay them at all.
+     * See https://developer.safaricom.co.ke/apis/QueryOrgInfo
+     */
+    @PostMapping("/b2b/query-org-info")
+    public ResponseEntity<ApiResponse<QueryOrgInfoResponse>> queryOrgInfo(
+            @Valid @RequestBody QueryOrgInfoRequest request) {
+        return ResponseEntity.ok(ApiResponse.success("Query Org Info lookup complete",
+                mpesaService.queryOrgInfo(request)));
     }
 
     // ==================== B2C ACCOUNT TOP UP ====================
