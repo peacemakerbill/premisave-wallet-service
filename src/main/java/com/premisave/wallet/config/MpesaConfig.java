@@ -29,6 +29,10 @@ public class MpesaConfig {
     private final B2b b2b = new B2b();
     private final ExpressCheckout expressCheckout = new ExpressCheckout();
     private final AccountTopUp accountTopUp = new AccountTopUp();
+    private final TransactionStatus transactionStatus = new TransactionStatus();
+    private final AccountBalance accountBalance = new AccountBalance();
+    private final Reversal reversal = new Reversal();
+    private final B2Pochi b2Pochi = new B2Pochi();
 
     public String baseUrl() {
         return "sandbox".equalsIgnoreCase(environment)
@@ -127,7 +131,78 @@ public class MpesaConfig {
         private String resultUrl;
     }
 
-    // TODO: add nested TransactionStatus / PullTransactions config classes
-    // once those flows get service/controller implementations —
-    // application.yml already defines mpesa.daraja.transaction-status.*, etc.
+    /**
+     * Transaction Status — secondary reconciliation mechanism for when a
+     * B2C/B2B/C2B/Reversal ResultURL callback never arrives. Query by either
+     * TransactionID (M-Pesa receipt) or OriginalConversationID.
+     * See https://developer.safaricom.co.ke/apis/TransactionStatus
+     */
+    @Data
+    public static class TransactionStatus {
+        private String initiatorName;
+        private String initiatorPassword;
+        /** Own shortcode being queried against — PartyA. */
+        private String partyA;
+        /** 1=MSISDN, 2=Till, 4=Shortcode. Shortcodes use 4. */
+        private String identifierType = "4";
+        private String queueTimeoutUrl;
+        private String resultUrl;
+    }
+
+    /**
+     * Account Balance — real-time balance inquiry across the Working (MMF),
+     * Utility, and Charges Paid accounts for our own shortcode.
+     * See https://developer.safaricom.co.ke/apis/AccountBalance
+     */
+    @Data
+    public static class AccountBalance {
+        private String initiatorName;
+        private String initiatorPassword;
+        private String partyA;
+        private String identifierType = "4";
+        private String queueTimeoutUrl;
+        private String resultUrl;
+    }
+
+    /**
+     * Reversal — reverses a completed C2B transaction, refunding the
+     * customer and debiting our shortcode. B2C payouts cannot be reversed
+     * via this API (Safaricom portal only).
+     * See https://developer.safaricom.co.ke/apis/Reversal
+     */
+    @Data
+    public static class Reversal {
+        private String initiatorName;
+        private String initiatorPassword;
+        /** Our own shortcode — the ReceiverParty debited by the reversal. */
+        private String receiverParty;
+        /** Must be "11" per Safaricom's Reversal spec. */
+        private String receiverIdentifierType = "11";
+        private String queueTimeoutUrl;
+        private String resultUrl;
+    }
+
+    /**
+     * B2Pochi (Business to Pochi la Biashara) — a B2C variant that pays
+     * directly into a customer's Pochi business wallet instead of their
+     * main M-Pesa balance. Requires a B2C shortcode / "one account" capable
+     * of both receiving and disbursing.
+     * See https://developer.safaricom.co.ke/apis/BusinessToPochi
+     */
+    @Data
+    public static class B2Pochi {
+        private String initiatorName;
+        private String initiatorPassword;
+        /** B2C shortcode money is sent FROM. */
+        private String partyA;
+        private String queueTimeoutUrl;
+        private String resultUrl;
+
+        private java.math.BigDecimal minAmount = new java.math.BigDecimal("10");
+        private java.math.BigDecimal maxAmount = new java.math.BigDecimal("250000");
+    }
+
+    // TODO: add nested PullTransactions config class once that flow gets a
+    // service/controller implementation — application.yml already defines
+    // mpesa.daraja.pull-transactions.*.
 }

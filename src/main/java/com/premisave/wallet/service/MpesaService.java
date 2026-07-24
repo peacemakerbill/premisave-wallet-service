@@ -4,10 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.premisave.wallet.config.MpesaConfig;
 import com.premisave.wallet.dto.B2BExpressCheckoutResponse;
+import com.premisave.wallet.dto.B2PochiRequest;
+import com.premisave.wallet.dto.MpesaAsyncResponse;
 import com.premisave.wallet.dto.MpesaB2BRequest;
 import com.premisave.wallet.dto.MpesaB2BResponse;
 import com.premisave.wallet.dto.MpesaB2CResponse;
+import com.premisave.wallet.dto.MpesaReversalRequest;
 import com.premisave.wallet.dto.MpesaStkPushRequest;
+import com.premisave.wallet.dto.TransactionStatusRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
@@ -21,6 +25,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
@@ -327,7 +332,198 @@ public class MpesaService {
         }
     }
 
+    // ─── Account Balance ─────────────────────────────────────────────────────
+
+    /**
+     * Queries the real-time balance (Working/MMF, Utility, Charges Paid,
+     * Organization Settlement accounts) for our own shortcode. Result
+     * arrives later via ResultURL as a pipe-delimited string per account —
+     * see MpesaOperationsService for parsing.
+     * See https://developer.safaricom.co.ke/apis/AccountBalance
+     */
+    public MpesaAsyncResponse queryAccountBalance() {
+        MpesaConfig.AccountBalance cfg = config.getAccountBalance();
+        String token = getAccessToken();
+        String securityCredential = securityCredentialService.encrypt(
+                cfg.getInitiatorPassword(), config.getCertificatePath());
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("Initiator", cfg.getInitiatorName());
+        body.put("SecurityCredential", securityCredential);
+        body.put("CommandID", "AccountBalance");
+        body.put("PartyA", cfg.getPartyA() != null ? cfg.getPartyA() : config.getShortcode());
+        body.put("IdentifierType", cfg.getIdentifierType());
+        body.put("Remarks", "Premisave balance inquiry");
+        body.put("QueueTimeOutURL", cfg.getQueueTimeoutUrl());
+        body.put("ResultURL", cfg.getResultUrl());
+
+        try {
+            String respBody = post(config.baseUrl() + "/mpesa/accountbalance/v1/query", token, body);
+            log.info("Account Balance response: {}", respBody);
+            return parseAsyncAck(respBody, "Account Balance");
+        } catch (Exception e) {
+            log.error("Account Balance query failed", e);
+            return new MpesaAsyncResponse(false, "Account Balance query failed: " + e.getMessage(), null, null);
+        }
+    }
+
+    // ─── Transaction Status ──────────────────────────────────────────────────
+
+    /**
+     * Secondary reconciliation mechanism for C2B/B2B/B2C/Reversal
+     * transactions when the original ResultURL callback never arrived.
+     * Requires either transactionId (M-Pesa receipt) or originatorConversationId.
+     * See https://developer.safaricom.co.ke/apis/TransactionStatus
+     */
+    public MpesaAsyncResponse queryTransactionStatus(TransactionStatusRequest req) {
+        boolean hasTxId = req.getTransactionId() != null && !req.getTransactionId().isBlank();
+        boolean hasOcid = req.getOriginatorConversationId() != null && !req.getOriginatorConversationId().isBlank();
+        if (!hasTxId && !hasOcid) {
+            return new MpesaAsyncResponse(false,
+                    "Either transactionId or originatorConversationId is required", null, null);
+        }
+
+        MpesaConfig.TransactionStatus cfg = config.getTransactionStatus();
+        String token = getAccessToken();
+        String securityCredential = securityCredentialService.encrypt(
+                cfg.getInitiatorPassword(), config.getCertificatePath());
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("Initiator", cfg.getInitiatorName());
+        body.put("SecurityCredential", securityCredential);
+        body.put("CommandID", "TransactionStatusQuery");
+        if (hasTxId) {
+            body.put("TransactionID", req.getTransactionId());
+        }
+        if (hasOcid) {
+            body.put("OriginalConversationID", req.getOriginatorConversationId());
+        }
+        body.put("PartyA", cfg.getPartyA() != null ? cfg.getPartyA() : config.getShortcode());
+        body.put("IdentifierType", cfg.getIdentifierType());
+        body.put("ResultURL", cfg.getResultUrl());
+        body.put("QueueTimeOutURL", cfg.getQueueTimeoutUrl());
+        body.put("Remarks", req.getRemarks() != null ? req.getRemarks() : "Status check");
+        if (req.getOccasion() != null && !req.getOccasion().isBlank()) {
+            body.put("Occasion", req.getOccasion());
+        }
+
+        try {
+            String respBody = post(config.baseUrl() + "/mpesa/transactionstatus/v1/query", token, body);
+            log.info("Transaction Status response: {}", respBody);
+            return parseAsyncAck(respBody, "Transaction Status");
+        } catch (Exception e) {
+            log.error("Transaction Status query failed", e);
+            return new MpesaAsyncResponse(false, "Transaction Status query failed: " + e.getMessage(), null, null);
+        }
+    }
+
+    // ─── Reversal ─────────────────────────────────────────────────────────────
+
+    /**
+     * Reverses a completed C2B transaction — refunds the customer and debits
+     * our shortcode. Per Safaricom's spec, B2C payouts cannot be reversed via
+     * this API (portal only), so this should only ever be called against a
+     * C2B/STK deposit's M-Pesa receipt number.
+     * See https://developer.safaricom.co.ke/apis/Reversal
+     */
+    public MpesaAsyncResponse initiateReversal(MpesaReversalRequest req) {
+        MpesaConfig.Reversal cfg = config.getReversal();
+        String token = getAccessToken();
+        String securityCredential = securityCredentialService.encrypt(
+                cfg.getInitiatorPassword(), config.getCertificatePath());
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("Initiator", cfg.getInitiatorName());
+        body.put("SecurityCredential", securityCredential);
+        body.put("CommandID", "TransactionReversal");
+        body.put("TransactionID", req.getTransactionId());
+        body.put("Amount", req.getAmount().intValue());
+        body.put("ReceiverParty", cfg.getReceiverParty() != null ? cfg.getReceiverParty() : config.getShortcode());
+        // Field name below intentionally matches Safaricom's own (misspelled) API field.
+        body.put("RecieverIdentifierType", cfg.getReceiverIdentifierType());
+        body.put("ResultURL", cfg.getResultUrl());
+        body.put("QueueTimeOutURL", cfg.getQueueTimeoutUrl());
+        body.put("Remarks", req.getRemarks());
+
+        try {
+            String respBody = post(config.baseUrl() + "/mpesa/reversal/v1/request", token, body);
+            log.info("Reversal response: {}", respBody);
+            return parseAsyncAck(respBody, "Reversal");
+        } catch (Exception e) {
+            log.error("Reversal initiation failed", e);
+            return new MpesaAsyncResponse(false, "Reversal initiation failed: " + e.getMessage(), null, null);
+        }
+    }
+
+    // ─── B2Pochi (Business to Pochi la Biashara) ────────────────────────────
+
+    /**
+     * Pays directly into a customer's Pochi la Biashara business wallet
+     * (CommandID BusinessPayToPochi) rather than their main M-Pesa balance.
+     * Requires our own OriginatorConversationID up front (Safaricom uses it
+     * to prevent double-disbursement) — we generate one and store it
+     * alongside the returned ConversationID for reconciliation.
+     * See https://developer.safaricom.co.ke/apis/BusinessToPochi
+     */
+    public MpesaAsyncResponse sendToPochi(B2PochiRequest req, String originatorConversationId) {
+        MpesaConfig.B2Pochi cfg = config.getB2Pochi();
+
+        if (req.getAmount().compareTo(cfg.getMinAmount()) < 0 || req.getAmount().compareTo(cfg.getMaxAmount()) > 0) {
+            return new MpesaAsyncResponse(false,
+                    "Amount must be between " + cfg.getMinAmount() + " and " + cfg.getMaxAmount() + " KES",
+                    null, null);
+        }
+
+        String token = getAccessToken();
+        String phone254 = normalizePhone(req.getPhoneNumber());
+        String securityCredential = securityCredentialService.encrypt(
+                cfg.getInitiatorPassword(), config.getCertificatePath());
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("OriginatorConversationID", originatorConversationId);
+        body.put("InitiatorName", cfg.getInitiatorName());
+        body.put("SecurityCredential", securityCredential);
+        body.put("CommandID", "BusinessPayToPochi");
+        body.put("Amount", req.getAmount().intValue());
+        body.put("PartyA", cfg.getPartyA() != null ? cfg.getPartyA() : config.getShortcode());
+        body.put("PartyB", phone254);
+        body.put("Remarks", req.getRemarks() != null ? req.getRemarks() : "Premisave Pochi disbursement");
+        body.put("QueueTimeOutURL", cfg.getQueueTimeoutUrl());
+        body.put("ResultURL", cfg.getResultUrl());
+        // Safaricom's own field is spelled "Occassion" (double-s) for B2Pochi
+        // specifically — differs from every other M-Pesa API. Match exactly.
+        body.put("Occassion", req.getOccasion() != null ? req.getOccasion() : "");
+
+        try {
+            String respBody = post(config.baseUrl() + "/mpesa/b2pochi/v1/paymentrequest", token, body);
+            log.info("B2Pochi response: {}", respBody);
+            return parseAsyncAck(respBody, "B2Pochi");
+        } catch (Exception e) {
+            log.error("B2Pochi initiation failed", e);
+            return new MpesaAsyncResponse(false, "B2Pochi initiation failed: " + e.getMessage(), null, null);
+        }
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    /**
+     * Shared parser for the four "operational" APIs above — all return the
+     * same {ResponseCode, ResponseDescription, ConversationID,
+     * OriginatorConversationID} acknowledgement shape.
+     */
+    private MpesaAsyncResponse parseAsyncAck(String respBody, String apiName) throws Exception {
+        JsonNode node = objectMapper.readTree(respBody);
+        boolean accepted = "0".equals(node.path("ResponseCode").asText("1"));
+        String conversationId = node.path("ConversationID").asText("");
+        String originatorId   = node.path("OriginatorConversationID").asText("");
+        String message        = node.path("ResponseDescription").asText(apiName + " request submitted");
+        return new MpesaAsyncResponse(accepted, message, conversationId, originatorId);
+    }
+
+    /** Generates a Safaricom-safe OriginatorConversationID for APIs (like B2Pochi) that require one up front. */
+    public String generateOriginatorConversationId(String prefix) {
+        return prefix + "_" + UUID.randomUUID().toString().replace("-", "").substring(0, 20);
+    }
 
     private String post(String url, String token, Map<String, Object> body) throws Exception {
         String json = objectMapper.writeValueAsString(body);

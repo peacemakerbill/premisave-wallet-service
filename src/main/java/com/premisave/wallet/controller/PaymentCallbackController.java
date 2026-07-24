@@ -8,6 +8,7 @@ import com.premisave.wallet.dto.MpesaResultCallbackRequest;
 import com.premisave.wallet.dto.MpesaStkCallbackRequest;
 import com.premisave.wallet.service.DepositService;
 import com.premisave.wallet.service.DisbursementService;
+import com.premisave.wallet.service.MpesaOperationsService;
 import com.stripe.model.Event;
 import com.stripe.model.PaymentIntent;
 import lombok.RequiredArgsConstructor;
@@ -24,7 +25,8 @@ import java.util.Map;
 
 /**
  * Handles incoming webhooks/callbacks from all payment providers:
- * M-Pesa (STK Push, B2C, B2B, B2B Express Checkout), Stripe, and PayPal.
+ * M-Pesa (STK Push, B2C, B2B, B2B Express Checkout, Account Balance,
+ * Transaction Status, Reversal, B2Pochi), Stripe, and PayPal.
  * All endpoints are PUBLIC (no JWT) — secured by signature verification
  * or IP allowlist at the gateway/firewall level.
  */
@@ -36,6 +38,7 @@ public class PaymentCallbackController {
 
     private final DepositService depositService;
     private final DisbursementService disbursementService;
+    private final MpesaOperationsService mpesaOperationsService;
     private final StripeService stripeService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -198,6 +201,154 @@ public class PaymentCallbackController {
         return ResponseEntity.ok().build();
     }
 
+    // ─── M-Pesa Account Balance Result ────────────────────────────────────────
+
+    /**
+     * Same Result envelope as B2C/B2B — the balances themselves arrive
+     * pipe-delimited inside a single "AccountBalance" ResultParameter, e.g.
+     * "Working Account|KES|700000.00|700000.00|0.00|0.00&Utility Account|...".
+     * We pass the raw parameter map through to MpesaOperationsService rather
+     * than parsing the pipe format here — keeps the parsing logic in one place.
+     * See https://developer.safaricom.co.ke/apis/AccountBalance
+     */
+    @PostMapping("/mpesa/balance/result")
+    public ResponseEntity<Void> mpesaBalanceResult(@RequestBody MpesaResultCallbackRequest callback) {
+        var result = callback.getResult();
+        log.info("M-Pesa Account Balance result: conversationId={} resultCode={} resultDesc={}",
+                result.getConversationID(), result.getResultCode(), result.getResultDesc());
+
+        try {
+            boolean success = result.getResultCode() == 0;
+            mpesaOperationsService.completeOperation(result.getConversationID(), success,
+                    String.valueOf(result.getResultCode()), result.getResultDesc(), extractResultParameters(result));
+        } catch (Exception e) {
+            log.error("Failed to process Account Balance result: conversationId={}", result.getConversationID(), e);
+        }
+
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/mpesa/balance/timeout")
+    public ResponseEntity<Void> mpesaBalanceTimeout(@RequestBody MpesaResultCallbackRequest callback) {
+        String conversationId = callback.getResult() != null ? callback.getResult().getConversationID() : null;
+        log.warn("M-Pesa Account Balance timeout: conversationId={}", conversationId);
+        try {
+            mpesaOperationsService.markOperationTimedOut(conversationId);
+        } catch (Exception e) {
+            log.error("Failed to process Account Balance timeout: conversationId={}", conversationId, e);
+        }
+        return ResponseEntity.ok().build();
+    }
+
+    // ─── M-Pesa Transaction Status Result ─────────────────────────────────────
+
+    /**
+     * See https://developer.safaricom.co.ke/apis/TransactionStatus
+     */
+    @PostMapping("/mpesa/transactionstatus/result")
+    public ResponseEntity<Void> mpesaTransactionStatusResult(@RequestBody MpesaResultCallbackRequest callback) {
+        var result = callback.getResult();
+        log.info("M-Pesa Transaction Status result: conversationId={} resultCode={} resultDesc={}",
+                result.getConversationID(), result.getResultCode(), result.getResultDesc());
+
+        try {
+            boolean success = result.getResultCode() == 0;
+            mpesaOperationsService.completeOperation(result.getConversationID(), success,
+                    String.valueOf(result.getResultCode()), result.getResultDesc(), extractResultParameters(result));
+        } catch (Exception e) {
+            log.error("Failed to process Transaction Status result: conversationId={}", result.getConversationID(), e);
+        }
+
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/mpesa/transactionstatus/timeout")
+    public ResponseEntity<Void> mpesaTransactionStatusTimeout(@RequestBody MpesaResultCallbackRequest callback) {
+        String conversationId = callback.getResult() != null ? callback.getResult().getConversationID() : null;
+        log.warn("M-Pesa Transaction Status timeout: conversationId={}", conversationId);
+        try {
+            mpesaOperationsService.markOperationTimedOut(conversationId);
+        } catch (Exception e) {
+            log.error("Failed to process Transaction Status timeout: conversationId={}", conversationId, e);
+        }
+        return ResponseEntity.ok().build();
+    }
+
+    // ─── M-Pesa Reversal Result ────────────────────────────────────────────────
+
+    /**
+     * On success, MpesaOperationsService.completeOperation automatically
+     * debits the linked wallet (if the reversed transactionId matched a
+     * completed deposit on file) and records a REFUND transaction.
+     * See https://developer.safaricom.co.ke/apis/Reversal
+     */
+    @PostMapping("/mpesa/reversal/result")
+    public ResponseEntity<Void> mpesaReversalResult(@RequestBody MpesaResultCallbackRequest callback) {
+        var result = callback.getResult();
+        log.info("M-Pesa Reversal result: conversationId={} resultCode={} resultDesc={}",
+                result.getConversationID(), result.getResultCode(), result.getResultDesc());
+
+        try {
+            boolean success = result.getResultCode() == 0;
+            mpesaOperationsService.completeOperation(result.getConversationID(), success,
+                    String.valueOf(result.getResultCode()), result.getResultDesc(), extractResultParameters(result));
+        } catch (Exception e) {
+            log.error("Failed to process Reversal result: conversationId={}", result.getConversationID(), e);
+        }
+
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/mpesa/reversal/timeout")
+    public ResponseEntity<Void> mpesaReversalTimeout(@RequestBody MpesaResultCallbackRequest callback) {
+        String conversationId = callback.getResult() != null ? callback.getResult().getConversationID() : null;
+        log.warn("M-Pesa Reversal timeout: conversationId={}", conversationId);
+        try {
+            mpesaOperationsService.markOperationTimedOut(conversationId);
+        } catch (Exception e) {
+            log.error("Failed to process Reversal timeout: conversationId={}", conversationId, e);
+        }
+        return ResponseEntity.ok().build();
+    }
+
+    // ─── M-Pesa B2Pochi Result ──────────────────────────────────────────────────
+
+    /**
+     * B2Pochi is a B2C variant (pays into a customer's Pochi la Biashara
+     * wallet instead of their main M-Pesa balance) — it's a Disbursement
+     * (channel="B2C_POCHI"), not an MpesaOperation, so it's reconciled
+     * through DisbursementService exactly like B2C/B2B/B2C Top Up.
+     * See https://developer.safaricom.co.ke/apis/BusinessToPochi
+     */
+    @PostMapping("/mpesa/b2pochi/result")
+    public ResponseEntity<Void> mpesaB2PochiResult(@RequestBody MpesaResultCallbackRequest callback) {
+        var result = callback.getResult();
+        log.info("M-Pesa B2Pochi result: conversationId={} resultCode={} resultDesc={}",
+                result.getConversationID(), result.getResultCode(), result.getResultDesc());
+
+        try {
+            boolean success = result.getResultCode() == 0;
+            disbursementService.completeMpesaDisbursement(
+                    result.getConversationID(), success, result.getResultDesc(), result.getTransactionID());
+        } catch (Exception e) {
+            log.error("Failed to process B2Pochi result: conversationId={}", result.getConversationID(), e);
+        }
+
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/mpesa/b2pochi/timeout")
+    public ResponseEntity<Void> mpesaB2PochiTimeout(@RequestBody MpesaResultCallbackRequest callback) {
+        String conversationId = callback.getResult() != null ? callback.getResult().getConversationID() : null;
+        log.warn("M-Pesa B2Pochi timeout: conversationId={}", conversationId);
+        try {
+            disbursementService.markMpesaDisbursementTimedOut(conversationId);
+        } catch (Exception e) {
+            log.error("Failed to process B2Pochi timeout: conversationId={}", conversationId, e);
+        }
+        return ResponseEntity.ok().build();
+    }
+
     // ─── Stripe Webhook ──────────────────────────────────────────────────────
 
     /**
@@ -286,5 +437,22 @@ public class PaymentCallbackController {
     private String resolveUserIdFromReference(String reference) {
         log.warn("resolveUserIdFromReference: implement userId lookup by reference={}", reference);
         return null;
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    /**
+     * Flattens Safaricom's Result.ResultParameters.ResultParameter[{Key,Value}]
+     * array into a plain Map — shared by AccountBalance, TransactionStatus,
+     * and Reversal callbacks, all of which use this same envelope shape.
+     */
+    private Map<String, Object> extractResultParameters(MpesaResultCallbackRequest.Result result) {
+        Map<String, Object> map = new HashMap<>();
+        if (result.getResultParameters() != null && result.getResultParameters().getResultParameter() != null) {
+            for (MpesaResultCallbackRequest.ResultParameter param : result.getResultParameters().getResultParameter()) {
+                map.put(param.getKey(), param.getValue());
+            }
+        }
+        return map;
     }
 }

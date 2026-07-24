@@ -2,13 +2,17 @@ package com.premisave.wallet.controller;
 
 import com.premisave.wallet.dto.*;
 import com.premisave.wallet.entity.Disbursement;
+import com.premisave.wallet.entity.MpesaOperation;
 import com.premisave.wallet.enums.TransactionStatus;
 import com.premisave.wallet.enums.TransactionType;
 import com.premisave.wallet.service.AdminWalletService;
+import com.premisave.wallet.service.DisbursementService;
+import com.premisave.wallet.service.MpesaOperationsService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -26,6 +30,8 @@ import java.util.Map;
 public class AdminWalletController {
 
     private final AdminWalletService adminWalletService;
+    private final DisbursementService disbursementService;
+    private final MpesaOperationsService mpesaOperationsService;
 
     // ==================== WALLET MANAGEMENT ====================
 
@@ -152,6 +158,88 @@ public class AdminWalletController {
             Authentication auth) {
         return ResponseEntity.ok(ApiResponse.success("B2C top-up initiated",
                 adminWalletService.processB2CTopUp(auth.getName(), request)));
+    }
+
+    // ==================== B2POCHI (BUSINESS TO POCHI LA BIASHARA) ====================
+
+    /**
+     * Disburses from our B2C shortcode straight into a customer's Pochi la
+     * Biashara business wallet. Restricted to ADMIN/FINANCE/OPERATIONS via
+     * the class-level @PreAuthorize.
+     * See https://developer.safaricom.co.ke/apis/BusinessToPochi
+     */
+    @PostMapping("/mpesa/b2pochi/pay")
+    public ResponseEntity<ApiResponse<DisbursementResponse>> payB2Pochi(
+            @Valid @RequestBody B2PochiRequest request,
+            Authentication auth) {
+        return ResponseEntity.ok(ApiResponse.success("B2Pochi payment initiated",
+                disbursementService.processB2PochiPayment(auth.getName(), request)));
+    }
+
+    // ==================== M-PESA ACCOUNT BALANCE ====================
+
+    /**
+     * Triggers a real-time Account Balance query against our own shortcode's
+     * Working/Utility/Charges Paid accounts. The actual balances arrive
+     * asynchronously via ResultURL — poll GET /mpesa/operations/{conversationId}
+     * once the callback has had time to land.
+     * See https://developer.safaricom.co.ke/apis/AccountBalance
+     */
+    @PostMapping("/mpesa/balance/query")
+    public ResponseEntity<ApiResponse<MpesaAsyncResponse>> queryAccountBalance(Authentication auth) {
+        return ResponseEntity.ok(ApiResponse.success("Account balance query submitted",
+                mpesaOperationsService.queryAccountBalance(auth.getName())));
+    }
+
+    // ==================== M-PESA TRANSACTION STATUS ====================
+
+    /**
+     * Secondary reconciliation mechanism for a C2B/B2B/B2C/Reversal
+     * transaction whose ResultURL callback never arrived. Requires either
+     * transactionId (M-Pesa receipt) or originatorConversationId in the body.
+     * See https://developer.safaricom.co.ke/apis/TransactionStatus
+     */
+    @PostMapping("/mpesa/transaction-status/query")
+    public ResponseEntity<ApiResponse<MpesaAsyncResponse>> queryTransactionStatus(
+            @RequestBody TransactionStatusRequest request,
+            Authentication auth) {
+        return ResponseEntity.ok(ApiResponse.success("Transaction status query submitted",
+                mpesaOperationsService.queryTransactionStatus(auth.getName(), request)));
+    }
+
+    // ==================== M-PESA REVERSAL ====================
+
+    /**
+     * Reverses a completed C2B transaction (refunds the customer, debits our
+     * shortcode). If the transactionId matches a completed deposit Transaction
+     * on file, that wallet is automatically debited once the reversal
+     * succeeds — see MpesaOperationsService.completeOperation.
+     * NOTE: B2C payouts cannot be reversed via this API (Safaricom portal only).
+     * See https://developer.safaricom.co.ke/apis/Reversal
+     */
+    @PostMapping("/mpesa/reversal")
+    public ResponseEntity<ApiResponse<MpesaAsyncResponse>> reverseTransaction(
+            @Valid @RequestBody MpesaReversalRequest request,
+            Authentication auth) {
+        return ResponseEntity.ok(ApiResponse.success("Reversal submitted",
+                mpesaOperationsService.initiateReversal(auth.getName(), request)));
+    }
+
+    // ==================== M-PESA OPERATIONS LOOKUP ====================
+
+    /**
+     * Polls the stored result of a previously submitted Account Balance,
+     * Transaction Status, or Reversal request by the ConversationID returned
+     * at submission time.
+     */
+    @GetMapping("/mpesa/operations/{conversationId}")
+    public ResponseEntity<ApiResponse<MpesaOperation>> getMpesaOperation(@PathVariable String conversationId) {
+        MpesaOperation operation = mpesaOperationsService.getOperation(conversationId);
+        if (operation == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(ApiResponse.error("No operation found for conversationId: " + conversationId));
+        }
+        return ResponseEntity.ok(ApiResponse.success("Operation retrieved", operation));
     }
 
     // ==================== REPORTS & ANALYTICS ====================

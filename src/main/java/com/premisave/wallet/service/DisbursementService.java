@@ -1,8 +1,10 @@
 package com.premisave.wallet.service;
 
 import com.premisave.wallet.dto.B2CTopUpRequest;
+import com.premisave.wallet.dto.B2PochiRequest;
 import com.premisave.wallet.dto.DisbursementRequest;
 import com.premisave.wallet.dto.DisbursementResponse;
+import com.premisave.wallet.dto.MpesaAsyncResponse;
 import com.premisave.wallet.dto.MpesaB2BRequest;
 import com.premisave.wallet.entity.Disbursement;
 import com.premisave.wallet.entity.Transaction;
@@ -162,12 +164,9 @@ public class DisbursementService {
     /**
      * Tops up a B2C shortcode's utility account from Premisave's working
      * account (CommandID BusinessPayToBulk). Purely an internal float-management
-     * operation — no end-user wallet is touched, so no refund logic applies on
-     * failure. We still record a Disbursement for audit trail;
-     * completeMpesaDisbursement() will mark it SUCCESS/FAILED via the existing
-     * B2B result callback, and correctly skips creating a wallet Transaction
-     * since channel != "B2C".
-     *
+     * operation — no user wallet is debited or credited; the Disbursement
+     * record here exists only for audit/reconciliation visibility, same
+     * reasoning as B2B above.
      * See https://developer.safaricom.co.ke/apis/B2CAccountTopUp
      */
     @Transactional
@@ -200,15 +199,55 @@ public class DisbursementService {
         return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), result.getMessage());
     }
 
+    // ─── B2Pochi (admin/finance-initiated, pay into a customer's Pochi wallet) ──
+
+    /**
+     * Disburses from our B2C shortcode straight into a customer's Pochi la
+     * Biashara business wallet (CommandID BusinessPayToPochi). Treated the
+     * same as B2B/B2C Top Up above — an admin/finance-triggered business
+     * operation against our own float, not a specific user's Premisave
+     * wallet, so no upfront wallet debit happens here.
+     * See https://developer.safaricom.co.ke/apis/BusinessToPochi
+     */
+    @Transactional
+    public DisbursementResponse processB2PochiPayment(String initiatedByUserId, B2PochiRequest request) {
+        idempotencyService.checkIdempotency(request.getReference());
+        String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
+        String originatorConversationId = mpesaService.generateOriginatorConversationId("B2POCHI");
+
+        MpesaAsyncResponse result = mpesaService.sendToPochi(request, originatorConversationId);
+
+        Disbursement disbursement = new Disbursement();
+        disbursement.setUserId(initiatedByUserId);
+        disbursement.setAmount(request.getAmount());
+        disbursement.setCurrency(Currency.KES);
+        disbursement.setDestination(request.getPhoneNumber());
+        disbursement.setProvider("MPESA");
+        disbursement.setChannel("B2C_POCHI");
+        disbursement.setReference(reference);
+
+        if (result.isSuccess()) {
+            disbursement.setStatus(DisbursementStatus.PENDING);
+            disbursement.setProviderReference(result.getConversationId());
+        } else {
+            disbursement.setStatus(DisbursementStatus.FAILED);
+            disbursement.setFailureReason(result.getMessage());
+        }
+
+        disbursementRepository.save(disbursement);
+        return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), result.getMessage());
+    }
+
     // ─── Reconciliation from Safaricom's ResultURL callback ─────────────────
 
     /**
      * Called by PaymentCallbackController when Safaricom's real B2C/B2B
      * result arrives. This is the ONLY place a disbursement should be marked
      * SUCCESS or given a completed Transaction record for M-Pesa payouts.
-     * Also used to reconcile B2C Account Top Ups (channel="B2C_TOPUP") — those
-     * intentionally never get a wallet Transaction since no user wallet is
-     * involved.
+     * Also used to reconcile B2C Account Top Ups (channel="B2C_TOPUP") and
+     * B2Pochi payments (channel="B2C_POCHI") — those intentionally never get
+     * a wallet Transaction since no user wallet is involved (same reasoning
+     * as B2B).
      */
     @Transactional
     public void completeMpesaDisbursement(String conversationId, boolean success,
@@ -229,9 +268,9 @@ public class DisbursementService {
             d.setStatus(DisbursementStatus.SUCCESS);
             disbursementRepository.save(d);
 
-            // B2B/B2C_TOPUP disbursements have no user wallet (userId is the admin
-            // who triggered it) — only create a wallet-side Transaction for
-            // user-initiated (B2C) payouts.
+            // Only user-initiated B2C payouts touch a Premisave wallet — B2B,
+            // B2C_TOPUP, and B2C_POCHI are all business/float operations with
+            // no corresponding user wallet Transaction.
             if ("B2C".equals(d.getChannel()) && d.getWalletId() != null) {
                 saveDisbursementTransaction(d.getUserId(), d.getWalletId(), d.getAmount(), d, d.getReference());
             }
@@ -269,10 +308,11 @@ public class DisbursementService {
      * Safety net: if Safaricom's ResultURL callback never arrives (network
      * issue, misconfigured URL, etc.), a disbursement could stay PENDING
      * forever with funds held. This doesn't auto-resolve it — resolving
-     * definitively requires the M-Pesa Transaction Status API (not yet wired,
-     * see MpesaConfig TODO) — but it surfaces anything stuck past 30 minutes
-     * so ops can check manually or via Safaricom's portal instead of it going
-     * unnoticed.
+     * definitively can now be done via the Transaction Status API (see
+     * MpesaOperationsService.queryTransactionStatus, keyed by this
+     * disbursement's providerReference as OriginatorConversationID) — but
+     * this sweeper still surfaces anything stuck past 30 minutes so ops can
+     * check manually or trigger that query, instead of it going unnoticed.
      */
     @Scheduled(fixedDelay = 15 * 60 * 1000) // every 15 minutes
     public void flagStuckDisbursements() {

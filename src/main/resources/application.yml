@@ -135,16 +135,54 @@ mpesa:
       result-url: ${MPESA_TOPUP_RESULT_URL:https://your-domain.com/payments/mpesa/b2b/result}
 
     # ── Transaction Status API ──
-    # Not yet wired to a service — reserved for full automatic reconciliation
-    # of stuck B2C/B2B disbursements (see DisbursementService.flagStuckDisbursements).
+    # Secondary reconciliation mechanism for C2B/B2B/B2C/Reversal transactions
+    # whose ResultURL callback never arrived. See MpesaOperationsService.
+    # https://developer.safaricom.co.ke/apis/TransactionStatus
     transaction-status:
       initiator-name: ${MPESA_STATUS_INITIATOR_NAME:your_initiator_name}
       initiator-password: ${MPESA_STATUS_INITIATOR_PASSWORD:your_initiator_password}
-      security-credential: ${MPESA_STATUS_SECURITY_CREDENTIAL:your_security_credential}
       party-a: ${MPESA_STATUS_PARTY_A:600000}
       identifier-type: ${MPESA_STATUS_IDENTIFIER_TYPE:4}   # 1=MSISDN, 2=Till, 4=Shortcode
-      queue-timeout-url: ${MPESA_STATUS_TIMEOUT_URL:https://your-domain.com/payments/mpesa/status/timeout}
-      result-url: ${MPESA_STATUS_RESULT_URL:https://your-domain.com/payments/mpesa/status/result}
+      queue-timeout-url: ${MPESA_STATUS_TIMEOUT_URL:https://your-domain.com/payments/mpesa/transactionstatus/timeout}
+      result-url: ${MPESA_STATUS_RESULT_URL:https://your-domain.com/payments/mpesa/transactionstatus/result}
+
+    # ── Account Balance API ──
+    # Real-time balance inquiry across Working (MMF), Utility, and Charges
+    # Paid accounts for our own shortcode. See MpesaOperationsService.
+    # https://developer.safaricom.co.ke/apis/AccountBalance
+    account-balance:
+      initiator-name: ${MPESA_BALANCE_INITIATOR_NAME:your_initiator_name}
+      initiator-password: ${MPESA_BALANCE_INITIATOR_PASSWORD:your_initiator_password}
+      party-a: ${MPESA_BALANCE_PARTY_A:600000}
+      identifier-type: ${MPESA_BALANCE_IDENTIFIER_TYPE:4}
+      queue-timeout-url: ${MPESA_BALANCE_TIMEOUT_URL:https://your-domain.com/payments/mpesa/balance/timeout}
+      result-url: ${MPESA_BALANCE_RESULT_URL:https://your-domain.com/payments/mpesa/balance/result}
+
+    # ── Reversal API ──
+    # Reverses a completed C2B transaction (refunds the customer, debits our
+    # shortcode). NOTE: B2C payouts cannot be reversed via API — portal only.
+    # https://developer.safaricom.co.ke/apis/Reversal
+    reversal:
+      initiator-name: ${MPESA_REVERSAL_INITIATOR_NAME:your_initiator_name}
+      initiator-password: ${MPESA_REVERSAL_INITIATOR_PASSWORD:your_initiator_password}
+      receiver-party: ${MPESA_REVERSAL_RECEIVER_PARTY:600000}
+      receiver-identifier-type: ${MPESA_REVERSAL_RECEIVER_IDENTIFIER_TYPE:11}   # Must be 11 per Safaricom's spec
+      queue-timeout-url: ${MPESA_REVERSAL_TIMEOUT_URL:https://your-domain.com/payments/mpesa/reversal/timeout}
+      result-url: ${MPESA_REVERSAL_RESULT_URL:https://your-domain.com/payments/mpesa/reversal/result}
+
+    # ── B2Pochi (Business to Pochi la Biashara) ──
+    # Pays directly into a customer's Pochi business wallet instead of their
+    # main M-Pesa balance. Requires a B2C shortcode / "one account" capable
+    # of both receiving and disbursing.
+    # https://developer.safaricom.co.ke/apis/BusinessToPochi
+    b2-pochi:
+      initiator-name: ${MPESA_POCHI_INITIATOR_NAME:your_initiator_name}
+      initiator-password: ${MPESA_POCHI_INITIATOR_PASSWORD:your_initiator_password}
+      party-a: ${MPESA_POCHI_PARTY_A:600000}
+      queue-timeout-url: ${MPESA_POCHI_TIMEOUT_URL:https://your-domain.com/payments/mpesa/b2pochi/timeout}
+      result-url: ${MPESA_POCHI_RESULT_URL:https://your-domain.com/payments/mpesa/b2pochi/result}
+      min-amount: 10
+      max-amount: 250000
 
     # ── Account Balance / Pull Transactions API ──
     pull-transactions:

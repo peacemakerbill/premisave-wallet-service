@@ -28,4 +28,12 @@ public interface TransactionRepository extends MongoRepository<Transaction, Stri
      * providerReference stores the M-Pesa TransID (e.g. "RCA71X5MJ4").
      */
     boolean existsByProviderReference(String providerReference);
+
+    /**
+     * Used by MpesaOperationsService to link a Reversal request back to the
+     * original completed deposit transaction, by its M-Pesa receipt number
+     * (stored as providerReference on C2B/STK deposits), so the wallet can
+     * be auto-debited once the reversal succeeds.
+     */
+    Optional<Transaction> findByProviderReference(String providerReference);
 }
