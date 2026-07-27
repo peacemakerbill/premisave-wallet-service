@@ -1,11 +1,10 @@
 package com.premisave.wallet.controller;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.premisave.wallet.dto.ApiResponse;
 import com.premisave.wallet.dto.B2BExpressCheckoutCallbackRequest;
 import com.premisave.wallet.dto.MpesaResultCallbackRequest;
 import com.premisave.wallet.dto.MpesaStkCallbackRequest;
+import com.premisave.wallet.dto.PaypalWebhookRequest;
 import com.premisave.wallet.service.DepositService;
 import com.premisave.wallet.service.DisbursementService;
 import com.premisave.wallet.service.MpesaOperationsService;
@@ -42,8 +41,6 @@ public class PaymentCallbackController {
     private final MpesaOperationsService mpesaOperationsService;
     private final PullTransactionService pullTransactionService;
     private final StripeService stripeService;
-    private final ObjectMapper objectMapper = new ObjectMapper();
-
     @Value("${stripe.webhook-secret:}")
     private String stripeWebhookSecret;
 
@@ -419,46 +416,24 @@ public class PaymentCallbackController {
      * for brevity we trust the event body here; add verification in production.
      */
     @PostMapping("/paypal/webhook")
-    public ResponseEntity<ApiResponse<Void>> paypalWebhook(@RequestBody String payload) {
+    public ResponseEntity<Void> paypalWebhook(@RequestBody PaypalWebhookRequest payload) {
+        log.info("PayPal webhook received: type={}", payload.getEventType());
         try {
-            JsonNode event = objectMapper.readTree(payload);
-            String eventType = event.path("event_type").asText();
-            log.info("PayPal webhook received: type={}", eventType);
-
-            if ("CHECKOUT.ORDER.APPROVED".equals(eventType)) {
-                JsonNode resource = event.path("resource");
-                String orderId = resource.path("id").asText();
-
-                JsonNode unit = resource.path("purchase_units").get(0);
-                String referenceId = unit.path("reference_id").asText();
-                String amountStr   = unit.path("amount").path("value").asText("0");
-                String currency    = unit.path("amount").path("currency_code").asText("USD");
-
-                String userId = resolveUserIdFromReference(referenceId);
-
-                if (userId != null) {
-                    depositService.creditWalletFromPaypal(userId, new BigDecimal(amountStr), orderId, currency);
-                } else {
-                    log.warn("PayPal webhook: cannot resolve userId for orderId={}", orderId);
-                }
+            if ("CHECKOUT.ORDER.APPROVED".equals(payload.getEventType()) && payload.getResource() != null) {
+                depositService.confirmPaypalDeposit(payload.getResource().getId());
             }
-
-            return ResponseEntity.ok(ApiResponse.success("PayPal webhook processed"));
+            // Other event types (PAYMENT.CAPTURE.COMPLETED, etc.) intentionally
+            // ignored — capture is already triggered above or by the frontend
+            // confirm endpoint; confirmPaypalDeposit is idempotent either way.
         } catch (Exception e) {
-            log.error("PayPal webhook processing failed", e);
-            return ResponseEntity.ok(ApiResponse.error("PayPal webhook error: " + e.getMessage()));
+            // Always ACK 200 to PayPal regardless of internal outcome — same
+            // pattern as MpesaC2BController.confirm.
+            log.error("PayPal webhook processing error: {}", e.getMessage(), e);
         }
+        return ResponseEntity.ok().build();
     }
 
-    /**
-     * Looks up the userId from a pending transaction's reference field.
-     * Replace with a proper lookup against TransactionRepository if you inject it here,
-     * or store userId directly in PayPal's custom_id at order creation time (recommended).
-     */
-    private String resolveUserIdFromReference(String reference) {
-        log.warn("resolveUserIdFromReference: implement userId lookup by reference={}", reference);
-        return null;
-    }
+    
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 

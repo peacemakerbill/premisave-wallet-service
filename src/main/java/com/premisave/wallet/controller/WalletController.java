@@ -7,6 +7,9 @@ import com.premisave.wallet.service.WalletService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+
+import java.util.Map;
+
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -98,5 +101,25 @@ public class WalletController {
         String userId = (String) request.getAttribute("userId");
         if (userId == null) userId = auth.getName();
         return ResponseEntity.ok(ApiResponse.success("Wallet unfrozen", walletService.unfreezeWallet(userId)));
+    }
+    
+    /**
+     * Called by the frontend immediately after the user approves the PayPal
+     * order (PayPal redirects back with ?token={orderId}&PayerID=...). Captures
+     * the order and credits the wallet right away, rather than waiting on the
+     * webhook — the webhook (see PaymentCallbackController) is a safety-net
+     * backstop and is idempotent against this same call.
+     * POST /wallet/deposit/paypal/confirm
+     */
+    @PostMapping("/deposit/paypal/confirm")
+    public ResponseEntity<ApiResponse<PaymentResponse>> confirmPaypalDeposit(
+            @RequestBody Map<String, String> body,
+            Authentication auth) {
+        String orderId = body.get("orderId");
+        if (orderId == null || orderId.isBlank()) {
+            throw new IllegalArgumentException("orderId is required");
+        }
+        PaymentResponse response = depositService.confirmPaypalDeposit(orderId, auth.getName());
+        return ResponseEntity.ok(ApiResponse.success("PayPal deposit processed", response));
     }
 }
