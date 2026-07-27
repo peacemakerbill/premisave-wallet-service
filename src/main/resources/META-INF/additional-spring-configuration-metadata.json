@@ -194,6 +194,49 @@
       "description": "Publicly accessible HTTPS URL Safaricom POSTs completed C2B payment details to."
     },
     {
+      "name": "mpesa.daraja.express-checkout.receiver-shortcode",
+      "type": "java.lang.String",
+      "description": "M-Pesa till shortcode being paid via B2B Express Checkout (USSD Push to Till). No initiator/security-credential needed — authenticated via the normal OAuth bearer token.",
+      "defaultValue": "174379"
+    },
+    {
+      "name": "mpesa.daraja.express-checkout.partner-name",
+      "type": "java.lang.String",
+      "description": "Partner/organization name displayed to the merchant in the USSD PIN prompt during B2B Express Checkout.",
+      "defaultValue": "Premisave"
+    },
+    {
+      "name": "mpesa.daraja.express-checkout.callback-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom POSTs the B2B Express Checkout result to."
+    },
+    {
+      "name": "mpesa.daraja.account-top-up.initiator-name",
+      "type": "java.lang.String",
+      "description": "M-Pesa API operator username used to top up a B2C shortcode's utility account from the working/MMF account (CommandID BusinessPayToBulk)."
+    },
+    {
+      "name": "mpesa.daraja.account-top-up.initiator-password",
+      "type": "java.lang.String",
+      "description": "Plaintext M-Pesa API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService — never sent to Safaricom directly, and no separate security-credential property is needed."
+    },
+    {
+      "name": "mpesa.daraja.account-top-up.party-a",
+      "type": "java.lang.String",
+      "description": "M-Pesa B2C shortcode whose utility account is being topped up.",
+      "defaultValue": "600000"
+    },
+    {
+      "name": "mpesa.daraja.account-top-up.queue-timeout-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom calls if the Account Top Up request times out in the queue."
+    },
+    {
+      "name": "mpesa.daraja.account-top-up.result-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom POSTs the final Account Top Up result to."
+    },
+    {
       "name": "mpesa.daraja.transaction-status.initiator-name",
       "type": "java.lang.String",
       "description": "M-Pesa API operator username used to query the status of a prior transaction. Not yet wired to a service — reserved for automatic reconciliation of stuck B2C/B2B disbursements."
@@ -201,12 +244,7 @@
     {
       "name": "mpesa.daraja.transaction-status.initiator-password",
       "type": "java.lang.String",
-      "description": "Plaintext M-Pesa API operator password, used to derive the security-credential. Never sent to Safaricom directly."
-    },
-    {
-      "name": "mpesa.daraja.transaction-status.security-credential",
-      "type": "java.lang.String",
-      "description": "Base64 string of the initiator password encrypted with Safaricom's public X.509 certificate for the target environment."
+      "description": "Plaintext M-Pesa API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService — never sent to Safaricom directly, and no separate security-credential property is needed."
     },
     {
       "name": "mpesa.daraja.transaction-status.party-a",
@@ -231,40 +269,128 @@
       "description": "Publicly accessible HTTPS URL Safaricom POSTs the Transaction Status query result to."
     },
     {
-      "name": "mpesa.daraja.pull-transactions.initiator-name",
+      "name": "mpesa.daraja.account-balance.initiator-name",
       "type": "java.lang.String",
-      "description": "M-Pesa API operator username used for Account Balance / Pull Transactions API requests."
+      "description": "M-Pesa API operator username used to query Working (MMF), Utility, and Charges Paid account balances for our own shortcode."
     },
     {
-      "name": "mpesa.daraja.pull-transactions.initiator-password",
+      "name": "mpesa.daraja.account-balance.initiator-password",
       "type": "java.lang.String",
-      "description": "Plaintext M-Pesa API operator password, used to derive the security-credential. Never sent to Safaricom directly."
+      "description": "Plaintext M-Pesa API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService — never sent to Safaricom directly, and no separate security-credential property is needed."
     },
     {
-      "name": "mpesa.daraja.pull-transactions.security-credential",
+      "name": "mpesa.daraja.account-balance.party-a",
       "type": "java.lang.String",
-      "description": "Base64 string of the initiator password encrypted with Safaricom's public X.509 certificate for the target environment."
+      "description": "M-Pesa shortcode whose account balance is being queried.",
+      "defaultValue": "600000"
+    },
+    {
+      "name": "mpesa.daraja.account-balance.identifier-type",
+      "type": "java.lang.Integer",
+      "description": "Type of organization whose balance is being queried. 1 = MSISDN, 2 = Till Number, 4 = Shortcode.",
+      "defaultValue": 4
+    },
+    {
+      "name": "mpesa.daraja.account-balance.queue-timeout-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom calls if the Account Balance request times out in the queue."
+    },
+    {
+      "name": "mpesa.daraja.account-balance.result-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom POSTs the Account Balance query result to."
+    },
+    {
+      "name": "mpesa.daraja.reversal.initiator-name",
+      "type": "java.lang.String",
+      "description": "M-Pesa API operator username used to reverse a completed C2B transaction. Note: B2C payouts cannot be reversed via API — portal only."
+    },
+    {
+      "name": "mpesa.daraja.reversal.initiator-password",
+      "type": "java.lang.String",
+      "description": "Plaintext M-Pesa API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService — never sent to Safaricom directly, and no separate security-credential property is needed."
+    },
+    {
+      "name": "mpesa.daraja.reversal.receiver-party",
+      "type": "java.lang.String",
+      "description": "M-Pesa shortcode that will be debited to refund the customer in a reversal.",
+      "defaultValue": "600000"
+    },
+    {
+      "name": "mpesa.daraja.reversal.receiver-identifier-type",
+      "type": "java.lang.Integer",
+      "description": "Type of organization identified by receiver-party for a reversal. Must be 11 per Safaricom's spec.",
+      "defaultValue": 11
+    },
+    {
+      "name": "mpesa.daraja.reversal.queue-timeout-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom calls if the Reversal request times out in the queue."
+    },
+    {
+      "name": "mpesa.daraja.reversal.result-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom POSTs the final Reversal result to."
+    },
+    {
+      "name": "mpesa.daraja.b2-pochi.initiator-name",
+      "type": "java.lang.String",
+      "description": "M-Pesa API operator username used to pay directly into a customer's Pochi la Biashara business wallet. Requires a B2C shortcode capable of both receiving and disbursing."
+    },
+    {
+      "name": "mpesa.daraja.b2-pochi.initiator-password",
+      "type": "java.lang.String",
+      "description": "Plaintext M-Pesa API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService — never sent to Safaricom directly, and no separate security-credential property is needed."
+    },
+    {
+      "name": "mpesa.daraja.b2-pochi.party-a",
+      "type": "java.lang.String",
+      "description": "M-Pesa organization shortcode that money is disbursed from in B2Pochi transactions.",
+      "defaultValue": "600000"
+    },
+    {
+      "name": "mpesa.daraja.b2-pochi.queue-timeout-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom calls if the B2Pochi request times out in the queue."
+    },
+    {
+      "name": "mpesa.daraja.b2-pochi.result-url",
+      "type": "java.lang.String",
+      "description": "Publicly accessible HTTPS URL Safaricom POSTs the final B2Pochi transaction result to."
+    },
+    {
+      "name": "mpesa.daraja.b2-pochi.min-amount",
+      "type": "java.math.BigDecimal",
+      "description": "Minimum KES amount accepted for a single B2Pochi payment. Confirm actual tier limits with Safaricom for your shortcode.",
+      "defaultValue": 10
+    },
+    {
+      "name": "mpesa.daraja.b2-pochi.max-amount",
+      "type": "java.math.BigDecimal",
+      "description": "Maximum KES amount accepted for a single B2Pochi payment. Confirm actual tier limits with Safaricom for your shortcode.",
+      "defaultValue": 250000
     },
     {
       "name": "mpesa.daraja.pull-transactions.shortcode",
       "type": "java.lang.String",
-      "description": "M-Pesa organization shortcode whose account balance or transactions are being queried.",
-      "defaultValue": "600000"
+      "description": "M-Pesa organization shortcode whose C2B transactions are being pulled for reconciliation.",
+      "defaultValue": "174379"
     },
     {
-      "name": "mpesa.daraja.pull-transactions.register-url",
+      "name": "mpesa.daraja.pull-transactions.nominated-number",
       "type": "java.lang.String",
-      "description": "One-time registration URL submitted to Safaricom to enroll the shortcode for the Pull Transactions API."
+      "description": "The Safaricom MSISDN tied to this shortcode's KYC, found on the M-PESA portal — not something you choose arbitrarily. Required for the Pull Transactions API.",
+      "defaultValue": "254722000000"
     },
     {
       "name": "mpesa.daraja.pull-transactions.callback-url",
       "type": "java.lang.String",
-      "description": "Publicly accessible HTTPS URL Safaricom POSTs pulled transaction batches to."
+      "description": "Publicly accessible HTTPS URL Safaricom POSTs pulled transaction batches to. Unlike every other operational M-Pesa API above, Pull Transactions needs NO initiator name/password/SecurityCredential — just the OAuth bearer token, same as STK Push and C2B Register URL."
     },
     {
       "name": "mpesa.daraja.pull-transactions.pull-days",
       "type": "java.lang.Integer",
-      "description": "Number of days back from today to pull transactions for.",
+      "description": "Default lookback window (in days) when a query doesn't specify its own dates. Maximum of 2, since Safaricom only retains 48 hours of pullable transaction data.",
       "defaultValue": 1
     },
     {
@@ -340,6 +466,14 @@
     },
     {
       "name": "mpesa.daraja.transaction-status.identifier-type.values",
+      "values": [
+        {"value": 1, "description": "MSISDN (phone number)."},
+        {"value": 2, "description": "Till Number."},
+        {"value": 4, "description": "Organization Shortcode."}
+      ]
+    },
+    {
+      "name": "mpesa.daraja.account-balance.identifier-type.values",
       "values": [
         {"value": 1, "description": "MSISDN (phone number)."},
         {"value": 2, "description": "Till Number."},
