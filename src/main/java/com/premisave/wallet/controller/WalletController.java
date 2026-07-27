@@ -35,16 +35,13 @@ public class WalletController {
         return ResponseEntity.ok(ApiResponse.success("Balance retrieved", walletService.getBalance(email)));
     }
 
-    /**
-     * Creates wallet using userId from JWT claim (no placeholder needed).
-     */
     @PostMapping("/create")
     public ResponseEntity<ApiResponse<WalletResponse>> createWallet(
             Authentication auth,
             HttpServletRequest request) {
         String email  = auth.getName();
-        String userId = (String) request.getAttribute("userId"); // set by JwtAuthenticationFilter
-        if (userId == null) userId = email; // safe fallback if claim absent
+        String userId = (String) request.getAttribute("userId");
+        if (userId == null) userId = email;
         WalletResponse wallet = walletService.createWallet(userId, email);
         return ResponseEntity.ok(ApiResponse.success("Wallet created", wallet));
     }
@@ -73,9 +70,6 @@ public class WalletController {
         return ResponseEntity.ok(ApiResponse.success("Transfer successful", response));
     }
 
-    /**
-     * Get Wallet Statement with date range and summary
-     */
     @PostMapping("/statement")
     public ResponseEntity<ApiResponse<WalletStatementResponse>> getStatement(
             @Valid @RequestBody WalletStatementRequest request,
@@ -102,7 +96,7 @@ public class WalletController {
         if (userId == null) userId = auth.getName();
         return ResponseEntity.ok(ApiResponse.success("Wallet unfrozen", walletService.unfreezeWallet(userId)));
     }
-    
+
     /**
      * Called by the frontend immediately after the user approves the PayPal
      * order (PayPal redirects back with ?token={orderId}&PayerID=...). Captures
@@ -121,5 +115,31 @@ public class WalletController {
         }
         PaymentResponse response = depositService.confirmPaypalDeposit(orderId, auth.getName());
         return ResponseEntity.ok(ApiResponse.success("PayPal deposit processed", response));
+    }
+
+    /**
+     * Called by the frontend after Stripe.js confirms the PaymentIntent
+     * client-side (stripe.confirmCardPayment). Retrieves the PaymentIntent's
+     * real status directly from Stripe and credits the wallet immediately,
+     * rather than waiting on the webhook — essential for local/sandbox
+     * testing where webhook delivery isn't configured (no `stripe listen`
+     * forwarding running), and a safety-net backstop in production, same
+     * pattern as the PayPal confirm endpoint above. Idempotent against the
+     * webhook — whichever arrives first wins, the other is a no-op.
+     * POST /wallet/deposit/stripe/confirm
+     */
+    @PostMapping("/deposit/stripe/confirm")
+    public ResponseEntity<ApiResponse<PaymentResponse>> confirmStripeDeposit(
+            @RequestBody Map<String, String> body,
+            Authentication auth,
+            HttpServletRequest request) {
+        String paymentIntentId = body.get("paymentIntentId");
+        if (paymentIntentId == null || paymentIntentId.isBlank()) {
+            throw new IllegalArgumentException("paymentIntentId is required");
+        }
+        String userId = (String) request.getAttribute("userId");
+        if (userId == null) userId = auth.getName();
+        PaymentResponse response = depositService.confirmStripeDeposit(paymentIntentId, userId);
+        return ResponseEntity.ok(ApiResponse.success("Stripe deposit processed", response));
     }
 }
