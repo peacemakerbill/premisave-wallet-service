@@ -13,9 +13,9 @@ import com.premisave.wallet.exception.PaypalCaptureException;
 import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
+import com.stripe.model.PaymentIntent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,20 +29,15 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class DepositService {
 
-	private final WalletRepository walletRepository;
+    private final WalletRepository walletRepository;
     private final TransactionRepository transactionRepository;
     private final MpesaService mpesaService;
     private final StripeService stripeService;
     private final PaypalService paypalService;
     private final FxRateService fxRateService;
 
-    /**
-     * Static USD->KES rate used to convert PayPal deposits/payouts, since
-     * PayPal doesn't support KES as a transaction currency for Kenyan
-     * merchant accounts. See application.yml paypal.usd-to-kes-rate.
-     */
-    @Value("${paypal.usd-to-kes-rate:130}")
-    private BigDecimal paypalUsdToKesRate;
+    // No static PayPal rate here anymore — see initiatePaypalDeposit, which
+    // now fetches a live rate from Frankfurter (FxRateService) on every call.
 
     /**
      * Routes deposit initiation to the correct payment provider.
@@ -121,7 +116,7 @@ public class DepositService {
     private PaymentResponse initiateStripeDeposit(String userId, DepositRequest request,
                                                     Wallet wallet, String idempotencyKey) {
         String currency = request.getCurrency() != null ? request.getCurrency() : "kes";
-        String clientSecret = stripeService.createPaymentIntent(request.getAmount(), currency, idempotencyKey);
+        String clientSecret = stripeService.createPaymentIntent(request.getAmount(), currency, idempotencyKey, userId);
 
         log.info("Stripe PaymentIntent created: userId={}", userId);
 
@@ -130,6 +125,86 @@ public class DepositService {
 
         return new PaymentResponse(true, clientSecret,
                 "Stripe PaymentIntent created. Use the client_secret to confirm payment.");
+    }
+
+    /**
+     * Reconciles a Stripe deposit — called by the webhook (payment_intent.succeeded,
+     * see PaymentCallbackController.stripeWebhook) or by confirmStripeDeposit
+     * as a synchronous backstop. Matched back to the pending Transaction via
+     * `reference`, which is the same idempotencyKey stored as the
+     * PaymentIntent's `idempotency_key` metadata at initiation — same
+     * matching pattern as the M-Pesa STK and PayPal flows. Idempotent: an
+     * already-COMPLETED transaction is a no-op, so a webhook retry or a
+     * webhook/confirm-endpoint race both resolve safely without double-crediting.
+     */
+    @Transactional
+    public void creditWalletFromStripeCallback(String reference, BigDecimal amount,
+                                                String paymentIntentId, String currency) {
+        Transaction tx = transactionRepository.findByReference(reference).orElse(null);
+
+        if (tx == null) {
+            log.warn("Stripe reconciliation: no pending transaction found for reference={} (paymentIntentId={}) — " +
+                    "cannot credit; needs manual review", reference, paymentIntentId);
+            return;
+        }
+
+        if (tx.getStatus() == TransactionStatus.COMPLETED) {
+            log.info("Stripe deposit already processed for reference={} — skipping duplicate delivery", reference);
+            return;
+        }
+
+        Wallet wallet = walletRepository.findById(tx.getWalletId())
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + tx.getWalletId()));
+
+        wallet.setBalance(wallet.getBalance().add(amount));
+        walletRepository.save(wallet);
+
+        tx.setStatus(TransactionStatus.COMPLETED);
+        tx.setAmount(amount);
+        tx.setCurrency(resolveCurrency(currency));
+        tx.setProviderReference(paymentIntentId);
+        tx.setDescription("Stripe deposit (PaymentIntent " + paymentIntentId + ")");
+        transactionRepository.save(tx);
+
+        log.info("Wallet credited via Stripe: reference={} amount={} piId={}", reference, amount, paymentIntentId);
+    }
+
+    /**
+     * Frontend-triggered confirm — mirrors confirmPaypalDeposit. Retrieves the
+     * PaymentIntent directly from Stripe (no waiting on the webhook), verifies
+     * ownership, then reconciles via the same path the webhook uses.
+     * Essential for sandbox testing where webhook delivery isn't configured.
+     */
+    @Transactional
+    public PaymentResponse confirmStripeDeposit(String paymentIntentId, String callerUserId) {
+        PaymentIntent pi = stripeService.retrievePaymentIntent(paymentIntentId);
+
+        String reference = pi.getMetadata() != null ? pi.getMetadata().get("idempotency_key") : null;
+        if (reference == null) {
+            return new PaymentResponse(false, paymentIntentId,
+                    "This PaymentIntent has no idempotency_key metadata and cannot be reconciled.");
+        }
+
+        Transaction tx = transactionRepository.findByReference(reference)
+                .orElseThrow(() -> new IllegalStateException("No pending transaction found for Stripe reference=" + reference));
+
+        if (!tx.getUserId().equals(callerUserId)) {
+            throw new IllegalArgumentException("This Stripe payment does not belong to the authenticated user");
+        }
+
+        if (tx.getStatus() == TransactionStatus.COMPLETED) {
+            return new PaymentResponse(true, tx.getId(), "Deposit already completed");
+        }
+
+        if (!"succeeded".equals(pi.getStatus())) {
+            return new PaymentResponse(false, tx.getId(),
+                    "Payment has not completed yet (status: " + pi.getStatus() + ")");
+        }
+
+        BigDecimal amount = BigDecimal.valueOf(pi.getAmount()).divide(BigDecimal.valueOf(100));
+        creditWalletFromStripeCallback(reference, amount, paymentIntentId, pi.getCurrency());
+
+        return new PaymentResponse(true, tx.getId(), "Stripe deposit successful");
     }
 
     // ─── PayPal ──────────────────────────────────────────────────────────────
@@ -361,29 +436,6 @@ public class DepositService {
 
         log.info("Wallet credited via B2B Express Checkout: requestRefId={} amount={} receipt={}",
                 requestRefId, amount, transactionId);
-    }
-
-    @Transactional
-    public void creditWalletFromStripe(String userId, BigDecimal amount,
-                                        String paymentIntentId, String currency) {
-        Wallet wallet = walletRepository.findByUserId(userId)
-                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
-
-        wallet.setBalance(wallet.getBalance().add(amount));
-        walletRepository.save(wallet);
-
-        Transaction tx = new Transaction();
-        tx.setUserId(wallet.getUserId());
-        tx.setWalletId(wallet.getId());
-        tx.setType(TransactionType.DEPOSIT);
-        tx.setStatus(TransactionStatus.COMPLETED);
-        tx.setAmount(amount);
-        tx.setCurrency(resolveCurrency(currency));
-        tx.setDescription("Stripe deposit");
-        tx.setProviderReference(paymentIntentId);
-        transactionRepository.save(tx);
-
-        log.info("Wallet credited via Stripe: userId={} amount={} piId={}", userId, amount, paymentIntentId);
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────

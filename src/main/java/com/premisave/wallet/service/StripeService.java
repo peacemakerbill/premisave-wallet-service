@@ -29,12 +29,19 @@ public class StripeService {
      * Creates a Stripe PaymentIntent for wallet deposits.
      * Returns the client_secret the frontend uses to confirm with Stripe.js.
      *
+     * Metadata carries BOTH idempotency_key (used to match this PaymentIntent
+     * back to the pending Transaction created at initiation — see
+     * DepositService.creditWalletFromStripeCallback) and user_id (defensive
+     * cross-check / logging). The webhook's own reconciliation relies on
+     * idempotency_key, not user_id.
+     *
      * @param amountKes  amount in KES (or your currency)
      * @param currency   ISO 4217 lowercase, e.g. "kes"
      * @param idempotencyKey  your reference / idempotency key
+     * @param userId     the depositing user's id, stored as metadata
      * @return client_secret of the PaymentIntent
      */
-    public String createPaymentIntent(BigDecimal amountKes, String currency, String idempotencyKey) {
+    public String createPaymentIntent(BigDecimal amountKes, String currency, String idempotencyKey, String userId) {
         // Stripe amounts are in smallest currency unit (cents / fils).
         // KES uses cents (1 KES = 100 cents).
         long amountCents = amountKes.multiply(BigDecimal.valueOf(100)).longValue();
@@ -45,6 +52,7 @@ public class StripeService {
                     .setCurrency(currency.toLowerCase())
                     .setDescription("Premisave wallet deposit")
                     .putMetadata("idempotency_key", idempotencyKey)
+                    .putMetadata("user_id", userId)
                     .build();
 
             com.stripe.net.RequestOptions options = com.stripe.net.RequestOptions.builder()
@@ -57,6 +65,23 @@ public class StripeService {
         } catch (StripeException e) {
             log.error("Stripe PaymentIntent creation failed", e);
             throw new RuntimeException("Stripe deposit failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Retrieves the current state of a PaymentIntent directly from Stripe —
+     * used by the frontend-triggered confirm endpoint (see
+     * DepositService.confirmStripeDeposit) as a synchronous alternative/backstop
+     * to the webhook. Especially useful in sandbox: without `stripe listen
+     * --forward-to` (or ngrok) running, the webhook never fires locally, but
+     * this call works immediately since it's a direct API request, not a
+     * callback.
+     */
+    public PaymentIntent retrievePaymentIntent(String paymentIntentId) {
+        try {
+            return PaymentIntent.retrieve(paymentIntentId);
+        } catch (StripeException e) {
+            throw new RuntimeException("Failed to retrieve Stripe PaymentIntent " + paymentIntentId + ": " + e.getMessage(), e);
         }
     }
 

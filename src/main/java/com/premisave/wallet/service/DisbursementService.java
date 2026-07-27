@@ -26,7 +26,6 @@ import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,7 +41,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class DisbursementService {
 
-	private final WalletRepository walletRepository;
+    private final WalletRepository walletRepository;
     private final DisbursementRepository disbursementRepository;
     private final TransactionRepository transactionRepository;
     private final MpesaService mpesaService;
@@ -51,9 +50,9 @@ public class DisbursementService {
     private final IdempotencyService idempotencyService;
     private final UserProfileClient userProfileClient;
     private final FxRateService fxRateService;
-    
-    @Value("${paypal.usd-to-kes-rate:130}")
-    private BigDecimal paypalUsdToKesRate;
+
+    // No static PayPal rate here anymore — see disbursePaypal, which now
+    // fetches a live rate from Frankfurter (FxRateService) on every call.
 
     private static final java.util.regex.Pattern EMAIL_PATTERN =
             java.util.regex.Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
@@ -238,14 +237,6 @@ public class DisbursementService {
 
     // ─── B2C Account Top Up (admin/finance-initiated) ───────────────────────
 
-    /**
-     * Tops up a B2C shortcode's utility account from Premisave's working
-     * account (CommandID BusinessPayToBulk). Purely an internal float-management
-     * operation — no user wallet is debited or credited; the Disbursement
-     * record here exists only for audit/reconciliation visibility, same
-     * reasoning as B2B above.
-     * See https://developer.safaricom.co.ke/apis/B2CAccountTopUp
-     */
     @Transactional
     public DisbursementResponse processB2CTopUp(String initiatedByUserId, B2CTopUpRequest request) {
         idempotencyService.checkIdempotency(request.getReference());
@@ -278,18 +269,6 @@ public class DisbursementService {
 
     // ─── B2Pochi (pay into the caller's own Pochi business wallet) ──────────────
 
-    /**
-     * Disburses from our B2C shortcode straight into the caller's own Pochi la
-     * Biashara business wallet (CommandID BusinessPayToPochi), same pattern as
-     * B2C above: the phone number is always resolved from the caller's own
-     * verified profile, never taken from the request — eliminates
-     * typo/mistargeted-transfer errors. If the number doesn't support Pochi,
-     * Safaricom's synchronous rejection or async result callback marks the
-     * Disbursement FAILED — since no wallet is ever debited upfront for
-     * B2Pochi, there's nothing to refund and no path where money moves
-     * before the incompatibility is discovered.
-     * See https://developer.safaricom.co.ke/apis/BusinessToPochi
-     */
     @Transactional
     public DisbursementResponse processB2PochiPayment(String initiatedByUserId, B2PochiRequest request) {
         idempotencyService.checkIdempotency(request.getReference());
@@ -301,8 +280,6 @@ public class DisbursementService {
                 : "POCHI-" + phoneNumber + "-" + System.currentTimeMillis();
         String originatorConversationId = mpesaService.generateOriginatorConversationId("B2POCHI");
 
-        // Build a request carrying the resolved phone number for MpesaService,
-        // since B2PochiRequest.phoneNumber from the client is ignored.
         B2PochiRequest resolvedRequest = new B2PochiRequest();
         resolvedRequest.setAmount(request.getAmount());
         resolvedRequest.setPhoneNumber(phoneNumber);
@@ -335,16 +312,6 @@ public class DisbursementService {
 
     // ─── Reconciliation from Safaricom's ResultURL callback ─────────────────
 
-    /**
-     * Called by PaymentCallbackController when Safaricom's real B2C/B2B
-     * result arrives. This is the ONLY place a disbursement should be marked
-     * SUCCESS or given a completed Transaction record for M-Pesa payouts.
-     * Also used to reconcile B2C Account Top Ups (channel="B2C_TOPUP") and
-     * B2Pochi payments (channel="B2C_POCHI") — those intentionally never get
-     * a wallet Transaction since no user wallet is involved (same reasoning
-     * as B2B), and for B2Pochi specifically walletId is always null so the
-     * refund branch below correctly no-ops on failure (nothing was ever debited).
-     */
     @Transactional
     public void completeMpesaDisbursement(String conversationId, boolean success,
                                            String resultDesc, String mpesaTransactionId) {
@@ -364,9 +331,6 @@ public class DisbursementService {
             d.setStatus(DisbursementStatus.SUCCESS);
             disbursementRepository.save(d);
 
-            // Only user-initiated B2C payouts touch a Premisave wallet — B2B,
-            // B2C_TOPUP, and B2C_POCHI are all business/float operations with
-            // no corresponding user wallet Transaction.
             if ("B2C".equals(d.getChannel()) && d.getWalletId() != null) {
                 saveDisbursementTransaction(d.getUserId(), d.getWalletId(), d.getAmount(), d, d.getReference());
             }
@@ -386,11 +350,6 @@ public class DisbursementService {
         }
     }
 
-    /**
-     * Called on M-Pesa's timeout URL — Safaricom couldn't reach the result URL
-     * in time. Leaves the disbursement PENDING (money stays held); the sweeper
-     * below will flag it for manual reconciliation if it's still stuck later.
-     */
     public void markMpesaDisbursementTimedOut(String conversationId) {
         disbursementRepository.findByProviderReference(conversationId).ifPresentOrElse(d -> {
             log.warn("M-Pesa disbursement queue timeout: id={} conversationId={} — awaiting eventual result or manual reconciliation",
@@ -400,16 +359,6 @@ public class DisbursementService {
 
     // ─── Stuck-disbursement sweeper ──────────────────────────────────────────
 
-    /**
-     * Safety net: if Safaricom's ResultURL callback never arrives (network
-     * issue, misconfigured URL, etc.), a disbursement could stay PENDING
-     * forever with funds held. This doesn't auto-resolve it — resolving
-     * definitively can now be done via the Transaction Status API (see
-     * MpesaOperationsService.queryTransactionStatus, keyed by this
-     * disbursement's providerReference as OriginatorConversationID) — but
-     * this sweeper still surfaces anything stuck past 30 minutes so ops can
-     * check manually or trigger that query, instead of it going unnoticed.
-     */
     @Scheduled(fixedDelay = 15 * 60 * 1000) // every 15 minutes
     public void flagStuckDisbursements() {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(30);
@@ -456,18 +405,6 @@ public class DisbursementService {
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    /**
-     * Resolves the caller's own verified M-Pesa phone number from their
-     * auth-service profile (via UserProfileClient, JWT-forwarded), used by
-     * both processDisbursement (B2C) and processB2PochiPayment, rather than
-     * trusting a client-supplied phone number in either request. Runs on the
-     * same thread as the originating HTTP request, so the JWT-forwarding
-     * interceptor in UserProfileFeignConfig can pick up the caller's
-     * Authorization header. Throws PhoneNumberUnavailableException — caught
-     * by GlobalExceptionHandler and returned as 422 — if the profile can't be
-     * reached or has no phone number set, BEFORE any wallet balance is touched
-     * or Safaricom is called.
-     */
     private String resolveVerifiedPhoneNumber(String userId) {
         Map<String, Object> profile;
         try {
