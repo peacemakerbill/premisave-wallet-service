@@ -1,7 +1,6 @@
 package com.premisave.wallet.dto;
 
 import jakarta.validation.constraints.DecimalMin;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
@@ -16,11 +15,16 @@ public class DisbursementRequest {
 
     /**
      * Destination identifier:
-     *  - MPESA  → phone number (07xxxxxxxx or 254xxxxxxxx)
-     *  - PAYPAL → PayPal email address
-     *  - STRIPE → Stripe external account ID (ba_xxxx)
+     *  - MPESA  → IGNORED. The recipient phone number is always resolved
+     *             from the caller's own verified profile (see
+     *             DisbursementService.resolveVerifiedPhoneNumber) — never
+     *             taken from this field. Omit it entirely for MPESA requests.
+     *  - PAYPAL → PayPal email address (required)
+     *  - STRIPE → Stripe external account ID (ba_xxxx) (required)
+     *
+     * Not annotated @NotBlank here since it's genuinely optional for MPESA;
+     * DisbursementService enforces it manually for STRIPE/PAYPAL.
      */
-    @NotBlank
     private String destination;
 
     /**

@@ -1,7 +1,6 @@
 package com.premisave.wallet.dto;
 
 import jakarta.validation.constraints.DecimalMin;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
@@ -19,8 +18,13 @@ public class B2PochiRequest {
     @DecimalMin("10.00")
     private BigDecimal amount;
 
-    /** Recipient's M-Pesa MSISDN, e.g. 07xxxxxxxx or 254xxxxxxxx. */
-    @NotBlank
+    /**
+     * IGNORED — the recipient phone number is always resolved from the
+     * caller's own verified profile (see
+     * DisbursementService.resolveVerifiedPhoneNumber), same as B2C. Omit
+     * this field entirely; kept only so older clients that still send it
+     * don't fail deserialization.
+     */
     private String phoneNumber;
 
     private String remarks;

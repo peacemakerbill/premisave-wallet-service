@@ -1,5 +1,6 @@
 package com.premisave.wallet.service;
 
+import com.premisave.wallet.client.UserProfileClient;
 import com.premisave.wallet.dto.B2CTopUpRequest;
 import com.premisave.wallet.dto.B2PochiRequest;
 import com.premisave.wallet.dto.DisbursementRequest;
@@ -16,6 +17,7 @@ import com.premisave.wallet.enums.DisbursementStatus;
 import com.premisave.wallet.enums.TransactionStatus;
 import com.premisave.wallet.enums.TransactionType;
 import com.premisave.wallet.exception.InsufficientFundsException;
+import com.premisave.wallet.exception.PhoneNumberUnavailableException;
 import com.premisave.wallet.exception.WalletFrozenException;
 import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.DisbursementRepository;
@@ -23,6 +25,8 @@ import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -37,13 +42,21 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class DisbursementService {
 
-    private final WalletRepository walletRepository;
+	private final WalletRepository walletRepository;
     private final DisbursementRepository disbursementRepository;
     private final TransactionRepository transactionRepository;
     private final MpesaService mpesaService;
     private final StripeService stripeService;
     private final PaypalService paypalService;
     private final IdempotencyService idempotencyService;
+    private final UserProfileClient userProfileClient;
+    private final FxRateService fxRateService;
+    
+    @Value("${paypal.usd-to-kes-rate:130}")
+    private BigDecimal paypalUsdToKesRate;
+
+    private static final java.util.regex.Pattern EMAIL_PATTERN =
+            java.util.regex.Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
 
     // ─── User-facing disbursement (phone / PayPal / Stripe) ─────────────────
 
@@ -67,6 +80,24 @@ public class DisbursementService {
             throw new IllegalArgumentException("M-Pesa disbursements must be in KES");
         }
 
+        // Resolve the actual payout destination. MPESA always uses the caller's
+        // own verified profile phone number — request.getDestination() is ignored
+        // entirely and doesn't need to be sent. STRIPE/PAYPAL still require an
+        // explicit destination since there's no equivalent "profile" identifier
+        // for those providers on this platform.
+        String destination;
+        if ("MPESA".equals(provider)) {
+            destination = resolveVerifiedPhoneNumber(userId);
+        } else {
+            if (request.getDestination() == null || request.getDestination().isBlank()) {
+                throw new IllegalArgumentException("destination is required for " + provider + " disbursements");
+            }
+            if ("PAYPAL".equals(provider) && !EMAIL_PATTERN.matcher(request.getDestination()).matches()) {
+                throw new IllegalArgumentException("destination must be a valid email address for PayPal disbursements");
+            }
+            destination = request.getDestination();
+        }
+
         // Deduct upfront — refunded on outright rejection or async failure.
         wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
         walletRepository.save(wallet);
@@ -77,14 +108,14 @@ public class DisbursementService {
         disbursement.setUserId(userId);
         disbursement.setWalletId(wallet.getId());
         disbursement.setAmount(request.getAmount());
-        disbursement.setDestination(request.getDestination());
+        disbursement.setDestination(destination);
         disbursement.setProvider(provider);
         disbursement.setReference(reference);
         disbursement.setStatus(DisbursementStatus.PENDING);
 
         if ("MPESA".equals(provider)) {
             disbursement.setChannel("B2C");
-            var result = mpesaService.sendB2C(request.getDestination(), request.getAmount());
+            var result = mpesaService.sendB2C(destination, request.getAmount());
 
             if (!result.isSuccess()) {
                 // Rejected outright (bad params, amount out of range, etc.) — refund now.
@@ -245,29 +276,47 @@ public class DisbursementService {
         return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), result.getMessage());
     }
 
-    // ─── B2Pochi (admin/finance-initiated, pay into a customer's Pochi wallet) ──
+    // ─── B2Pochi (pay into the caller's own Pochi business wallet) ──────────────
 
     /**
-     * Disburses from our B2C shortcode straight into a customer's Pochi la
-     * Biashara business wallet (CommandID BusinessPayToPochi). Treated the
-     * same as B2B/B2C Top Up above — an admin/finance-triggered business
-     * operation against our own float, not a specific user's Premisave
-     * wallet, so no upfront wallet debit happens here.
+     * Disburses from our B2C shortcode straight into the caller's own Pochi la
+     * Biashara business wallet (CommandID BusinessPayToPochi), same pattern as
+     * B2C above: the phone number is always resolved from the caller's own
+     * verified profile, never taken from the request — eliminates
+     * typo/mistargeted-transfer errors. If the number doesn't support Pochi,
+     * Safaricom's synchronous rejection or async result callback marks the
+     * Disbursement FAILED — since no wallet is ever debited upfront for
+     * B2Pochi, there's nothing to refund and no path where money moves
+     * before the incompatibility is discovered.
      * See https://developer.safaricom.co.ke/apis/BusinessToPochi
      */
     @Transactional
     public DisbursementResponse processB2PochiPayment(String initiatedByUserId, B2PochiRequest request) {
         idempotencyService.checkIdempotency(request.getReference());
-        String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
+
+        String phoneNumber = resolveVerifiedPhoneNumber(initiatedByUserId);
+
+        String reference = request.getReference() != null
+                ? request.getReference()
+                : "POCHI-" + phoneNumber + "-" + System.currentTimeMillis();
         String originatorConversationId = mpesaService.generateOriginatorConversationId("B2POCHI");
 
-        MpesaAsyncResponse result = mpesaService.sendToPochi(request, originatorConversationId);
+        // Build a request carrying the resolved phone number for MpesaService,
+        // since B2PochiRequest.phoneNumber from the client is ignored.
+        B2PochiRequest resolvedRequest = new B2PochiRequest();
+        resolvedRequest.setAmount(request.getAmount());
+        resolvedRequest.setPhoneNumber(phoneNumber);
+        resolvedRequest.setRemarks(request.getRemarks());
+        resolvedRequest.setOccasion(request.getOccasion());
+        resolvedRequest.setReference(reference);
+
+        MpesaAsyncResponse result = mpesaService.sendToPochi(resolvedRequest, originatorConversationId);
 
         Disbursement disbursement = new Disbursement();
         disbursement.setUserId(initiatedByUserId);
         disbursement.setAmount(request.getAmount());
         disbursement.setCurrency(Currency.KES);
-        disbursement.setDestination(request.getPhoneNumber());
+        disbursement.setDestination(phoneNumber);
         disbursement.setProvider("MPESA");
         disbursement.setChannel("B2C_POCHI");
         disbursement.setReference(reference);
@@ -293,7 +342,8 @@ public class DisbursementService {
      * Also used to reconcile B2C Account Top Ups (channel="B2C_TOPUP") and
      * B2Pochi payments (channel="B2C_POCHI") — those intentionally never get
      * a wallet Transaction since no user wallet is involved (same reasoning
-     * as B2B).
+     * as B2B), and for B2Pochi specifically walletId is always null so the
+     * refund branch below correctly no-ops on failure (nothing was ever debited).
      */
     @Transactional
     public void completeMpesaDisbursement(String conversationId, boolean success,
@@ -386,15 +436,57 @@ public class DisbursementService {
 
     private ProviderResult disbursePaypal(DisbursementRequest request) {
         try {
-            String currency = request.getCurrency() != null ? request.getCurrency() : "USD";
-            String batchId = paypalService.processPayout(request.getDestination(), request.getAmount(), currency);
-            return new ProviderResult(true, "PayPal payout queued", batchId);
+            // request.getAmount() is in KES (already deducted from the wallet's
+            // KES balance by processDisbursement above). PayPal Payouts require
+            // USD — convert using a live Frankfurter rate fetched fresh for this
+            // payout. If Frankfurter is unreachable, this throws, is caught below,
+            // and the caller's existing failure path refunds the wallet — same
+            // as any other PayPal payout failure.
+            BigDecimal usdToKesRate = fxRateService.getRate("USD", "KES");
+            BigDecimal usdAmount = request.getAmount()
+                    .divide(usdToKesRate, 2, java.math.RoundingMode.HALF_UP);
+            String batchId = paypalService.processPayout(request.getDestination(), usdAmount, "USD");
+            log.info("PayPal payout: kesAmount={} usdAmount={} rate={} batchId={}",
+                    request.getAmount(), usdAmount, usdToKesRate, batchId);
+            return new ProviderResult(true, "PayPal payout initiated (USD " + usdAmount + ")", batchId);
         } catch (Exception e) {
             return new ProviderResult(false, e.getMessage(), null);
         }
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    /**
+     * Resolves the caller's own verified M-Pesa phone number from their
+     * auth-service profile (via UserProfileClient, JWT-forwarded), used by
+     * both processDisbursement (B2C) and processB2PochiPayment, rather than
+     * trusting a client-supplied phone number in either request. Runs on the
+     * same thread as the originating HTTP request, so the JWT-forwarding
+     * interceptor in UserProfileFeignConfig can pick up the caller's
+     * Authorization header. Throws PhoneNumberUnavailableException — caught
+     * by GlobalExceptionHandler and returned as 422 — if the profile can't be
+     * reached or has no phone number set, BEFORE any wallet balance is touched
+     * or Safaricom is called.
+     */
+    private String resolveVerifiedPhoneNumber(String userId) {
+        Map<String, Object> profile;
+        try {
+            profile = userProfileClient.getPublicProfile(userId);
+        } catch (Exception e) {
+            log.error("Failed to fetch profile for userId={} while resolving disbursement phone number", userId, e);
+            throw new PhoneNumberUnavailableException(
+                    "Could not verify your phone number right now — please try again shortly.");
+        }
+
+        Object phoneObj = profile != null ? profile.get("phoneNumber") : null;
+        String phone = phoneObj != null ? String.valueOf(phoneObj).trim() : null;
+
+        if (phone == null || phone.isBlank()) {
+            throw new PhoneNumberUnavailableException(
+                    "No phone number is set on your profile — please add one before requesting an M-Pesa disbursement.");
+        }
+        return phone;
+    }
 
     private void refund(Wallet wallet, BigDecimal amount) {
         wallet.setBalance(wallet.getBalance().add(amount));

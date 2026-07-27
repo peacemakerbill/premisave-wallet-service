@@ -222,6 +222,12 @@ paypal:
   client-id: ${PAYPAL_CLIENT_ID:your_paypal_client_id}
   client-secret: ${PAYPAL_CLIENT_SECRET:your_paypal_client_secret}
   environment: ${PAYPAL_ENV:sandbox}   # "sandbox" or "production"
+  # PayPal doesn't support KES as a transaction currency for most merchant
+  # accounts, including Kenya. All PayPal deposits/payouts are processed in
+  # USD, then converted to/from the wallet's KES balance using this static
+  # rate. This is a placeholder until a live FX integration is added —
+  # UPDATE PERIODICALLY, it does not track market rates.
+  usd-to-kes-rate: ${PAYPAL_USD_TO_KES_RATE:130}
 
 # Frontend URL for CORS
 frontend:

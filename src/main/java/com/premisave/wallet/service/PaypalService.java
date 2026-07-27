@@ -2,6 +2,7 @@ package com.premisave.wallet.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.premisave.wallet.exception.PaypalCaptureException;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,6 +18,10 @@ import java.util.UUID;
 /**
  * PayPal v2 Orders API (deposits) + Payouts API (disbursements).
  * Uses OkHttp directly — no heavyweight PayPal SDK.
+ *
+ * All amounts handled by this service are in USD (see DepositService and
+ * DisbursementService for the KES<->USD conversion applied around these
+ * calls, since PayPal doesn't support KES as a transaction currency).
  */
 @Slf4j
 @Service
@@ -61,8 +66,14 @@ public class PaypalService {
                 .build();
 
         try (Response response = http.newCall(request).execute()) {
-            JsonNode node = objectMapper.readTree(response.body().string());
-            return node.path("access_token").asText();
+            String responseBody = response.body().string();
+            JsonNode node = objectMapper.readTree(responseBody);
+            String token = node.path("access_token").asText();
+
+            if (!response.isSuccessful() || token.isBlank()) {
+                throw new RuntimeException("PayPal OAuth failed (" + response.code() + "): " + responseBody);
+            }
+            return token;
         } catch (Exception e) {
             throw new RuntimeException("Failed to get PayPal access token", e);
         }
@@ -71,13 +82,13 @@ public class PaypalService {
     // ─── Deposit (Orders API v2) ──────────────────────────────────────────────
 
     /**
-     * Creates a PayPal Order for wallet deposits.
+     * Creates a PayPal Order for wallet deposits, in USD.
      * Returns the "approve" link — redirect the user there to authorise payment.
      * After approval, call captureOrder() with the returned order_id.
      *
      * @return Map with "orderId" and "approveUrl"
      */
-    public Map<String, String> createOrder(BigDecimal amount, String currency, String idempotencyKey) {
+    public Map<String, String> createOrder(BigDecimal usdAmount, String currency, String idempotencyKey) {
         String token = getAccessToken();
 
         Map<String, Object> requestBody = Map.of(
@@ -86,7 +97,7 @@ public class PaypalService {
                         "reference_id", idempotencyKey,
                         "amount", Map.of(
                                 "currency_code", currency.toUpperCase(),
-                                "value", amount.toPlainString()
+                                "value", usdAmount.toPlainString()
                         ),
                         "description", "Premisave wallet deposit"
                 ))
@@ -104,7 +115,13 @@ public class PaypalService {
                     .build();
 
             try (Response response = http.newCall(request).execute()) {
-                JsonNode node = objectMapper.readTree(response.body().string());
+                String responseBody = response.body().string();
+                JsonNode node = objectMapper.readTree(responseBody);
+
+                if (!response.isSuccessful()) {
+                    throw new RuntimeException("PayPal createOrder failed (" + response.code() + "): " + responseBody);
+                }
+
                 String orderId = node.path("id").asText();
                 String approveUrl = "";
                 for (JsonNode link : node.path("links")) {
@@ -113,6 +130,11 @@ public class PaypalService {
                         break;
                     }
                 }
+
+                if (orderId.isBlank() || approveUrl.isBlank()) {
+                    throw new RuntimeException("PayPal createOrder response missing id/approve link: " + responseBody);
+                }
+
                 log.info("PayPal Order created: id={}", orderId);
                 return Map.of("orderId", orderId, "approveUrl", approveUrl);
             }
@@ -126,6 +148,9 @@ public class PaypalService {
      * Call this from your PayPal return/webhook handler.
      *
      * @return PayPal capture ID (use as providerReference)
+     * @throws PaypalCaptureException if PayPal rejects the capture — check
+     *         isAlreadyCaptured() to distinguish idempotent no-ops from
+     *         genuine failures.
      */
     public String captureOrder(String orderId) {
         String token = getAccessToken();
@@ -138,12 +163,28 @@ public class PaypalService {
                 .build();
 
         try (Response response = http.newCall(request).execute()) {
-            JsonNode node = objectMapper.readTree(response.body().string());
-            String captureId = node.path("purchase_units").get(0)
-                    .path("payments").path("captures").get(0)
-                    .path("id").asText();
+            String responseBody = response.body().string();
+            JsonNode node = objectMapper.readTree(responseBody);
+
+            if (!response.isSuccessful()) {
+                String issue = "";
+                JsonNode details = node.path("details");
+                if (details.isArray() && details.size() > 0) {
+                    issue = details.get(0).path("issue").asText("");
+                }
+                throw new PaypalCaptureException(orderId, issue, responseBody);
+            }
+
+            JsonNode captures = node.path("purchase_units").get(0).path("payments").path("captures");
+            if (captures == null || !captures.isArray() || captures.isEmpty()) {
+                throw new RuntimeException("PayPal capture response missing captures array: " + responseBody);
+            }
+
+            String captureId = captures.get(0).path("id").asText();
             log.info("PayPal Order captured: orderId={} captureId={}", orderId, captureId);
             return captureId;
+        } catch (PaypalCaptureException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("PayPal captureOrder failed: " + e.getMessage(), e);
         }
@@ -152,28 +193,28 @@ public class PaypalService {
     // ─── Disbursement (Payouts API) ───────────────────────────────────────────
 
     /**
-     * Sends money to a PayPal email address (Payouts API).
+     * Sends money to a PayPal email address (Payouts API), in USD.
      * Returns the Payout batch ID.
      */
-    public String processPayout(String recipientEmail, BigDecimal amount, String currency) {
+    public String processPayout(String recipientEmail, BigDecimal usdAmount, String currency) {
         String token = getAccessToken();
-        String batchId = UUID.randomUUID().toString();
+        String senderBatchId = UUID.randomUUID().toString();
 
         Map<String, Object> requestBody = Map.of(
                 "sender_batch_header", Map.of(
-                        "sender_batch_id", batchId,
+                        "sender_batch_id", senderBatchId,
                         "email_subject", "You have a payment from Premisave",
                         "email_message", "Your wallet disbursement has been processed."
                 ),
                 "items", List.of(Map.of(
                         "recipient_type", "EMAIL",
                         "amount", Map.of(
-                                "value", amount.toPlainString(),
+                                "value", usdAmount.toPlainString(),
                                 "currency", currency.toUpperCase()
                         ),
                         "receiver", recipientEmail,
                         "note", "Premisave wallet disbursement",
-                        "sender_item_id", batchId
+                        "sender_item_id", senderBatchId
                 ))
         );
 
@@ -188,8 +229,18 @@ public class PaypalService {
                     .build();
 
             try (Response response = http.newCall(request).execute()) {
-                JsonNode node = objectMapper.readTree(response.body().string());
+                String responseBody = response.body().string();
+                JsonNode node = objectMapper.readTree(responseBody);
+
+                if (!response.isSuccessful()) {
+                    throw new RuntimeException("PayPal payout failed (" + response.code() + "): " + responseBody);
+                }
+
                 String payoutBatchId = node.path("batch_header").path("payout_batch_id").asText();
+                if (payoutBatchId.isBlank()) {
+                    throw new RuntimeException("PayPal payout response missing payout_batch_id: " + responseBody);
+                }
+
                 log.info("PayPal Payout created: batchId={}", payoutBatchId);
                 return payoutBatchId;
             }
