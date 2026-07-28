@@ -35,13 +35,16 @@ public class WalletController {
         return ResponseEntity.ok(ApiResponse.success("Balance retrieved", walletService.getBalance(email)));
     }
 
+    /**
+     * Creates wallet using userId from JWT claim (no placeholder needed).
+     */
     @PostMapping("/create")
     public ResponseEntity<ApiResponse<WalletResponse>> createWallet(
             Authentication auth,
             HttpServletRequest request) {
         String email  = auth.getName();
-        String userId = (String) request.getAttribute("userId");
-        if (userId == null) userId = email;
+        String userId = (String) request.getAttribute("userId"); // set by JwtAuthenticationFilter
+        if (userId == null) userId = email; // safe fallback if claim absent
         WalletResponse wallet = walletService.createWallet(userId, email);
         return ResponseEntity.ok(ApiResponse.success("Wallet created", wallet));
     }
@@ -70,6 +73,9 @@ public class WalletController {
         return ResponseEntity.ok(ApiResponse.success("Transfer successful", response));
     }
 
+    /**
+     * Get Wallet Statement with date range and summary
+     */
     @PostMapping("/statement")
     public ResponseEntity<ApiResponse<WalletStatementResponse>> getStatement(
             @Valid @RequestBody WalletStatementRequest request,
@@ -95,6 +101,68 @@ public class WalletController {
         String userId = (String) request.getAttribute("userId");
         if (userId == null) userId = auth.getName();
         return ResponseEntity.ok(ApiResponse.success("Wallet unfrozen", walletService.unfreezeWallet(userId)));
+    }
+
+    /**
+     * Sets/updates the PayPal email PayPal disbursements are sent to.
+     * Resolved authoritatively from here by DisbursementService — never
+     * taken from a disbursement request itself, same reasoning as M-Pesa's
+     * verified-phone-number pattern (eliminates typo/mistargeted-payout risk).
+     * PUT /wallet/paypal-email
+     */
+    @PutMapping("/paypal-email")
+    public ResponseEntity<ApiResponse<WalletResponse>> updatePaypalEmail(
+            @Valid @RequestBody UpdatePaypalEmailRequest updateRequest,
+            Authentication auth,
+            HttpServletRequest request) {
+        String userId = (String) request.getAttribute("userId");
+        if (userId == null) userId = auth.getName();
+        WalletResponse response = walletService.updatePaypalEmail(userId, updateRequest.getPaypalEmail());
+        return ResponseEntity.ok(ApiResponse.success("PayPal email updated", response));
+    }
+
+    /**
+     * Starts a Stripe SetupIntent so the frontend can save a card (via
+     * Stripe.js/Elements) without making a payment — e.g. a "manage payment
+     * method" settings screen. Lazily creates a Stripe Customer for this
+     * wallet if one doesn't exist yet. Follow up with
+     * confirmStripeSetupIntent once Stripe.js confirms client-side.
+     * POST /wallet/stripe/setup-intent
+     */
+    @PostMapping("/stripe/setup-intent")
+    public ResponseEntity<ApiResponse<Map<String, String>>> createStripeSetupIntent(
+            Authentication auth,
+            HttpServletRequest request) {
+        String email = auth.getName();
+        String userId = (String) request.getAttribute("userId");
+        if (userId == null) userId = email;
+        Map<String, String> result = depositService.createStripeSetupIntent(userId, email);
+        return ResponseEntity.ok(ApiResponse.success("Setup intent created", result));
+    }
+
+    /**
+     * Called by the frontend after Stripe.js confirms the SetupIntent
+     * (stripe.confirmCardSetup). Verifies the setup intent belongs to this
+     * user's Stripe Customer, then saves the resulting card as the wallet's
+     * default payment method for one-click deposit reloads. The Stripe
+     * webhook's setup_intent.succeeded handler is a backstop for this same
+     * flow (see PaymentCallbackController), so this call is idempotent
+     * against it.
+     * POST /wallet/stripe/setup-intent/confirm
+     */
+    @PostMapping("/stripe/setup-intent/confirm")
+    public ResponseEntity<ApiResponse<Void>> confirmStripeSetupIntent(
+            @RequestBody Map<String, String> body,
+            Authentication auth,
+            HttpServletRequest request) {
+        String setupIntentId = body.get("setupIntentId");
+        if (setupIntentId == null || setupIntentId.isBlank()) {
+            throw new IllegalArgumentException("setupIntentId is required");
+        }
+        String userId = (String) request.getAttribute("userId");
+        if (userId == null) userId = auth.getName();
+        depositService.confirmStripeSetupIntent(setupIntentId, userId);
+        return ResponseEntity.ok(ApiResponse.success("Card saved"));
     }
 
     /**

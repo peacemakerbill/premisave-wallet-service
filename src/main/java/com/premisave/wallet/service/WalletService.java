@@ -185,6 +185,16 @@ public class WalletService {
         );
     }
 
+    @Transactional
+    public WalletResponse updatePaypalEmail(String userId, String paypalEmail) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
+        wallet.setPaypalEmail(paypalEmail);
+        wallet = walletRepository.save(wallet);
+        log.info("PayPal email updated for userId={}", userId);
+        return mapToResponse(wallet);
+    }
+
     private WalletResponse mapToResponse(Wallet wallet) {
         WalletResponse response = new WalletResponse();
         response.setId(wallet.getId());
@@ -193,6 +203,10 @@ public class WalletService {
         response.setBalance(wallet.getBalance());
         response.setCurrency(wallet.getCurrency());
         response.setFrozen(wallet.isFrozen());
+        response.setPaypalEmail(wallet.getPaypalEmail());
+        response.setHasSavedCard(wallet.getStripeDefaultPaymentMethodId() != null);
+        response.setCardBrand(wallet.getStripeCardBrand());
+        response.setCardLast4(wallet.getStripeCardLast4());
         return response;
     }
 }

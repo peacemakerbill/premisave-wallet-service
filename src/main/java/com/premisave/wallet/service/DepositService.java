@@ -14,6 +14,8 @@ import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import com.stripe.model.PaymentIntent;
+import com.stripe.model.PaymentMethod;
+import com.stripe.model.SetupIntent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -36,18 +38,6 @@ public class DepositService {
     private final PaypalService paypalService;
     private final FxRateService fxRateService;
 
-    // No static PayPal rate here anymore — see initiatePaypalDeposit, which
-    // now fetches a live rate from Frankfurter (FxRateService) on every call.
-
-    /**
-     * Routes deposit initiation to the correct payment provider.
-     *
-     * Response meanings by provider:
-     *  - MPESA      → reference = CheckoutRequestID (STK push sent to phone)
-     *  - MPESA_TILL → reference = our generated RequestRefID (USSD push sent to till)
-     *  - STRIPE     → reference = Stripe client_secret (frontend confirms with Stripe.js)
-     *  - PAYPAL     → reference = PayPal approveUrl (redirect user to PayPal)
-     */
     public PaymentResponse initiateDeposit(String userId, String userEmail, DepositRequest request) {
         Wallet wallet = walletRepository.findByUserId(userId)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found. Please create a wallet first."));
@@ -58,7 +48,7 @@ public class DepositService {
         return switch (provider) {
             case "MPESA" -> initiateMpesaDeposit(userId, request, wallet, idempotencyKey);
             case "MPESA_TILL" -> initiateExpressCheckoutDeposit(userId, request, wallet);
-            case "STRIPE" -> initiateStripeDeposit(userId, request, wallet, idempotencyKey);
+            case "STRIPE" -> initiateStripeDeposit(userId, userEmail, request, wallet, idempotencyKey);
             case "PAYPAL" -> initiatePaypalDeposit(userId, request, wallet, idempotencyKey);
             default -> new PaymentResponse(false, null, "Unsupported deposit provider: " + provider);
         };
@@ -113,33 +103,136 @@ public class DepositService {
 
     // ─── Stripe ──────────────────────────────────────────────────────────────
 
-    private PaymentResponse initiateStripeDeposit(String userId, DepositRequest request,
+    /**
+     * If the wallet already has a saved card (stripeDefaultPaymentMethodId),
+     * attempts an off-session charge immediately — no client_secret, no
+     * Stripe.js round trip, the deposit just completes. If no card is saved
+     * yet, returns a client_secret for a normal Stripe.js confirmation, and
+     * requests setup_future_usage so this deposit itself saves the card for
+     * next time. Ensures a Stripe Customer exists on the wallet first,
+     * creating one lazily if needed.
+     */
+    private PaymentResponse initiateStripeDeposit(String userId, String userEmail, DepositRequest request,
                                                     Wallet wallet, String idempotencyKey) {
         String currency = request.getCurrency() != null ? request.getCurrency() : "kes";
-        String clientSecret = stripeService.createPaymentIntent(request.getAmount(), currency, idempotencyKey, userId);
 
-        log.info("Stripe PaymentIntent created: userId={}", userId);
+        String customerId = wallet.getStripeCustomerId();
+        if (customerId == null) {
+            customerId = stripeService.createCustomer(userEmail, userId);
+            wallet.setStripeCustomerId(customerId);
+            walletRepository.save(wallet);
+        }
+
+        StripeService.StripePaymentIntentResult result = stripeService.createOrChargePaymentIntent(
+                customerId, wallet.getStripeDefaultPaymentMethodId(), request.getAmount(), currency, idempotencyKey, userId);
+
+        log.info("Stripe deposit attempt: userId={} piId={} status={} requiresAction={}",
+                userId, result.paymentIntentId(), result.status(), result.requiresAction());
 
         savePendingTransaction(userId, wallet.getId(), TransactionType.DEPOSIT,
                 request.getAmount(), Currency.KES, "Stripe deposit (pending payment confirmation)", idempotencyKey);
 
-        return new PaymentResponse(true, clientSecret,
+        if ("succeeded".equals(result.status())) {
+            // Off-session charge on the saved card went through immediately.
+            creditWalletFromStripeCallback(idempotencyKey, request.getAmount(), result.paymentIntentId(),
+                    currency, result.customerId(), result.paymentMethodId());
+            return new PaymentResponse(true, result.paymentIntentId(), "Deposit successful (charged saved card).");
+        }
+
+        return new PaymentResponse(true, result.clientSecret(),
                 "Stripe PaymentIntent created. Use the client_secret to confirm payment.");
     }
 
     /**
-     * Reconciles a Stripe deposit — called by the webhook (payment_intent.succeeded,
-     * see PaymentCallbackController.stripeWebhook) or by confirmStripeDeposit
-     * as a synchronous backstop. Matched back to the pending Transaction via
-     * `reference`, which is the same idempotencyKey stored as the
-     * PaymentIntent's `idempotency_key` metadata at initiation — same
-     * matching pattern as the M-Pesa STK and PayPal flows. Idempotent: an
-     * already-COMPLETED transaction is a no-op, so a webhook retry or a
-     * webhook/confirm-endpoint race both resolve safely without double-crediting.
+     * Starts a SetupIntent so the frontend can attach a card to this wallet's
+     * Stripe Customer via Stripe.js/Elements WITHOUT making a payment —
+     * useful for a "manage payment method" settings screen. Creates the
+     * Customer lazily if this wallet doesn't have one yet.
      */
     @Transactional
-    public void creditWalletFromStripeCallback(String reference, BigDecimal amount,
-                                                String paymentIntentId, String currency) {
+    public Map<String, String> createStripeSetupIntent(String userId, String email) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found. Please create a wallet first."));
+
+        String customerId = wallet.getStripeCustomerId();
+        if (customerId == null) {
+            customerId = stripeService.createCustomer(email, userId);
+            wallet.setStripeCustomerId(customerId);
+            walletRepository.save(wallet);
+        }
+
+        SetupIntent setupIntent = stripeService.createSetupIntent(customerId);
+        return Map.of("clientSecret", setupIntent.getClientSecret(), "setupIntentId", setupIntent.getId());
+    }
+
+    /**
+     * Called by the frontend after Stripe.js confirms the SetupIntent
+     * (stripe.confirmCardSetup). Verifies it belongs to this user's Stripe
+     * Customer, then saves the resulting PaymentMethod as the wallet's
+     * default for future one-click deposits, along with display-only
+     * brand/last4. The webhook handler below is a backstop for the same flow.
+     */
+    @Transactional
+    public void confirmStripeSetupIntent(String setupIntentId, String userId) {
+        SetupIntent setupIntent = stripeService.retrieveSetupIntent(setupIntentId);
+
+        if (!"succeeded".equals(setupIntent.getStatus())) {
+            throw new IllegalStateException("Card setup has not completed yet (status: " + setupIntent.getStatus() + ")");
+        }
+
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
+
+        if (!setupIntent.getCustomer().equals(wallet.getStripeCustomerId())) {
+            throw new IllegalArgumentException("This setup intent does not belong to the authenticated user");
+        }
+
+        attachSavedCard(wallet, setupIntent.getPaymentMethod());
+    }
+
+    /**
+     * Webhook backstop for setup_intent.succeeded — resolves the wallet by
+     * Stripe customerId rather than by an authenticated caller, same
+     * reasoning as the PayPal webhook having no ownership check.
+     */
+    @Transactional
+    public void attachSavedCardByCustomerId(String customerId, String paymentMethodId) {
+        walletRepository.findByStripeCustomerId(customerId).ifPresentOrElse(
+                wallet -> attachSavedCard(wallet, paymentMethodId),
+                () -> log.warn("setup_intent.succeeded webhook: no wallet found for Stripe customerId={}", customerId));
+    }
+
+    private void attachSavedCard(Wallet wallet, String paymentMethodId) {
+        if (paymentMethodId == null) return;
+
+        wallet.setStripeDefaultPaymentMethodId(paymentMethodId);
+        try {
+            PaymentMethod pm = stripeService.retrievePaymentMethod(paymentMethodId);
+            if (pm.getCard() != null) {
+                wallet.setStripeCardBrand(pm.getCard().getBrand());
+                wallet.setStripeCardLast4(pm.getCard().getLast4());
+            }
+        } catch (Exception e) {
+            // Non-fatal — the payment method is still usable even if we
+            // couldn't fetch display details for the UI.
+            log.warn("Saved card attached but failed to fetch display details: {}", e.getMessage());
+        }
+        walletRepository.save(wallet);
+        log.info("Stripe saved card attached: walletId={} paymentMethodId={}", wallet.getId(), paymentMethodId);
+    }
+
+    /**
+     * Reconciles a Stripe deposit — called synchronously from
+     * initiateStripeDeposit (off-session success), by the webhook
+     * (payment_intent.succeeded), or by confirmStripeDeposit. Matched back
+     * to the pending Transaction via `reference` (the idempotencyKey stored
+     * as PaymentIntent metadata at initiation). Idempotent: an
+     * already-COMPLETED transaction is a no-op. When a paymentMethodId is
+     * present, also keeps the wallet's saved-card fields in sync.
+     */
+    @Transactional
+    public void creditWalletFromStripeCallback(String reference, BigDecimal amount, String paymentIntentId,
+                                                String currency, String customerId, String paymentMethodId) {
         Transaction tx = transactionRepository.findByReference(reference).orElse(null);
 
         if (tx == null) {
@@ -157,6 +250,21 @@ public class DepositService {
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + tx.getWalletId()));
 
         wallet.setBalance(wallet.getBalance().add(amount));
+
+        if (paymentMethodId != null && !paymentMethodId.equals(wallet.getStripeDefaultPaymentMethodId())) {
+            wallet.setStripeDefaultPaymentMethodId(paymentMethodId);
+            if (customerId != null) wallet.setStripeCustomerId(customerId);
+            try {
+                PaymentMethod pm = stripeService.retrievePaymentMethod(paymentMethodId);
+                if (pm.getCard() != null) {
+                    wallet.setStripeCardBrand(pm.getCard().getBrand());
+                    wallet.setStripeCardLast4(pm.getCard().getLast4());
+                }
+            } catch (Exception e) {
+                log.warn("Deposit succeeded but failed to fetch card display details: {}", e.getMessage());
+            }
+        }
+
         walletRepository.save(wallet);
 
         tx.setStatus(TransactionStatus.COMPLETED);
@@ -170,10 +278,9 @@ public class DepositService {
     }
 
     /**
-     * Frontend-triggered confirm — mirrors confirmPaypalDeposit. Retrieves the
-     * PaymentIntent directly from Stripe (no waiting on the webhook), verifies
-     * ownership, then reconciles via the same path the webhook uses.
-     * Essential for sandbox testing where webhook delivery isn't configured.
+     * Frontend-triggered confirm — mirrors confirmPaypalDeposit. Retrieves
+     * the PaymentIntent directly from Stripe, verifies ownership, then
+     * reconciles via the same path the webhook uses.
      */
     @Transactional
     public PaymentResponse confirmStripeDeposit(String paymentIntentId, String callerUserId) {
@@ -202,24 +309,14 @@ public class DepositService {
         }
 
         BigDecimal amount = BigDecimal.valueOf(pi.getAmount()).divide(BigDecimal.valueOf(100));
-        creditWalletFromStripeCallback(reference, amount, paymentIntentId, pi.getCurrency());
+        creditWalletFromStripeCallback(reference, amount, paymentIntentId, pi.getCurrency(),
+                pi.getCustomer(), pi.getPaymentMethod());
 
         return new PaymentResponse(true, tx.getId(), "Stripe deposit successful");
     }
 
     // ─── PayPal ──────────────────────────────────────────────────────────────
 
-    /**
-     * PayPal doesn't support KES as a transaction currency for Kenyan
-     * merchant accounts, so the requested amount is always processed with
-     * PayPal in USD and converted to the wallet's KES balance using a live
-     * Frankfurter rate (see FxRateService), fetched fresh for every deposit —
-     * no caching, no static fallback. The rate is fetched BEFORE creating the
-     * PayPal order: if Frankfurter is unreachable, we abort here rather than
-     * leaving an orphaned PayPal order with no way to price it in KES.
-     * Currency is enforced to USD explicitly rather than silently
-     * reinterpreted, to avoid mis-crediting on a mismatched request.
-     */
     private PaymentResponse initiatePaypalDeposit(String userId, DepositRequest request,
                                                     Wallet wallet, String idempotencyKey) {
         String requestedCurrency = request.getCurrency() != null ? request.getCurrency().toUpperCase() : "USD";
@@ -228,9 +325,6 @@ public class DepositService {
         }
 
         BigDecimal usdAmount = request.getAmount();
-
-        // Fetch the live rate first — fail fast before touching PayPal at all
-        // if Frankfurter is down.
         BigDecimal usdToKesRate = fxRateService.getRate("USD", "KES");
 
         Map<String, String> result = paypalService.createOrder(usdAmount, "USD", idempotencyKey);
@@ -260,18 +354,6 @@ public class DepositService {
                         + "USD " + usdAmount + " will be credited as approximately KES " + kesEquivalent + ".");
     }
 
-    /**
-     * Reconciles a PayPal deposit — called by the frontend immediately after
-     * the user approves on PayPal (see WalletController.confirmPaypalDeposit),
-     * or by the PayPal webhook as a backstop if the frontend call never
-     * happens. Matched back to the pending Transaction via orderId (stored
-     * as `reference` at initiation), same pattern as the M-Pesa STK callback.
-     * Idempotent: an already-completed transaction, or PayPal reporting
-     * "already captured", both no-op safely rather than double-crediting.
-     *
-     * No ownership check — used by the webhook, which has no authenticated
-     * caller. See the overload below for the user-facing confirm endpoint.
-     */
     @Transactional
     public PaymentResponse confirmPaypalDeposit(String orderId) {
         Transaction tx = transactionRepository.findByReference(orderId)
@@ -280,12 +362,6 @@ public class DepositService {
         return confirmPaypalDepositInternal(tx, orderId);
     }
 
-    /**
-     * Same as above, but verifies the caller actually owns this PayPal order
-     * before capturing — used by the user-facing confirm endpoint so one
-     * authenticated user can't trigger a capture against another user's
-     * pending deposit.
-     */
     @Transactional
     public PaymentResponse confirmPaypalDeposit(String orderId, String callerUserId) {
         Transaction tx = transactionRepository.findByReference(orderId)
@@ -314,11 +390,6 @@ public class DepositService {
             captureId = paypalService.captureOrder(orderId);
         } catch (PaypalCaptureException e) {
             if (e.isAlreadyCaptured()) {
-                // PayPal says it's captured but our own record is still PENDING —
-                // an inconsistent state (e.g. webhook and frontend confirm raced,
-                // or a prior attempt crashed after PayPal-side capture but before
-                // our DB write). Log loudly for manual reconciliation rather than
-                // silently crediting twice or guessing which figure is correct.
                 log.error("PayPal reports orderId={} already captured but local transaction {} is still {} — " +
                         "manual reconciliation required", orderId, tx.getId(), tx.getStatus());
                 return new PaymentResponse(false, tx.getId(),

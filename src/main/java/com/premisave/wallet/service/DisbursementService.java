@@ -54,10 +54,10 @@ public class DisbursementService {
     // No static PayPal rate here anymore — see disbursePaypal, which now
     // fetches a live rate from Frankfurter (FxRateService) on every call.
 
-    private static final java.util.regex.Pattern EMAIL_PATTERN =
-            java.util.regex.Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
+//    private static final java.util.regex.Pattern EMAIL_PATTERN =
+//            java.util.regex.Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
 
-    // ─── User-facing disbursement (phone / PayPal / Stripe) ─────────────────
+ // ─── User-facing disbursement (phone / PayPal / Stripe) ─────────────────
 
     @Transactional
     public DisbursementResponse processDisbursement(String userId, DisbursementRequest request) {
@@ -72,32 +72,32 @@ public class DisbursementService {
 
         String provider = request.getProvider() != null ? request.getProvider().toUpperCase() : "MPESA";
 
-        // M-Pesa payouts are KES-only via Daraja — reject mismatched currency instead
-        // of silently sending the wrong amount.
         if ("MPESA".equals(provider) && request.getCurrency() != null
                 && !"KES".equalsIgnoreCase(request.getCurrency())) {
             throw new IllegalArgumentException("M-Pesa disbursements must be in KES");
         }
 
-        // Resolve the actual payout destination. MPESA always uses the caller's
-        // own verified profile phone number — request.getDestination() is ignored
-        // entirely and doesn't need to be sent. STRIPE/PAYPAL still require an
-        // explicit destination since there's no equivalent "profile" identifier
-        // for those providers on this platform.
+        // Resolve the actual payout destination — MPESA and PAYPAL both resolve
+        // from the wallet's own verified profile fields, never from the request,
+        // eliminating typo/mistargeted-payout risk for both. STRIPE still
+        // requires an explicit destination (Stripe Connect isn't wired up yet,
+        // so there's no per-user Stripe payout identity to resolve from).
         String destination;
         if ("MPESA".equals(provider)) {
             destination = resolveVerifiedPhoneNumber(userId);
+        } else if ("PAYPAL".equals(provider)) {
+            if (wallet.getPaypalEmail() == null || wallet.getPaypalEmail().isBlank()) {
+                throw new IllegalArgumentException(
+                        "No PayPal email is set on your wallet — add one via PUT /wallet/paypal-email before requesting a PayPal disbursement.");
+            }
+            destination = wallet.getPaypalEmail();
         } else {
             if (request.getDestination() == null || request.getDestination().isBlank()) {
                 throw new IllegalArgumentException("destination is required for " + provider + " disbursements");
             }
-            if ("PAYPAL".equals(provider) && !EMAIL_PATTERN.matcher(request.getDestination()).matches()) {
-                throw new IllegalArgumentException("destination must be a valid email address for PayPal disbursements");
-            }
             destination = request.getDestination();
         }
 
-        // Deduct upfront — refunded on outright rejection or async failure.
         wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
         walletRepository.save(wallet);
 
@@ -117,7 +117,6 @@ public class DisbursementService {
             var result = mpesaService.sendB2C(destination, request.getAmount());
 
             if (!result.isSuccess()) {
-                // Rejected outright (bad params, amount out of range, etc.) — refund now.
                 refund(wallet, request.getAmount());
                 disbursement.setStatus(DisbursementStatus.FAILED);
                 disbursement.setFailureReason(result.getMessage());
@@ -125,22 +124,15 @@ public class DisbursementService {
                 return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), result.getMessage());
             }
 
-            // Accepted for processing — stays PENDING. Do NOT record a completed
-            // transaction yet; that happens in completeMpesaDisbursement() once
-            // the real ResultURL callback arrives.
             disbursement.setProviderReference(result.getConversationId());
             disbursementRepository.save(disbursement);
             return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
                     "Disbursement queued with M-Pesa — awaiting confirmation");
         }
 
-        // Stripe/PayPal payout APIs here are treated as synchronous per the
-        // existing provider service methods. (Their real APIs are also async in
-        // production — same PENDING/callback pattern applies if/when those get
-        // wired to webhooks; out of scope for this pass.)
         ProviderResult result = switch (provider) {
             case "STRIPE" -> disburseStripe(request);
-            case "PAYPAL" -> disbursePaypal(request);
+            case "PAYPAL" -> disbursePaypal(request, destination);
             default -> new ProviderResult(false, "Unsupported provider: " + provider, null);
         };
 
@@ -371,7 +363,7 @@ public class DisbursementService {
         }
     }
 
-    // ─── Provider dispatch (Stripe/PayPal) ───────────────────────────────────
+ // ─── Provider dispatch (Stripe/PayPal) ───────────────────────────────────
 
     private ProviderResult disburseStripe(DisbursementRequest request) {
         try {
@@ -383,18 +375,12 @@ public class DisbursementService {
         }
     }
 
-    private ProviderResult disbursePaypal(DisbursementRequest request) {
+    private ProviderResult disbursePaypal(DisbursementRequest request, String destinationEmail) {
         try {
-            // request.getAmount() is in KES (already deducted from the wallet's
-            // KES balance by processDisbursement above). PayPal Payouts require
-            // USD — convert using a live Frankfurter rate fetched fresh for this
-            // payout. If Frankfurter is unreachable, this throws, is caught below,
-            // and the caller's existing failure path refunds the wallet — same
-            // as any other PayPal payout failure.
             BigDecimal usdToKesRate = fxRateService.getRate("USD", "KES");
             BigDecimal usdAmount = request.getAmount()
                     .divide(usdToKesRate, 2, java.math.RoundingMode.HALF_UP);
-            String batchId = paypalService.processPayout(request.getDestination(), usdAmount, "USD");
+            String batchId = paypalService.processPayout(destinationEmail, usdAmount, "USD");
             log.info("PayPal payout: kesAmount={} usdAmount={} rate={} batchId={}",
                     request.getAmount(), usdAmount, usdToKesRate, batchId);
             return new ProviderResult(true, "PayPal payout initiated (USD " + usdAmount + ")", batchId);

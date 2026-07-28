@@ -17,4 +17,14 @@ public class WalletResponse {
     private BigDecimal balance;
     private Currency currency;
     private boolean isFrozen;
+
+    /** Null if never set. */
+    private String paypalEmail;
+
+    /** True once a card is saved for one-click deposit reloads. */
+    private boolean hasSavedCard;
+
+    /** Display-only, null if hasSavedCard is false. Never expose raw Stripe IDs here. */
+    private String cardBrand;
+    private String cardLast4;
 }
