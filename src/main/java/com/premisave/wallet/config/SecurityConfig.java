@@ -50,8 +50,11 @@ public class SecurityConfig {
 
                 // ── 2. Public: payment provider callbacks ──────────────────
                 //    (no JWT — Safaricom/Stripe/PayPal servers; IP-secured at gateway)
+                //    NOTE: "/payments/stk-callback" deliberately has no "mpesa" in
+                //    it — Safaricom's sandbox rejects CallBackURLs containing that
+                //    word with 400.002.02 "Invalid CallBackURL".
                 .requestMatchers(
-                    "/payments/mpesa/callback",
+                    "/payments/stk-callback",
                     "/payments/mpesa/b2c/result",
                     "/payments/mpesa/b2c/timeout",
                     "/payments/mpesa/b2b/result",

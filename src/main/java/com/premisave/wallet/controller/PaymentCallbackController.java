@@ -30,6 +30,12 @@ import java.util.Map;
  * Transaction Status, Reversal, B2Pochi), Stripe, and PayPal.
  * All endpoints are PUBLIC (no JWT) — secured by signature verification
  * or IP allowlist at the gateway/firewall level.
+ *
+ * NOTE: the STK callback path below deliberately does NOT contain the
+ * substring "mpesa" — Safaricom's sandbox rejects CallBackURLs containing
+ * that word with "400.002.02 Bad Request - Invalid CallBackURL", even when
+ * the URL is otherwise valid and publicly reachable. Keep this path (and
+ * the corresponding mpesa.daraja.callback-url env value) free of "mpesa".
  */
 @Slf4j
 @RestController
@@ -57,7 +63,7 @@ public class PaymentCallbackController {
      * there is no account number or email in this payload, so the transaction is
      * matched back to a wallet via CheckoutRequestID (see DepositService).
      */
-    @PostMapping("/mpesa/callback")
+    @PostMapping("/stk-callback")
     public ResponseEntity<ApiResponse<Void>> handleMpesaCallback(@RequestBody MpesaStkCallbackRequest callback) {
         MpesaStkCallbackRequest.StkCallback stk = callback.getBody().getStkCallback();
         String checkoutRequestId = stk.getCheckoutRequestID();

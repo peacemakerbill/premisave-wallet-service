@@ -73,6 +73,12 @@ public class DepositService {
      * the wallet's saved M-Pesa number (see WalletService.updateMpesaPhoneNumber
      * / PUT /wallet/mpesa-phone) so repeat deposits don't require typing a
      * number every time.
+     *
+     * Only reports success and saves a pending transaction when Safaricom
+     * actually accepted the push (see MpesaService.StkPushResult) — a
+     * rejected push (bad CallBackURL, invalid shortcode, etc.) now surfaces
+     * as an honest failure instead of a fake "STK_PUSH_INITIATED" success
+     * that could never be reconciled by a real callback.
      */
     private PaymentResponse initiateMpesaDeposit(String userId, DepositRequest request,
                                                    Wallet wallet, String idempotencyKey) {
@@ -90,14 +96,24 @@ public class DepositService {
         stkRequest.setAmount(request.getAmount());
         stkRequest.setAccountReference("PREMISAVE-" + userId);
 
-        String checkoutId = mpesaService.initiateStkPush(stkRequest);
-        log.info("M-Pesa STK push: userId={} checkoutId={}", userId, checkoutId);
+        MpesaService.StkPushResult result = mpesaService.initiateStkPush(stkRequest);
+
+        if (!result.success()) {
+            log.warn("M-Pesa STK push rejected: userId={} reason={}", userId, result.errorMessage());
+            return new PaymentResponse(false, null, "M-Pesa STK push failed: " + result.errorMessage());
+        }
+
+        log.info("M-Pesa STK push: userId={} checkoutId={}", userId, result.checkoutRequestId());
 
         savePendingTransaction(userId, wallet.getId(), TransactionType.DEPOSIT,
-                request.getAmount(), Currency.KES, "M-Pesa deposit (pending STK confirmation)", checkoutId);
+                request.getAmount(), Currency.KES, "M-Pesa deposit (pending STK confirmation)",
+                result.checkoutRequestId());
 
-        return new PaymentResponse(true, checkoutId,
-                "M-Pesa STK push sent. Enter your PIN to complete the deposit.");
+        String message = (result.customerMessage() != null && !result.customerMessage().isBlank())
+                ? result.customerMessage()
+                : "M-Pesa STK push sent. Enter your PIN to complete the deposit.";
+
+        return new PaymentResponse(true, result.checkoutRequestId(), message);
     }
 
     // ─── M-Pesa B2B Express Checkout (USSD Push to Till) ────────────────────

@@ -98,7 +98,28 @@ public class MpesaService {
 
     // ─── STK Push (C2B — customer-initiated deposit) ────────────────────────
 
-    public String initiateStkPush(MpesaStkPushRequest req) {
+    /**
+     * Result of an STK Push initiation attempt.
+     *
+     * Safaricom uses TWO DIFFERENT response shapes here, and both are valid
+     * JSON, so parsing alone doesn't tell you which one you got:
+     *   - Rejection:  {"requestId": "...", "errorCode": "400.002.02", "errorMessage": "..."}
+     *   - Acceptance: {"MerchantRequestID": "...", "CheckoutRequestID": "...",
+     *                  "ResponseCode": "0", "ResponseDescription": "...",
+     *                  "CustomerMessage": "..."}
+     * success=false on either an HTTP/network failure OR a well-formed
+     * Safaricom rejection — callers must check this before treating the
+     * push as sent, rather than assuming a well-formed reply means success.
+     */
+    public record StkPushResult(
+            boolean success,
+            String checkoutRequestId,
+            String merchantRequestId,
+            String responseDescription,
+            String customerMessage,
+            String errorMessage) {}
+
+    public StkPushResult initiateStkPush(MpesaStkPushRequest req) {
         String token     = getAccessToken();
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         String password  = Base64.getEncoder().encodeToString(
@@ -123,11 +144,36 @@ public class MpesaService {
             String respBody = post(config.baseUrl() + "/mpesa/stkpush/v1/processrequest", token, body);
             log.info("STK Push response: {}", respBody);
             JsonNode node = objectMapper.readTree(respBody);
-            String checkoutId = node.path("CheckoutRequestID").asText();
-            return checkoutId.isBlank() ? "STK_PUSH_INITIATED" : checkoutId;
+
+            // ── Rejection shape: {requestId, errorCode, errorMessage} ──────
+            String errorCode = node.path("errorCode").asText(null);
+            if (errorCode != null && !errorCode.isBlank()) {
+                String errorMessage = node.path("errorMessage").asText("Unknown STK Push error");
+                log.warn("STK Push rejected by Safaricom: errorCode={} errorMessage={}", errorCode, errorMessage);
+                return new StkPushResult(false, null, null, null, null,
+                        errorCode + ": " + errorMessage);
+            }
+
+            // ── Acceptance shape ─────────────────────────────────────────
+            String checkoutId        = node.path("CheckoutRequestID").asText();
+            String merchantRequestId = node.path("MerchantRequestID").asText();
+            String responseCode      = node.path("ResponseCode").asText();
+            String responseDesc      = node.path("ResponseDescription").asText();
+            String customerMessage   = node.path("CustomerMessage").asText();
+
+            boolean accepted = "0".equals(responseCode) && !checkoutId.isBlank();
+            if (!accepted) {
+                log.warn("STK Push not accepted: responseCode={} responseDesc={} raw={}",
+                        responseCode, responseDesc, respBody);
+                return new StkPushResult(false, null, merchantRequestId, responseDesc, customerMessage,
+                        "Safaricom did not accept the STK push (ResponseCode=" + responseCode + "): " + responseDesc);
+            }
+
+            return new StkPushResult(true, checkoutId, merchantRequestId, responseDesc, customerMessage, null);
         } catch (Exception e) {
             log.error("STK Push failed", e);
-            throw new RuntimeException("M-Pesa STK Push failed: " + e.getMessage(), e);
+            return new StkPushResult(false, null, null, null, null,
+                    "M-Pesa STK Push failed: " + e.getMessage());
         }
     }
 
@@ -178,18 +224,6 @@ public class MpesaService {
 
     // ─── B2B (Business to Business — BusinessPayBill / BusinessBuyGoods / etc.) ──
 
-    /**
-     * Initiates a generic B2B payment via /mpesa/b2b/v1/paymentrequest.
-     * Covers BusinessPayBill (pay another paybill) and BusinessBuyGoods (pay
-     * a till/store number) — the request shape is identical for both per
-     * Safaricom's spec; only CommandID (and typically the identifier types)
-     * differ. Same async caveat as sendB2C — a "true" result here means
-     * Safaricom accepted the request, not that funds have moved.
-     * B2B is a permissioned API; confirm it's enabled for your shortcode.
-     *
-     * See https://developer.safaricom.co.ke/apis/BusinessBuyGoods for the
-     * BusinessBuyGoods variant specifically.
-     */
     public MpesaB2BResponse sendB2B(MpesaB2BRequest req) {
         MpesaConfig.B2b b2b = config.getB2b();
 
@@ -237,19 +271,6 @@ public class MpesaService {
 
     // ─── B2B Express Checkout (USSD Push to Till) ───────────────────────────
 
-    /**
-     * Triggers a USSD Push to a merchant's till, prompting them to pay one
-     * of our shortcodes (mpesa.daraja.express-checkout.receiver-shortcode)
-     * directly from their till. See
-     * https://developer.safaricom.co.ke/apis/B2BExpressCheckout
-     *
-     * Unlike the other B2B/B2C calls, Safaricom's acknowledgement here is
-     * just {"code":"0","status":"..."} — no ConversationID. The real outcome
-     * (success/cancelled/failed) arrives later via the express-checkout
-     * callback URL, keyed by the RequestRefID we generate and pass in here,
-     * since the callback body carries no account/email either
-     * (see DepositService.creditWalletFromExpressCheckout).
-     */
     public B2BExpressCheckoutResponse initiateExpressCheckout(String payerTillNumber, BigDecimal amount,
                                                                 String paymentRef, String requestRefId) {
         String token = getAccessToken();
@@ -283,17 +304,6 @@ public class MpesaService {
 
     // ─── B2C Account Top Up ──────────────────────────────────────────────────
 
-    /**
-     * Loads funds from Premisave's working/MMF account into a B2C
-     * shortcode's utility account via CommandID "BusinessPayToBulk", so
-     * disbursements don't run dry. See
-     * https://developer.safaricom.co.ke/apis/B2CAccountTopUp
-     *
-     * Reuses the /mpesa/b2b/v1/paymentrequest endpoint and the existing B2B
-     * result/timeout callbacks for reconciliation, keyed by ConversationID
-     * like every other B2B call — see DisbursementService.processB2CTopUp
-     * and completeMpesaDisbursement.
-     */
     public MpesaB2BResponse topUpB2CAccount(BigDecimal amount, String receivingShortcode,
                                               String requester, String accountReference, String remarks) {
         MpesaConfig.AccountTopUp topUp = config.getAccountTopUp();
@@ -340,13 +350,6 @@ public class MpesaService {
 
     // ─── Account Balance ─────────────────────────────────────────────────────
 
-    /**
-     * Queries the real-time balance (Working/MMF, Utility, Charges Paid,
-     * Organization Settlement accounts) for our own shortcode. Result
-     * arrives later via ResultURL as a pipe-delimited string per account —
-     * see MpesaOperationsService for parsing.
-     * See https://developer.safaricom.co.ke/apis/AccountBalance
-     */
     public MpesaAsyncResponse queryAccountBalance() {
         MpesaConfig.AccountBalance cfg = config.getAccountBalance();
         String token = getAccessToken();
@@ -375,12 +378,6 @@ public class MpesaService {
 
     // ─── Transaction Status ──────────────────────────────────────────────────
 
-    /**
-     * Secondary reconciliation mechanism for C2B/B2B/B2C/Reversal
-     * transactions when the original ResultURL callback never arrived.
-     * Requires either transactionId (M-Pesa receipt) or originatorConversationId.
-     * See https://developer.safaricom.co.ke/apis/TransactionStatus
-     */
     public MpesaAsyncResponse queryTransactionStatus(TransactionStatusRequest req) {
         boolean hasTxId = req.getTransactionId() != null && !req.getTransactionId().isBlank();
         boolean hasOcid = req.getOriginatorConversationId() != null && !req.getOriginatorConversationId().isBlank();
@@ -425,13 +422,6 @@ public class MpesaService {
 
     // ─── Reversal ─────────────────────────────────────────────────────────────
 
-    /**
-     * Reverses a completed C2B transaction — refunds the customer and debits
-     * our shortcode. Per Safaricom's spec, B2C payouts cannot be reversed via
-     * this API (portal only), so this should only ever be called against a
-     * C2B/STK deposit's M-Pesa receipt number.
-     * See https://developer.safaricom.co.ke/apis/Reversal
-     */
     public MpesaAsyncResponse initiateReversal(MpesaReversalRequest req) {
         MpesaConfig.Reversal cfg = config.getReversal();
         String token = getAccessToken();
@@ -463,14 +453,6 @@ public class MpesaService {
 
     // ─── B2Pochi (Business to Pochi la Biashara) ────────────────────────────
 
-    /**
-     * Pays directly into a customer's Pochi la Biashara business wallet
-     * (CommandID BusinessPayToPochi) rather than their main M-Pesa balance.
-     * Requires our own OriginatorConversationID up front (Safaricom uses it
-     * to prevent double-disbursement) — we generate one and store it
-     * alongside the returned ConversationID for reconciliation.
-     * See https://developer.safaricom.co.ke/apis/BusinessToPochi
-     */
     public MpesaAsyncResponse sendToPochi(B2PochiRequest req, String originatorConversationId) {
         MpesaConfig.B2Pochi cfg = config.getB2Pochi();
 
@@ -512,13 +494,6 @@ public class MpesaService {
 
     // ─── Pull Transactions (C2B reconciliation) ─────────────────────────────
 
-    /**
-     * One-time registration of our shortcode for the Pull Transactions API.
-     * Unlike B2C/B2B/Reversal/Balance/TransactionStatus, this needs no
-     * initiator/SecurityCredential — just the OAuth bearer token, same as
-     * STK Push and C2B Register URL.
-     * See https://developer.safaricom.co.ke/apis/PullTransaction
-     */
     public PullTransactionResponse registerPullTransactions() {
         MpesaConfig.PullTransactions cfg = config.getPullTransactions();
         String token = getAccessToken();
@@ -549,21 +524,6 @@ public class MpesaService {
         }
     }
 
-    /**
-     * Queries all C2B transactions on our shortcode within the given window
-     * (Safaricom retains up to 48 hours). Returns the raw list of records —
-     * reconciliation against our own Transaction records happens in
-     * PullTransactionService, not here.
-     *
-     * NOTE on HTTP method: Safaricom's docs state "Method is ... GET for
-     * Pull transaction" but the documented request is a JSON body, which
-     * standard HTTP GET can't carry (OkHttp explicitly rejects a body on
-     * GET). Every working implementation of this endpoint we could verify
-     * sends it as POST, same as Register Pull, so that's what's implemented
-     * here. If your sandbox testing shows Safaricom rejects POST for this
-     * specific endpoint, switch the method below — the request/response
-     * shape stays the same either way.
-     */
     public PullTransactionResponse queryPullTransactions(LocalDateTime startDate, LocalDateTime endDate, int offsetValue) {
         MpesaConfig.PullTransactions cfg = config.getPullTransactions();
         String token = getAccessToken();
@@ -586,11 +546,6 @@ public class MpesaService {
         }
     }
 
-    /**
-     * Shared parser for the Query Pull Transaction response — also reusable
-     * for whatever Safaricom posts to our CallBackURL, since the per-record
-     * field shape should be the same (see PullTransactionService).
-     */
     public PullTransactionResponse parsePullTransactionsResponse(String respBody) throws Exception {
         JsonNode node = objectMapper.readTree(respBody);
 
@@ -617,14 +572,6 @@ public class MpesaService {
 
     // ─── B2B Hakikisha (Query Org Info) ─────────────────────────────────────
 
-    /**
-     * Looks up the registered name and charge/tariff profile for a given
-     * shortcode/till — meant to be called before a B2B payment so the
-     * recipient can be confirmed and fees estimated up front. Synchronous:
-     * unlike every other operational API here, the answer comes back in the
-     * HTTP response itself, no ResultURL involved.
-     * See https://developer.safaricom.co.ke/apis/QueryOrgInfo
-     */
     public QueryOrgInfoResponse queryOrgInfo(QueryOrgInfoRequest req) {
         String queryUrl = config.queryOrgInfoUrl();
         String token = getAccessToken();
@@ -664,11 +611,6 @@ public class MpesaService {
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    /**
-     * Shared parser for the four "operational" APIs above — all return the
-     * same {ResponseCode, ResponseDescription, ConversationID,
-     * OriginatorConversationID} acknowledgement shape.
-     */
     private MpesaAsyncResponse parseAsyncAck(String respBody, String apiName) throws Exception {
         JsonNode node = objectMapper.readTree(respBody);
         boolean accepted = "0".equals(node.path("ResponseCode").asText("1"));
