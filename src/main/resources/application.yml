@@ -57,12 +57,12 @@ rate-limit:
 # ─── M-Pesa Daraja ────────────────────────────────────────────────────────────
 mpesa:
   daraja:
-    consumer-key: ${MPESA_CONSUMER_KEY:your_consumer_key}
-    consumer-secret: ${MPESA_CONSUMER_SECRET:your_consumer_secret}
-    shortcode: ${MPESA_SHORTCODE:174379}
-    passkey: ${MPESA_PASSKEY:your_passkey}
+    consumer-key: ${MPESA_CONSUMER_KEY}
+    consumer-secret: ${MPESA_CONSUMER_SECRET}
+    shortcode: ${MPESA_SHORTCODE}
+    passkey: ${MPESA_PASSKEY}
     # STK push callback — must be HTTPS and publicly reachable (use ngrok locally)
-    callback-url: ${MPESA_CALLBACK_URL:https://your-domain.com/payments/mpesa/callback}
+    callback-url: ${MPESA_CALLBACK_URL}
     environment: ${MPESA_ENV:sandbox}
 
     # Safaricom's public certificate, used to RSA-encrypt initiator passwords
@@ -74,14 +74,14 @@ mpesa:
 
     # ── B2C (Business to Customer — disbursements/payouts to a phone number) ──
     b2c:
-      initiator-name: ${MPESA_B2C_INITIATOR_NAME:your_initiator_name}
+      initiator-name: ${MPESA_B2C_INITIATOR_NAME}
       # Plaintext initiator password — encrypted at runtime via certificate-path,
       # never sent to Safaricom in this form. Set MPESA_B2C_INITIATOR_PASSWORD in production.
-      initiator-password: ${MPESA_B2C_INITIATOR_PASSWORD:your_initiator_password}
-      shortcode: ${MPESA_B2C_SHORTCODE:600000}
-      command-id: ${MPESA_B2C_COMMAND_ID:BusinessPayment}   # SalaryPayment | BusinessPayment | PromotionPayment
-      queue-timeout-url: ${MPESA_B2C_TIMEOUT_URL:https://your-domain.com/payments/mpesa/b2c/timeout}
-      result-url: ${MPESA_B2C_RESULT_URL:https://your-domain.com/payments/mpesa/b2c/result}
+      initiator-password: ${MPESA_B2C_INITIATOR_PASSWORD}
+      shortcode: ${MPESA_B2C_SHORTCODE}
+      command-id: ${MPESA_B2C_COMMAND_ID}   # SalaryPayment | BusinessPayment | PromotionPayment
+      queue-timeout-url: ${MPESA_B2C_TIMEOUT_URL}
+      result-url: ${MPESA_B2C_RESULT_URL}
       # Confirm actual tier limits with Safaricom for your shortcode.
       min-amount: 10
       max-amount: 150000
@@ -92,24 +92,24 @@ mpesa:
     # relying on this in production. commandId here defaults BusinessPayBill /
     # BusinessBuyGoods / etc. calls that don't specify their own commandId.
     b2b:
-      initiator-name: ${MPESA_B2B_INITIATOR_NAME:your_initiator_name}
-      initiator-password: ${MPESA_B2B_INITIATOR_PASSWORD:your_initiator_password}
-      shortcode: ${MPESA_B2B_SHORTCODE:600000}
-      receiver-shortcode: ${MPESA_B2B_RECEIVER_SHORTCODE:600001}
+      initiator-name: ${MPESA_B2B_INITIATOR_NAME}
+      initiator-password: ${MPESA_B2B_INITIATOR_PASSWORD}
+      shortcode: ${MPESA_B2B_SHORTCODE}
+      receiver-shortcode: ${MPESA_B2B_RECEIVER_SHORTCODE}
       command-id: ${MPESA_B2B_COMMAND_ID:BusinessPayBill}   # BusinessPayBill | BusinessBuyGoods | MerchantToMerchantTransfer | ...
       sender-identifier-type: ${MPESA_B2B_SENDER_IDENTIFIER_TYPE:4}
       receiver-identifier-type: ${MPESA_B2B_RECEIVER_IDENTIFIER_TYPE:4}
-      queue-timeout-url: ${MPESA_B2B_TIMEOUT_URL:https://your-domain.com/payments/mpesa/b2b/timeout}
-      result-url: ${MPESA_B2B_RESULT_URL:https://your-domain.com/payments/mpesa/b2b/result}
+      queue-timeout-url: ${MPESA_B2B_TIMEOUT_URL}
+      result-url: ${MPESA_B2B_RESULT_URL}
       min-amount: 10
       max-amount: 150000
 
     # ── C2B (Customer to Business — Register URL, Validation & Confirmation) ──
     c2b:
-      shortcode: ${MPESA_C2B_SHORTCODE:174379}
-      response-type: ${MPESA_C2B_RESPONSE_TYPE:Completed}   # Completed | Cancelled
-      validation-url: ${MPESA_C2B_VALIDATION_URL:https://your-domain.com/payments/mpesa/c2b/validation}
-      confirmation-url: ${MPESA_C2B_CONFIRMATION_URL:https://your-domain.com/payments/mpesa/c2b/confirmation}
+      shortcode: ${MPESA_C2B_SHORTCODE}
+      response-type: ${MPESA_C2B_RESPONSE_TYPE}   # Completed | Cancelled
+      validation-url: ${MPESA_C2B_VALIDATION_URL}
+      confirmation-url: ${MPESA_C2B_CONFIRMATION_URL}
 
     # ── B2B Express Checkout (USSD Push to Till) ──
     # Prompts a merchant to pay one of our shortcodes directly from their own
@@ -117,9 +117,9 @@ mpesa:
     # No initiator/security credential needed — auth is via the normal OAuth
     # bearer token. See https://developer.safaricom.co.ke/apis/B2BExpressCheckout
     express-checkout:
-      receiver-shortcode: ${MPESA_EXPRESS_CHECKOUT_RECEIVER_SHORTCODE:174379}
+      receiver-shortcode: ${MPESA_EXPRESS_CHECKOUT_RECEIVER_SHORTCODE}
       partner-name: ${MPESA_EXPRESS_CHECKOUT_PARTNER_NAME:Premisave}
-      callback-url: ${MPESA_EXPRESS_CHECKOUT_CALLBACK_URL:https://your-domain.com/payments/mpesa/b2b/express-checkout/result}
+      callback-url: ${MPESA_EXPRESS_CHECKOUT_CALLBACK_URL}
 
     # ── B2C Account Top Up (CommandID BusinessPayToBulk) ──
     # Loads funds from our working/MMF account into a B2C shortcode's utility
@@ -128,47 +128,47 @@ mpesa:
     # product with its own initiator credentials.
     # See https://developer.safaricom.co.ke/apis/B2CAccountTopUp
     account-top-up:
-      initiator-name: ${MPESA_TOPUP_INITIATOR_NAME:your_initiator_name}
-      initiator-password: ${MPESA_TOPUP_INITIATOR_PASSWORD:your_initiator_password}
-      party-a: ${MPESA_TOPUP_PARTY_A:600000}
-      queue-timeout-url: ${MPESA_TOPUP_TIMEOUT_URL:https://your-domain.com/payments/mpesa/b2b/timeout}
-      result-url: ${MPESA_TOPUP_RESULT_URL:https://your-domain.com/payments/mpesa/b2b/result}
+      initiator-name: ${MPESA_TOPUP_INITIATOR_NAME}
+      initiator-password: ${MPESA_TOPUP_INITIATOR_PASSWORD}
+      party-a: ${MPESA_TOPUP_PARTY_A}
+      queue-timeout-url: ${MPESA_TOPUP_TIMEOUT_URL}
+      result-url: ${MPESA_TOPUP_RESULT_URL}
 
     # ── Transaction Status API ──
     # Secondary reconciliation mechanism for C2B/B2B/B2C/Reversal transactions
     # whose ResultURL callback never arrived. See MpesaOperationsService.
     # https://developer.safaricom.co.ke/apis/TransactionStatus
     transaction-status:
-      initiator-name: ${MPESA_STATUS_INITIATOR_NAME:your_initiator_name}
-      initiator-password: ${MPESA_STATUS_INITIATOR_PASSWORD:your_initiator_password}
-      party-a: ${MPESA_STATUS_PARTY_A:600000}
+      initiator-name: ${MPESA_STATUS_INITIATOR_NAME}
+      initiator-password: ${MPESA_STATUS_INITIATOR_PASSWORD}
+      party-a: ${MPESA_STATUS_PARTY_A}
       identifier-type: ${MPESA_STATUS_IDENTIFIER_TYPE:4}   # 1=MSISDN, 2=Till, 4=Shortcode
-      queue-timeout-url: ${MPESA_STATUS_TIMEOUT_URL:https://your-domain.com/payments/mpesa/transactionstatus/timeout}
-      result-url: ${MPESA_STATUS_RESULT_URL:https://your-domain.com/payments/mpesa/transactionstatus/result}
+      queue-timeout-url: ${MPESA_STATUS_TIMEOUT_URL}
+      result-url: ${MPESA_STATUS_RESULT_URL}
 
     # ── Account Balance API ──
     # Real-time balance inquiry across Working (MMF), Utility, and Charges
     # Paid accounts for our own shortcode. See MpesaOperationsService.
     # https://developer.safaricom.co.ke/apis/AccountBalance
     account-balance:
-      initiator-name: ${MPESA_BALANCE_INITIATOR_NAME:your_initiator_name}
-      initiator-password: ${MPESA_BALANCE_INITIATOR_PASSWORD:your_initiator_password}
-      party-a: ${MPESA_BALANCE_PARTY_A:600000}
+      initiator-name: ${MPESA_BALANCE_INITIATOR_NAME}
+      initiator-password: ${MPESA_BALANCE_INITIATOR_PASSWORD}
+      party-a: ${MPESA_BALANCE_PARTY_A}
       identifier-type: ${MPESA_BALANCE_IDENTIFIER_TYPE:4}
-      queue-timeout-url: ${MPESA_BALANCE_TIMEOUT_URL:https://your-domain.com/payments/mpesa/balance/timeout}
-      result-url: ${MPESA_BALANCE_RESULT_URL:https://your-domain.com/payments/mpesa/balance/result}
+      queue-timeout-url: ${MPESA_BALANCE_TIMEOUT_URL}
+      result-url: ${MPESA_BALANCE_RESULT_URL}
 
     # ── Reversal API ──
     # Reverses a completed C2B transaction (refunds the customer, debits our
     # shortcode). NOTE: B2C payouts cannot be reversed via API — portal only.
     # https://developer.safaricom.co.ke/apis/Reversal
     reversal:
-      initiator-name: ${MPESA_REVERSAL_INITIATOR_NAME:your_initiator_name}
-      initiator-password: ${MPESA_REVERSAL_INITIATOR_PASSWORD:your_initiator_password}
-      receiver-party: ${MPESA_REVERSAL_RECEIVER_PARTY:600000}
+      initiator-name: ${MPESA_REVERSAL_INITIATOR_NAME}
+      initiator-password: ${MPESA_REVERSAL_INITIATOR_PASSWORD}
+      receiver-party: ${MPESA_REVERSAL_RECEIVER_PARTY}
       receiver-identifier-type: ${MPESA_REVERSAL_RECEIVER_IDENTIFIER_TYPE:11}   # Must be 11 per Safaricom's spec
-      queue-timeout-url: ${MPESA_REVERSAL_TIMEOUT_URL:https://your-domain.com/payments/mpesa/reversal/timeout}
-      result-url: ${MPESA_REVERSAL_RESULT_URL:https://your-domain.com/payments/mpesa/reversal/result}
+      queue-timeout-url: ${MPESA_REVERSAL_TIMEOUT_URL}
+      result-url: ${MPESA_REVERSAL_RESULT_URL}
 
     # ── B2Pochi (Business to Pochi la Biashara) ──
     # Pays directly into a customer's Pochi business wallet instead of their
@@ -176,11 +176,11 @@ mpesa:
     # of both receiving and disbursing.
     # https://developer.safaricom.co.ke/apis/BusinessToPochi
     b2-pochi:
-      initiator-name: ${MPESA_POCHI_INITIATOR_NAME:your_initiator_name}
-      initiator-password: ${MPESA_POCHI_INITIATOR_PASSWORD:your_initiator_password}
-      party-a: ${MPESA_POCHI_PARTY_A:600000}
-      queue-timeout-url: ${MPESA_POCHI_TIMEOUT_URL:https://your-domain.com/payments/mpesa/b2pochi/timeout}
-      result-url: ${MPESA_POCHI_RESULT_URL:https://your-domain.com/payments/mpesa/b2pochi/result}
+      initiator-name: ${MPESA_POCHI_INITIATOR_NAME}
+      initiator-password: ${MPESA_POCHI_INITIATOR_PASSWORD}
+      party-a: ${MPESA_POCHI_PARTY_A}
+      queue-timeout-url: ${MPESA_POCHI_TIMEOUT_URL}
+      result-url: ${MPESA_POCHI_RESULT_URL}
       min-amount: 10
       max-amount: 250000
 
@@ -202,26 +202,26 @@ mpesa:
     # as STK Push and C2B Register URL.
     # https://developer.safaricom.co.ke/apis/PullTransaction
     pull-transactions:
-      shortcode: ${MPESA_PULL_SHORTCODE:174379}
+      shortcode: ${MPESA_PULL_SHORTCODE}
       # The Safaricom MSISDN tied to this shortcode's KYC — found on the
       # M-PESA portal, NOT something you choose arbitrarily.
       nominated-number: ${MPESA_PULL_NOMINATED_NUMBER:254722000000}
-      callback-url: ${MPESA_PULL_CALLBACK_URL:https://your-domain.com/payments/mpesa/pull/callback}
+      callback-url: ${MPESA_PULL_CALLBACK_URL}
       # Default lookback window (days) when a query doesn't specify dates. Max 2 (48h retention).
       pull-days: ${MPESA_PULL_DAYS:1}
       offset-value: ${MPESA_PULL_OFFSET:0}
 
 # ─── Stripe ───────────────────────────────────────────────────────────────────
 stripe:
-  secret-key: ${STRIPE_SECRET_KEY:sk_test_your_stripe_secret_key}
+  secret-key: ${STRIPE_SECRET_KEY}
   # Get this from Stripe Dashboard → Webhooks → your endpoint → Signing secret
-  webhook-secret: ${STRIPE_WEBHOOK_SECRET:whsec_your_webhook_signing_secret}
+  webhook-secret: ${STRIPE_WEBHOOK_SECRET}
 
 # ─── PayPal ───────────────────────────────────────────────────────────────────
 paypal:
-  client-id: ${PAYPAL_CLIENT_ID:your_paypal_client_id}
-  client-secret: ${PAYPAL_CLIENT_SECRET:your_paypal_client_secret}
-  environment: ${PAYPAL_ENV:sandbox}   # "sandbox" or "production"
+  client-id: ${PAYPAL_CLIENT_ID}
+  client-secret: ${PAYPAL_CLIENT_SECRET}
+  environment: ${PAYPAL_ENV}   # "sandbox" or "production"
   # USD<->KES conversion is now fetched live from Frankfurter (see
   # FxRateService) on every deposit/payout — no static rate is configured
   # or cached here anymore.
