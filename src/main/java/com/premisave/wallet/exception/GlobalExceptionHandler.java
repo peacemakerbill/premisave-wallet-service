@@ -37,6 +37,35 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ex.getMessage()));
     }
 
+    /**
+     * Wallet already exists (POST /wallet/create called twice). 409 Conflict
+     * is the more semantically correct code here — unlike WalletFrozenException
+     * (an action forbidden by current *state*), this is a resource-already-exists
+     * conflict, the same category as DuplicateTransactionException below.
+     */
+    @ExceptionHandler(WalletAlreadyExistsException.class)
+    public ResponseEntity<ApiResponse<Void>> handleWalletAlreadyExists(WalletAlreadyExistsException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    /**
+     * Freeze/unfreeze called when the wallet is already in that state.
+     * 409 Conflict — the request conflicts with the wallet's current state,
+     * same category as WalletAlreadyExistsException above.
+     */
+    @ExceptionHandler(WalletAlreadyFrozenException.class)
+    public ResponseEntity<ApiResponse<Void>> handleWalletAlreadyFrozen(WalletAlreadyFrozenException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(WalletNotFrozenException.class)
+    public ResponseEntity<ApiResponse<Void>> handleWalletNotFrozen(WalletNotFrozenException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
     @ExceptionHandler(DuplicateTransactionException.class)
     public ResponseEntity<ApiResponse<Void>> handleDuplicateTransaction(DuplicateTransactionException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
@@ -45,6 +74,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(PhoneNumberUnavailableException.class)
     public ResponseEntity<ApiResponse<Void>> handlePhoneNumberUnavailable(PhoneNumberUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(PaypalCaptureException.class)
+    public ResponseEntity<ApiResponse<Void>> handlePaypalCapture(PaypalCaptureException ex) {
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
                 .body(ApiResponse.error(ex.getMessage()));
     }

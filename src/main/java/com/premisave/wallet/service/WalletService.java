@@ -5,8 +5,11 @@ import com.premisave.wallet.entity.Transaction;
 import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.exception.InsufficientFundsException;
+import com.premisave.wallet.exception.WalletAlreadyExistsException;
+import com.premisave.wallet.exception.WalletAlreadyFrozenException;
 import com.premisave.wallet.exception.WalletFrozenException;
 import com.premisave.wallet.exception.WalletNotFoundException;
+import com.premisave.wallet.exception.WalletNotFrozenException;
 import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
@@ -48,14 +51,29 @@ public class WalletService {
     }
 
     /**
-     * Create wallet if it doesn't exist
+     * Create wallet if it doesn't exist.
+     *
+     * Rejects outright if a wallet already exists — checked by BOTH
+     * accountNumber (email) and userId, since a mismatch between the two
+     * would otherwise let a caller end up owning two wallet records (e.g.
+     * userId already has a wallet under a different/older email). Callers
+     * should GET /wallet instead of re-POSTing /wallet/create.
      */
     @Transactional
     public WalletResponse createWallet(String userId, String email) {
-        Optional<Wallet> existing = walletRepository.findByAccountNumber(email);
-        if (existing.isPresent()) {
-            log.info("Wallet already exists for email: {}", email);
-            return mapToResponse(existing.get());
+        Optional<Wallet> existingByEmail = walletRepository.findByAccountNumber(email);
+        if (existingByEmail.isPresent()) {
+            log.warn("Wallet creation rejected — wallet already exists for email={}", email);
+            throw new WalletAlreadyExistsException(
+                    "A wallet already exists for this account (" + email + "). " +
+                    "Use GET /wallet to view it instead of creating a new one.");
+        }
+
+        Optional<Wallet> existingByUserId = walletRepository.findByUserId(userId);
+        if (existingByUserId.isPresent()) {
+            log.warn("Wallet creation rejected — wallet already exists for userId={}", userId);
+            throw new WalletAlreadyExistsException(
+                    "A wallet already exists for this user. Use GET /wallet to view it instead of creating a new one.");
         }
 
         Wallet wallet = new Wallet();
@@ -72,7 +90,10 @@ public class WalletService {
     }
 
     /**
-     * Freeze wallet
+     * Freeze wallet.
+     *
+     * Rejects if the wallet is already frozen — callers get an explicit,
+     * actionable error instead of a silent no-op that looks successful.
      */
     @Transactional
     public WalletResponse freezeWallet(String userId) {
@@ -80,8 +101,8 @@ public class WalletService {
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
 
         if (wallet.isFrozen()) {
-            log.warn("Wallet is already frozen for userId: {}", userId);
-            return mapToResponse(wallet);
+            log.warn("Freeze rejected — wallet already frozen for userId: {}", userId);
+            throw new WalletAlreadyFrozenException("This wallet is already frozen.");
         }
 
         wallet.setFrozen(true);
@@ -92,7 +113,10 @@ public class WalletService {
     }
 
     /**
-     * Unfreeze wallet
+     * Unfreeze wallet.
+     *
+     * Rejects if the wallet is not currently frozen — same reasoning as
+     * freezeWallet above: an explicit error beats a silent no-op.
      */
     @Transactional
     public WalletResponse unfreezeWallet(String userId) {
@@ -100,8 +124,8 @@ public class WalletService {
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
 
         if (!wallet.isFrozen()) {
-            log.warn("Wallet is already active for userId: {}", userId);
-            return mapToResponse(wallet);
+            log.warn("Unfreeze rejected — wallet is not frozen for userId: {}", userId);
+            throw new WalletNotFrozenException("This wallet is not frozen — nothing to unfreeze.");
         }
 
         wallet.setFrozen(false);
@@ -112,7 +136,12 @@ public class WalletService {
     }
 
     /**
-     * Get detailed wallet statement with summary
+     * Get detailed wallet statement with summary.
+     * Read-only — intentionally allowed even while frozen, so a frozen
+     * user can still see their transaction history and understand their
+     * balance; only money-movement and payout-destination changes are
+     * blocked while frozen (see validateWalletForTransaction,
+     * updatePaypalEmail, updateMpesaPhoneNumber).
      */
     public WalletStatementResponse getStatement(String email, WalletStatementRequest request) {
         Wallet wallet = walletRepository.findByAccountNumber(email)
@@ -159,14 +188,17 @@ public class WalletService {
     }
 
     /**
-     * Helper method to check if wallet is active and has sufficient funds
+     * Helper method to check if wallet is active and has sufficient funds.
+     * Used by every money-movement flow (PaymentService, TransferService,
+     * DisbursementService) — the single source of truth for "can this
+     * wallet spend right now."
      */
     public void validateWalletForTransaction(String userId, BigDecimal amount) {
         Wallet wallet = walletRepository.findByUserId(userId)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
 
         if (wallet.isFrozen()) {
-            throw new WalletFrozenException("Wallet is frozen and cannot perform transactions");
+            throw new WalletFrozenException("Wallet is frozen and cannot perform transactions until it is unfrozen");
         }
 
         if (wallet.getBalance().compareTo(amount) < 0) {
@@ -186,10 +218,23 @@ public class WalletService {
         );
     }
 
+    /**
+     * Sets/updates the PayPal payout email.
+     * Blocked while frozen — same reasoning as blocking transfers/
+     * disbursements: a frozen wallet's money-movement configuration
+     * shouldn't be changeable either (prevents a compromised/flagged
+     * account from redirecting future payouts while under review).
+     */
     @Transactional
     public WalletResponse updatePaypalEmail(String userId, String paypalEmail) {
         Wallet wallet = walletRepository.findByUserId(userId)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
+
+        if (wallet.isFrozen()) {
+            throw new WalletFrozenException(
+                    "Wallet is frozen — payout details cannot be changed until it is unfrozen");
+        }
+
         wallet.setPaypalEmail(paypalEmail);
         wallet = walletRepository.save(wallet);
         log.info("PayPal email updated for userId={}", userId);
@@ -198,16 +243,23 @@ public class WalletService {
 
     /**
      * Sets/updates the M-Pesa phone number used for quick deposits (STK
-     * push reloads without re-entering a number every time) and for
-     * disbursements (see DisbursementService.resolveVerifiedPhoneNumber,
-     * which checks this field first). Normalized before storage so
-     * lookups/comparisons elsewhere are consistent regardless of the format
-     * the user typed it in (07xxxxxxxx, 254xxxxxxxxx, +254xxxxxxxxx, etc).
+     * push — no need to type a number every time) and disbursements.
+     * Resolved authoritatively from here by DepositService/
+     * DisbursementService — never taken from a deposit/disbursement
+     * request itself — same reasoning as the PayPal email pattern above
+     * (eliminates typo/mistargeted-payout risk).
+     * Blocked while frozen — same reasoning as updatePaypalEmail above.
      */
     @Transactional
     public WalletResponse updateMpesaPhoneNumber(String userId, String phoneNumber) {
         Wallet wallet = walletRepository.findByUserId(userId)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
+
+        if (wallet.isFrozen()) {
+            throw new WalletFrozenException(
+                    "Wallet is frozen — payout details cannot be changed until it is unfrozen");
+        }
+
         wallet.setMpesaPhoneNumber(mpesaService.normalizePhone(phoneNumber));
         wallet = walletRepository.save(wallet);
         log.info("M-Pesa phone number updated for userId={}", userId);

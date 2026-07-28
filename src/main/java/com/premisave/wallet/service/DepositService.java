@@ -10,6 +10,7 @@ import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.enums.TransactionStatus;
 import com.premisave.wallet.enums.TransactionType;
 import com.premisave.wallet.exception.PaypalCaptureException;
+import com.premisave.wallet.exception.WalletFrozenException;
 import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
@@ -38,9 +39,20 @@ public class DepositService {
     private final PaypalService paypalService;
     private final FxRateService fxRateService;
 
+    /**
+     * Blocked while the wallet is frozen — a freeze is typically applied as
+     * a fraud/compliance hold, and allowing money to keep flowing IN while
+     * the wallet is under review defeats the point of the hold. Checked
+     * once here, up front, before dispatching to any provider-specific
+     * deposit flow below.
+     */
     public PaymentResponse initiateDeposit(String userId, String userEmail, DepositRequest request) {
         Wallet wallet = walletRepository.findByUserId(userId)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found. Please create a wallet first."));
+
+        if (wallet.isFrozen()) {
+            throw new WalletFrozenException("Wallet is frozen — deposits are not allowed until it is unfrozen");
+        }
 
         String provider = request.getProvider() != null ? request.getProvider().toUpperCase() : "MPESA";
         String idempotencyKey = UUID.randomUUID().toString();
@@ -159,6 +171,11 @@ public class DepositService {
      * Stripe Customer via Stripe.js/Elements WITHOUT making a payment —
      * useful for a "manage payment method" settings screen. Creates the
      * Customer lazily if this wallet doesn't have one yet.
+     *
+     * Deliberately NOT blocked by a frozen wallet — saving a card doesn't
+     * move any money, so there's no reason to prevent it while a freeze is
+     * in effect (and it avoids forcing the user to redo card setup the
+     * moment they're unfrozen).
      */
     @Transactional
     public Map<String, String> createStripeSetupIntent(String userId, String email) {
