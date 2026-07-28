@@ -20,8 +20,11 @@ public class DepositRequest {
     private String provider;
 
     /**
-     * Required for M-Pesa STK push (provider=MPESA) — the customer's
-     * Safaricom number. Format: 07xxxxxxxx or 254xxxxxxxx
+     * Used for M-Pesa STK push (provider=MPESA) — the customer's Safaricom
+     * number. Format: 07xxxxxxxx or 254xxxxxxxx. Optional if the wallet has
+     * a saved M-Pesa phone number (see PUT /wallet/mpesa-phone) — that's
+     * used automatically when this is omitted, so repeat deposits don't
+     * require typing a number every time.
      */
     private String phoneNumber;
 

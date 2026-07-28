@@ -696,7 +696,13 @@ public class MpesaService {
         }
     }
 
-    private String normalizePhone(String phone) {
+    /**
+     * Normalizes a Kenyan phone number to Safaricom's 254XXXXXXXXX format.
+     * Public so other services (e.g. WalletService, when saving a user's
+     * M-Pesa number to their wallet) can store numbers in the same
+     * canonical format used for outbound M-Pesa API calls.
+     */
+    public String normalizePhone(String phone) {
         if (phone == null) return "";
         phone = phone.replaceAll("\\s+", "").replaceAll("[^0-9+]", "");
         if (phone.startsWith("+254")) return phone.substring(1);

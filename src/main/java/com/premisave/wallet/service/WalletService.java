@@ -27,6 +27,7 @@ public class WalletService {
 
     private final WalletRepository walletRepository;
     private final TransactionRepository transactionRepository;
+    private final MpesaService mpesaService;
 
     /**
      * Get wallet by account number (email)
@@ -195,6 +196,24 @@ public class WalletService {
         return mapToResponse(wallet);
     }
 
+    /**
+     * Sets/updates the M-Pesa phone number used for quick deposits (STK
+     * push reloads without re-entering a number every time) and for
+     * disbursements (see DisbursementService.resolveVerifiedPhoneNumber,
+     * which checks this field first). Normalized before storage so
+     * lookups/comparisons elsewhere are consistent regardless of the format
+     * the user typed it in (07xxxxxxxx, 254xxxxxxxxx, +254xxxxxxxxx, etc).
+     */
+    @Transactional
+    public WalletResponse updateMpesaPhoneNumber(String userId, String phoneNumber) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
+        wallet.setMpesaPhoneNumber(mpesaService.normalizePhone(phoneNumber));
+        wallet = walletRepository.save(wallet);
+        log.info("M-Pesa phone number updated for userId={}", userId);
+        return mapToResponse(wallet);
+    }
+
     private WalletResponse mapToResponse(Wallet wallet) {
         WalletResponse response = new WalletResponse();
         response.setId(wallet.getId());
@@ -204,6 +223,7 @@ public class WalletService {
         response.setCurrency(wallet.getCurrency());
         response.setFrozen(wallet.isFrozen());
         response.setPaypalEmail(wallet.getPaypalEmail());
+        response.setMpesaPhoneNumber(wallet.getMpesaPhoneNumber());
         response.setHasSavedCard(wallet.getStripeDefaultPaymentMethodId() != null);
         response.setCardBrand(wallet.getStripeCardBrand());
         response.setCardLast4(wallet.getStripeCardLast4());

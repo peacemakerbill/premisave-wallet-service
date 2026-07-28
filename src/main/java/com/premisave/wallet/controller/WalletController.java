@@ -122,6 +122,26 @@ public class WalletController {
     }
 
     /**
+     * Sets/updates the M-Pesa phone number used for quick deposits (STK
+     * push — no need to type a number every time) and disbursements.
+     * Resolved authoritatively from here by DepositService/
+     * DisbursementService — never taken from a deposit/disbursement
+     * request itself — same reasoning as the PayPal email pattern above
+     * (eliminates typo/mistargeted-payout risk).
+     * PUT /wallet/mpesa-phone
+     */
+    @PutMapping("/mpesa-phone")
+    public ResponseEntity<ApiResponse<WalletResponse>> updateMpesaPhone(
+            @Valid @RequestBody UpdateMpesaPhoneRequest updateRequest,
+            Authentication auth,
+            HttpServletRequest request) {
+        String userId = (String) request.getAttribute("userId");
+        if (userId == null) userId = auth.getName();
+        WalletResponse response = walletService.updateMpesaPhoneNumber(userId, updateRequest.getMpesaPhoneNumber());
+        return ResponseEntity.ok(ApiResponse.success("M-Pesa phone number updated", response));
+    }
+
+    /**
      * Starts a Stripe SetupIntent so the frontend can save a card (via
      * Stripe.js/Elements) without making a payment — e.g. a "manage payment
      * method" settings screen. Lazily creates a Stripe Customer for this

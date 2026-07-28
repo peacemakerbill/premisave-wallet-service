@@ -56,14 +56,25 @@ public class DepositService {
 
     // ─── M-Pesa STK Push ─────────────────────────────────────────────────────
 
+    /**
+     * Explicit request.phoneNumber wins if supplied; otherwise falls back to
+     * the wallet's saved M-Pesa number (see WalletService.updateMpesaPhoneNumber
+     * / PUT /wallet/mpesa-phone) so repeat deposits don't require typing a
+     * number every time.
+     */
     private PaymentResponse initiateMpesaDeposit(String userId, DepositRequest request,
                                                    Wallet wallet, String idempotencyKey) {
-        if (request.getPhoneNumber() == null || request.getPhoneNumber().isBlank()) {
-            throw new IllegalArgumentException("phoneNumber is required for M-Pesa deposits");
+        String phoneNumber = (request.getPhoneNumber() != null && !request.getPhoneNumber().isBlank())
+                ? request.getPhoneNumber()
+                : wallet.getMpesaPhoneNumber();
+
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            throw new IllegalArgumentException(
+                    "phoneNumber is required for M-Pesa deposits (or save one via PUT /wallet/mpesa-phone for quick reloads without typing it each time)");
         }
 
         MpesaStkPushRequest stkRequest = new MpesaStkPushRequest();
-        stkRequest.setPhoneNumber(request.getPhoneNumber());
+        stkRequest.setPhoneNumber(phoneNumber);
         stkRequest.setAmount(request.getAmount());
         stkRequest.setAccountReference("PREMISAVE-" + userId);
 

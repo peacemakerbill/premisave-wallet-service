@@ -84,11 +84,11 @@ public class DisbursementService {
         // so there's no per-user Stripe payout identity to resolve from).
         String destination;
         if ("MPESA".equals(provider)) {
-            destination = resolveVerifiedPhoneNumber(userId);
+            destination = resolveVerifiedPhoneNumber(userId, wallet);
         } else if ("PAYPAL".equals(provider)) {
             if (wallet.getPaypalEmail() == null || wallet.getPaypalEmail().isBlank()) {
                 throw new IllegalArgumentException(
-                        "No PayPal email is set on your wallet — add one via PUT /wallet/paypal-email before requesting a PayPal disbursement.");
+                        "No PayPal email is set on your wallet — add one before requesting a PayPal disbursement.");
             }
             destination = wallet.getPaypalEmail();
         } else {
@@ -391,7 +391,30 @@ public class DisbursementService {
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
+    /**
+     * Resolves the phone number an M-Pesa disbursement (B2C or B2Pochi)
+     * should be sent to. Looks up the wallet fresh — use the overload below
+     * when a Wallet is already in hand to avoid a redundant DB round trip.
+     */
     private String resolveVerifiedPhoneNumber(String userId) {
+        return resolveVerifiedPhoneNumber(userId, walletRepository.findByUserId(userId).orElse(null));
+    }
+
+    /**
+     * Resolves the phone number an M-Pesa disbursement (B2C or B2Pochi)
+     * should be sent to. Prefers the wallet's own mpesaPhoneNumber (set via
+     * PUT /wallet/mpesa-phone) if present — same reasoning as the PayPal
+     * email field: the user's own verified choice of destination, resolved
+     * authoritatively here rather than taken from the disbursement request.
+     * Falls back to the auth-service profile's phone number if the wallet
+     * doesn't have one set yet, so nothing breaks for existing users who
+     * haven't set a wallet phone number.
+     */
+    private String resolveVerifiedPhoneNumber(String userId, Wallet wallet) {
+        if (wallet != null && wallet.getMpesaPhoneNumber() != null && !wallet.getMpesaPhoneNumber().isBlank()) {
+            return wallet.getMpesaPhoneNumber();
+        }
+
         Map<String, Object> profile;
         try {
             profile = userProfileClient.getPublicProfile(userId);
@@ -406,7 +429,7 @@ public class DisbursementService {
 
         if (phone == null || phone.isBlank()) {
             throw new PhoneNumberUnavailableException(
-                    "No phone number is set on your profile — please add one before requesting an M-Pesa disbursement.");
+                    "No phone number is set on your profile — please add one before requesting for an M-Pesa disbursement.");
         }
         return phone;
     }

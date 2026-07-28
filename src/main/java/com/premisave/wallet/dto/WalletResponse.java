@@ -21,6 +21,9 @@ public class WalletResponse {
     /** Null if never set. */
     private String paypalEmail;
 
+    /** Null if never set. Normalized to 254XXXXXXXXX. */
+    private String mpesaPhoneNumber;
+
     /** True once a card is saved for one-click deposit reloads. */
     private boolean hasSavedCard;
 

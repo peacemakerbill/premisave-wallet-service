@@ -39,6 +39,19 @@ public class Wallet {
     private String paypalEmail;
 
     /**
+     * M-Pesa phone number the user wants deposits (quick STK push reloads)
+     * and disbursements sent to. Resolved authoritatively from here — never
+     * taken from a deposit/disbursement request itself — same reasoning as
+     * paypalEmail: eliminates typo/mistargeted-payout risk and lets the user
+     * pick which verified number to use. If unset, disbursements fall back
+     * to the auth-service profile's phone number (see
+     * DisbursementService.resolveVerifiedPhoneNumber); deposits require the
+     * caller to supply a phoneNumber explicitly instead.
+     * Stored normalized to 254XXXXXXXXX. Set via PUT /wallet/mpesa-phone.
+     */
+    private String mpesaPhoneNumber;
+
+    /**
      * Stripe Customer object id (cus_xxx) for this wallet's owner. Created
      * lazily on first Stripe deposit or first setup-intent request. A
      * test-mode customer and a live-mode customer are entirely separate
