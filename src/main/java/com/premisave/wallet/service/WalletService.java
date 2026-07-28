@@ -65,15 +65,14 @@ public class WalletService {
         if (existingByEmail.isPresent()) {
             log.warn("Wallet creation rejected — wallet already exists for email={}", email);
             throw new WalletAlreadyExistsException(
-                    "A wallet already exists for this account (" + email + "). " +
-                    "Use GET /wallet to view it instead of creating a new one.");
+                    "You already have a wallet for this account. Please refresh the page to view it.");
         }
 
         Optional<Wallet> existingByUserId = walletRepository.findByUserId(userId);
         if (existingByUserId.isPresent()) {
             log.warn("Wallet creation rejected — wallet already exists for userId={}", userId);
             throw new WalletAlreadyExistsException(
-                    "A wallet already exists for this user. Use GET /wallet to view it instead of creating a new one.");
+                    "You already have a wallet. Please refresh the page to view it.");
         }
 
         Wallet wallet = new Wallet();

@@ -82,7 +82,7 @@ public class DepositService {
 
         if (phoneNumber == null || phoneNumber.isBlank()) {
             throw new IllegalArgumentException(
-                    "phoneNumber is required for M-Pesa deposits (or save one via PUT /wallet/mpesa-phone for quick reloads without typing it each time)");
+                    "Please enter a phone number for this M-Pesa deposit, or save one in your wallet settings so you don't have to type it every time.");
         }
 
         MpesaStkPushRequest stkRequest = new MpesaStkPushRequest();
