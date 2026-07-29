@@ -25,17 +25,19 @@ public class WebConfig implements WebMvcConfigurer {
                     "/v3/api-docs/**",
                     // Payment provider callbacks should bypass rate limiting
                     // — they come from Safaricom/Stripe/PayPal servers, not end users.
-                    // NOTE: "/payments/stk-callback" deliberately has no "mpesa" in
-                    // it — Safaricom's sandbox rejects CallBackURLs containing that
-                    // word with 400.002.02 "Invalid CallBackURL".
+                    // NOTE: "/payments/stk-callback" and "/payments/c2b-validation" /
+                    // "/payments/c2b-confirmation" deliberately have no "mpesa" in
+                    // them — Safaricom's sandbox rejects CallBackURL/ValidationURL/
+                    // ConfirmationURL values containing that word with
+                    // 400.002.02 "Invalid CallBackURL".
                     "/payments/stk-callback",
+                    "/payments/c2b-validation",
+                    "/payments/c2b-confirmation",
                     "/payments/mpesa/b2c/result",
                     "/payments/mpesa/b2c/timeout",
                     "/payments/mpesa/b2b/result",
                     "/payments/mpesa/b2b/timeout",
                     "/payments/mpesa/b2b/express-checkout/result",
-                    "/payments/mpesa/c2b/validation",
-                    "/payments/mpesa/c2b/confirmation",
                     "/payments/mpesa/balance/result",
                     "/payments/mpesa/balance/timeout",
                     "/payments/mpesa/transactionstatus/result",
