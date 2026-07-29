@@ -46,6 +46,16 @@ public class MpesaC2BService {
      * confirmation-url) instead of deriving paths from the STK callback URL —
      * the C2B test shortcode is different from the STK Push test shortcode
      * in Daraja sandbox, so they must be configured independently.
+     *
+     * Safaricom uses TWO DIFFERENT response shapes here, and both are valid
+     * JSON, so parsing alone doesn't tell you which one you got:
+     *   - Rejection:  {"requestId": "...", "errorCode": "...", "errorMessage": "..."}
+     *   - Acceptance: {"ResponseCode": "0", "ResponseDescription": "success", ...}
+     * Blindly reading ResponseCode/ResponseDescription/CustomerMessage off an
+     * error payload just returns empty strings for all three — which used to
+     * get wrapped in ApiResponse.success(...) by the controller, masking a
+     * real failure as a fake success. This now throws on either shape of
+     * rejection so the failure surfaces honestly instead.
      */
     public Map<String, Object> registerUrls() {
         String token = mpesaService.getAccessToken();
@@ -71,12 +81,38 @@ public class MpesaC2BService {
                 String respBody = response.body().string();
                 log.info("C2B URL registration response: {}", respBody);
                 JsonNode node = objectMapper.readTree(respBody);
+
+                // ── Rejection shape: {requestId, errorCode, errorMessage} ──────
+                String errorCode = node.path("errorCode").asText(null);
+                if (errorCode != null && !errorCode.isBlank()) {
+                    String errorMessage = node.path("errorMessage").asText("Unknown C2B registration error");
+                    log.warn("C2B URL registration rejected by Safaricom: errorCode={} errorMessage={}",
+                            errorCode, errorMessage);
+                    throw new RuntimeException(
+                            "C2B URL registration failed (" + errorCode + "): " + errorMessage);
+                }
+
+                // ── Acceptance shape ─────────────────────────────────────────
+                String responseCode = node.path("ResponseCode").asText("");
+                boolean success = "0".equals(responseCode);
+
+                if (!success) {
+                    String desc = node.path("ResponseDescription").asText("Unknown failure");
+                    log.warn("C2B URL registration not accepted: responseCode={} description={} raw={}",
+                            responseCode, desc, respBody);
+                    throw new RuntimeException(
+                            "C2B URL registration was not accepted (ResponseCode=" + responseCode + "): " + desc);
+                }
+
                 return Map.of(
-                        "ResponseCode",        node.path("ResponseCode").asText(),
+                        "success",             true,
+                        "ResponseCode",        responseCode,
                         "ResponseDescription", node.path("ResponseDescription").asText(),
                         "CustomerMessage",     node.path("CustomerMessage").asText()
                 );
             }
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("C2B URL registration failed: " + e.getMessage(), e);
         }
