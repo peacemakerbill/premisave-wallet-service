@@ -222,6 +222,14 @@ paypal:
   client-id: ${PAYPAL_CLIENT_ID}
   client-secret: ${PAYPAL_CLIENT_SECRET}
   environment: ${PAYPAL_ENV}   # "sandbox" or "production"
+  # From Developer Dashboard → your app → Webhooks → your registered
+  # webhook endpoint (https://<your-domain>/payments/paypal/webhook).
+  # Required for PaymentCallbackController.paypalWebhook to verify incoming
+  # events actually came from PayPal rather than trusting the request body
+  # outright — see PaypalService.verifyWebhookSignature. Left blank by
+  # default; verifyWebhookSignature fails closed (rejects the webhook) if
+  # this isn't set.
+  webhook-id: ${PAYPAL_WEBHOOK_ID}
   # USD<->KES conversion is now fetched live from Frankfurter (see
   # FxRateService) on every deposit/payout — no static rate is configured
   # or cached here anymore.
