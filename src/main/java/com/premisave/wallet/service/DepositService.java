@@ -39,13 +39,6 @@ public class DepositService {
     private final PaypalService paypalService;
     private final FxRateService fxRateService;
 
-    /**
-     * Blocked while the wallet is frozen — a freeze is typically applied as
-     * a fraud/compliance hold, and allowing money to keep flowing IN while
-     * the wallet is under review defeats the point of the hold. Checked
-     * once here, up front, before dispatching to any provider-specific
-     * deposit flow below.
-     */
     public PaymentResponse initiateDeposit(String userId, String userEmail, DepositRequest request) {
         Wallet wallet = walletRepository.findByUserId(userId)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found. Please create a wallet first."));
@@ -68,17 +61,6 @@ public class DepositService {
 
     // ─── M-Pesa STK Push ─────────────────────────────────────────────────────
 
-    /**
-     * Explicit request.phoneNumber wins if supplied; otherwise falls back to
-     * the wallet's saved M-Pesa number (see WalletService.updateMpesaPhoneNumber
-     * / PUT /wallet/mpesa-phone) so repeat deposits don't require typing a
-     * number every time.
-     *
-     * Only reports success and saves a pending transaction when Safaricom
-     * actually accepted the push (see MpesaService.StkPushResult) — a
-     * rejected push (bad CallBackURL, invalid shortcode, etc.) surfaces as
-     * an honest failure instead of a fake success.
-     */
     private PaymentResponse initiateMpesaDeposit(String userId, DepositRequest request,
                                                    Wallet wallet, String idempotencyKey) {
         String phoneNumber = (request.getPhoneNumber() != null && !request.getPhoneNumber().isBlank())
@@ -141,15 +123,6 @@ public class DepositService {
 
     // ─── Stripe ──────────────────────────────────────────────────────────────
 
-    /**
-     * If the wallet already has a saved card (stripeDefaultPaymentMethodId),
-     * attempts an off-session charge immediately — no client_secret, no
-     * Stripe.js round trip, the deposit just completes. If no card is saved
-     * yet, returns a client_secret for a normal Stripe.js confirmation, and
-     * requests setup_future_usage so this deposit itself saves the card for
-     * next time. Ensures a Stripe Customer exists on the wallet first,
-     * creating one lazily if needed.
-     */
     private PaymentResponse initiateStripeDeposit(String userId, String userEmail, DepositRequest request,
                                                     Wallet wallet, String idempotencyKey) {
         String currency = request.getCurrency() != null ? request.getCurrency() : "kes";
@@ -171,7 +144,6 @@ public class DepositService {
                 request.getAmount(), Currency.KES, "Stripe deposit (pending payment confirmation)", idempotencyKey);
 
         if ("succeeded".equals(result.status())) {
-            // Off-session charge on the saved card went through immediately.
             creditWalletFromStripeCallback(idempotencyKey, request.getAmount(), result.paymentIntentId(),
                     currency, result.customerId(), result.paymentMethodId());
             return new PaymentResponse(true, result.paymentIntentId(), "Deposit successful (charged saved card).");
@@ -181,17 +153,6 @@ public class DepositService {
                 "Stripe PaymentIntent created. Use the client_secret to confirm payment.");
     }
 
-    /**
-     * Starts a SetupIntent so the frontend can attach a card to this wallet's
-     * Stripe Customer via Stripe.js/Elements WITHOUT making a payment —
-     * useful for a "manage payment method" settings screen. Creates the
-     * Customer lazily if this wallet doesn't have one yet.
-     *
-     * Deliberately NOT blocked by a frozen wallet — saving a card doesn't
-     * move any money, so there's no reason to prevent it while a freeze is
-     * in effect (and it avoids forcing the user to redo card setup the
-     * moment they're unfrozen).
-     */
     @Transactional
     public Map<String, String> createStripeSetupIntent(String userId, String email) {
         Wallet wallet = walletRepository.findByUserId(userId)
@@ -208,13 +169,6 @@ public class DepositService {
         return Map.of("clientSecret", setupIntent.getClientSecret(), "setupIntentId", setupIntent.getId());
     }
 
-    /**
-     * Called by the frontend after Stripe.js confirms the SetupIntent
-     * (stripe.confirmCardSetup). Verifies it belongs to this user's Stripe
-     * Customer, then saves the resulting PaymentMethod as the wallet's
-     * default for future one-click deposits, along with display-only
-     * brand/last4. The webhook handler below is a backstop for the same flow.
-     */
     @Transactional
     public void confirmStripeSetupIntent(String setupIntentId, String userId) {
         SetupIntent setupIntent = stripeService.retrieveSetupIntent(setupIntentId);
@@ -233,11 +187,6 @@ public class DepositService {
         attachSavedCard(wallet, setupIntent.getPaymentMethod());
     }
 
-    /**
-     * Webhook backstop for setup_intent.succeeded — resolves the wallet by
-     * Stripe customerId rather than by an authenticated caller, same
-     * reasoning as the PayPal webhook having no ownership check.
-     */
     @Transactional
     public void attachSavedCardByCustomerId(String customerId, String paymentMethodId) {
         walletRepository.findByStripeCustomerId(customerId).ifPresentOrElse(
@@ -256,23 +205,12 @@ public class DepositService {
                 wallet.setStripeCardLast4(pm.getCard().getLast4());
             }
         } catch (Exception e) {
-            // Non-fatal — the payment method is still usable even if we
-            // couldn't fetch display details for the UI.
             log.warn("Saved card attached but failed to fetch display details: {}", e.getMessage());
         }
         walletRepository.save(wallet);
         log.info("Stripe saved card attached: walletId={} paymentMethodId={}", wallet.getId(), paymentMethodId);
     }
 
-    /**
-     * Reconciles a Stripe deposit — called synchronously from
-     * initiateStripeDeposit (off-session success), by the webhook
-     * (payment_intent.succeeded), or by confirmStripeDeposit. Matched back
-     * to the pending Transaction via `reference` (the idempotencyKey stored
-     * as PaymentIntent metadata at initiation). Idempotent: an
-     * already-COMPLETED transaction is a no-op. When a paymentMethodId is
-     * present, also keeps the wallet's saved-card fields in sync.
-     */
     @Transactional
     public void creditWalletFromStripeCallback(String reference, BigDecimal amount, String paymentIntentId,
                                                 String currency, String customerId, String paymentMethodId) {
@@ -320,11 +258,6 @@ public class DepositService {
         log.info("Wallet credited via Stripe: reference={} amount={} piId={}", reference, amount, paymentIntentId);
     }
 
-    /**
-     * Frontend-triggered confirm — mirrors confirmPaypalDeposit. Retrieves
-     * the PaymentIntent directly from Stripe, verifies ownership, then
-     * reconciles via the same path the webhook uses.
-     */
     @Transactional
     public PaymentResponse confirmStripeDeposit(String paymentIntentId, String callerUserId) {
         PaymentIntent pi = stripeService.retrievePaymentIntent(paymentIntentId);
@@ -362,12 +295,18 @@ public class DepositService {
 
     /**
      * Initiates a PayPal deposit. If the wallet already has a saved PayPal
-     * account (walletPaypalVaultId set), reuses it via the vault_id path —
-     * PayPal may still return a payer-action link if re-authentication is
-     * required (fraud/risk signals, expired consent, etc.), so this does
-     * NOT assume a saved account is always redirect-free; it checks the
-     * approveUrl either way. If no saved account exists yet, requests
-     * vaulting on this order so it's available for next time once captured.
+     * account (walletPaypalVaultId set), reuses it via the vault_id path.
+     *
+     * IMPORTANT: when a saved vault_id is reused and no re-authentication is
+     * required, PayPal captures the order synchronously as part of the
+     * createOrder() response itself (approveUrl == null AND status ==
+     * "COMPLETED") — there is no separate capture step to perform, and
+     * calling captureOrder() on it would fail with ORDER_ALREADY_CAPTURED.
+     * So credit directly from the create-order response in that case. If a
+     * saved vault_id exists but capture didn't complete synchronously for
+     * some reason, fall through to the normal confirm/capture path, which
+     * itself now reconciles an ORDER_ALREADY_CAPTURED race if one occurs
+     * (see confirmPaypalDepositInternal).
      */
     private PaymentResponse initiatePaypalDeposit(String userId, DepositRequest request,
                                                     Wallet wallet, String idempotencyKey) {
@@ -405,8 +344,24 @@ public class DepositService {
         transactionRepository.save(tx);
 
         if (result.approveUrl() == null) {
-            // Fully vaulted, no payer action required — capture immediately
-            // rather than waiting on a redirect the payer will never see.
+            if ("COMPLETED".equals(result.status()) && result.captureId() != null) {
+                // Vault reuse auto-captured synchronously at order creation —
+                // credit directly from what createOrder() already returned
+                // instead of calling captureOrder() again.
+                PaypalService.CaptureResult captureResult = new PaypalService.CaptureResult(
+                        result.captureId(), result.vaultId(), result.customerId(),
+                        result.payerEmail(), result.vaultStatus());
+                PaymentResponse credited = creditPaypalTransaction(tx, captureResult);
+                if (credited.isSuccess()) {
+                    return new PaymentResponse(true, orderId,
+                            "Deposit successful using your saved PayPal account.");
+                }
+                return credited;
+            }
+
+            // No payer action required but not reported completed above
+            // (shouldn't normally happen) — fall back to the confirm path,
+            // which now reconciles ORDER_ALREADY_CAPTURED races too.
             PaymentResponse captured = confirmPaypalDepositInternal(tx, orderId);
             if (captured.isSuccess()) {
                 return new PaymentResponse(true, orderId,
@@ -441,16 +396,13 @@ public class DepositService {
     }
 
     /**
-     * Captures the order, credits the wallet, and — if this order was
-     * vaulted — persists the saved account's vault_id, customer_id, and
-     * connected email onto the wallet so future deposits can reuse it and
-     * the frontend can display "Connected: user@example.com".
+     * Captures the order and credits the wallet.
      *
-     * If capture returns vaultStatus="APPROVED" rather than "VAULTED", the
-     * vault_id here may not be final yet — the VAULT.PAYMENT-TOKEN.CREATED
-     * webhook (see PaymentCallbackController / attachPaypalVaultToken
-     * below) is the authoritative backstop for that case, same pattern as
-     * Stripe's setup_intent.succeeded.
+     * If PayPal reports ORDER_ALREADY_CAPTURED (a race between this call and
+     * the webhook, or — the common case — a vault-reuse order that was
+     * actually auto-captured at creation time and reached this path anyway),
+     * this no longer gives up: it fetches the order's actual capture details
+     * via getOrder() and credits against that, same as a normal capture.
      */
     private PaymentResponse confirmPaypalDepositInternal(Transaction tx, String orderId) {
         if (tx.getStatus() == TransactionStatus.COMPLETED) {
@@ -468,16 +420,37 @@ public class DepositService {
             captureResult = paypalService.captureOrder(orderId);
         } catch (PaypalCaptureException e) {
             if (e.isAlreadyCaptured()) {
-                log.error("PayPal reports orderId={} already captured but local transaction {} is still {} — " +
-                        "manual reconciliation required", orderId, tx.getId(), tx.getStatus());
-                return new PaymentResponse(false, tx.getId(),
-                        "This deposit is in an inconsistent state and needs manual review. Please contact support.");
+                log.warn("PayPal reports orderId={} already captured — reconciling from order details instead of failing",
+                        orderId);
+                try {
+                    captureResult = paypalService.getOrder(orderId);
+                } catch (Exception fetchEx) {
+                    log.error("PayPal reports orderId={} already captured but reconciliation fetch failed — " +
+                            "manual review required", orderId, fetchEx);
+                    return new PaymentResponse(false, tx.getId(),
+                            "This deposit is in an inconsistent state and needs manual review. Please contact support.");
+                }
+            } else {
+                markPaypalTransactionFailed(orderId, e.getMessage());
+                return new PaymentResponse(false, tx.getId(), "PayPal capture failed: " + e.getMessage());
             }
-            markPaypalTransactionFailed(orderId, e.getMessage());
-            return new PaymentResponse(false, tx.getId(), "PayPal capture failed: " + e.getMessage());
         } catch (Exception e) {
             markPaypalTransactionFailed(orderId, e.getMessage());
             return new PaymentResponse(false, tx.getId(), "PayPal capture failed: " + e.getMessage());
+        }
+
+        return creditPaypalTransaction(tx, captureResult);
+    }
+
+    /**
+     * Shared credit path for a PayPal deposit, regardless of whether the
+     * capture details came from captureOrder(), a create-order
+     * auto-capture, or a getOrder() reconciliation fetch.
+     */
+    private PaymentResponse creditPaypalTransaction(Transaction tx, PaypalService.CaptureResult captureResult) {
+        if (tx.getStatus() == TransactionStatus.COMPLETED) {
+            log.info("PayPal deposit already processed for orderId={} — skipping duplicate credit", tx.getReference());
+            return new PaymentResponse(true, tx.getId(), "Deposit already completed");
         }
 
         Wallet wallet = walletRepository.findById(tx.getWalletId())
@@ -505,7 +478,7 @@ public class DepositService {
         transactionRepository.save(tx);
 
         log.info("Wallet credited via PayPal: orderId={} amount={} captureId={}",
-                orderId, tx.getAmount(), captureResult.captureId());
+                tx.getReference(), tx.getAmount(), captureResult.captureId());
         return new PaymentResponse(true, tx.getId(), "PayPal deposit successful");
     }
 
@@ -523,13 +496,6 @@ public class DepositService {
         }, () -> log.warn("Failure callback for unknown PayPal orderId={}: {}", orderId, reason));
     }
 
-    /**
-     * Backstop for VAULT.PAYMENT-TOKEN.CREATED — fired when capture
-     * returned vaultStatus="APPROVED" rather than "VAULTED", meaning
-     * vaulting was still processing asynchronously at capture time. Finds
-     * the wallet by matching paypalCustomerId (set provisionally at
-     * capture) and fills in the final vaultId/email.
-     */
     @Transactional
     public void attachPaypalVaultToken(String vaultId, String customerId, String payerEmail) {
         if (customerId == null) {

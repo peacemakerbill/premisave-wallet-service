@@ -233,6 +233,8 @@ paypal:
   # USD<->KES conversion is now fetched live from Frankfurter (see
   # FxRateService) on every deposit/payout — no static rate is configured
   # or cached here anymore.
+  return-url: ${PAYPAL_RETURN_URL}
+  cancel-url: ${PAYPAL_CANCEL_URL}
 
 # Frontend URL for CORS
 frontend:

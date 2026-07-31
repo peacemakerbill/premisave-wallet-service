@@ -48,18 +48,14 @@ public class PaypalService {
     @Value("${paypal.environment:sandbox}")
     private String environment;
 
-    /**
-     * PayPal Webhook ID — from Developer Dashboard → your app → Webhooks →
-     * your registered webhook endpoint. Required to verify that incoming
-     * /payments/paypal/webhook calls actually originated from PayPal (see
-     * verifyWebhookSignature) rather than trusting the request body
-     * outright. Optional at startup (no @Value default failure) so this
-     * service still works for Orders/Payouts testing before a webhook is
-     * registered — but PaymentCallbackController will reject all webhook
-     * calls until this is set.
-     */
     @Value("${paypal.webhook-id:}")
     private String webhookId;
+
+    @Value("${paypal.return-url}")
+    private String returnUrl;
+
+    @Value("${paypal.cancel-url}")
+    private String cancelUrl;
 
     private final OkHttpClient http = new OkHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -72,15 +68,6 @@ public class PaypalService {
 
     // ─── OAuth (cached) ──────────────────────────────────────────────────────
 
-    /**
-     * PayPal client-credentials tokens last ~9 hours (32400s) in practice,
-     * though the actual expires_in is read from the response rather than
-     * assumed. Previously this fetched a brand-new token on every single
-     * call — correct but wasteful, adding a full extra HTTP round trip to
-     * every Orders/Payouts operation. Cached here the same way
-     * MpesaService caches its OAuth token, refreshing a minute before
-     * actual expiry to avoid races.
-     */
     private record CachedToken(String token, Instant expiresAt) {}
     private final AtomicReference<CachedToken> tokenCache = new AtomicReference<>();
 
@@ -107,7 +94,7 @@ public class PaypalService {
             String responseBody = response.body().string();
             JsonNode node = objectMapper.readTree(responseBody);
             String token = node.path("access_token").asText();
-            int expiresIn = node.path("expires_in").asInt(32400); // ~9h typical
+            int expiresIn = node.path("expires_in").asInt(32400);
 
             if (!response.isSuccessful() || token.isBlank()) {
                 throw new RuntimeException("PayPal OAuth failed (" + response.code() + "): " + responseBody);
@@ -124,14 +111,28 @@ public class PaypalService {
 
     // ─── Deposit (Orders API v2, with Vault support) ──────────────────────────
 
-    /** Result of createOrder — approveUrl is null when no payer action is required. */
-    public record CreateOrderResult(String orderId, String approveUrl) {}
-
     /**
-     * Result of captureOrder. vaultId/customerId/payerEmail/vaultStatus are
-     * null unless this order's payment source was vaulted (or an existing
-     * vault_id was reused).
+     * Result of createOrder. approveUrl is null when no payer action is
+     * required. When PayPal captures the order synchronously as part of
+     * order creation itself — which happens when an existing vault_id is
+     * reused and no re-authentication is needed — status will be
+     * "COMPLETED" and captureId/vaultId/etc. will be populated from that
+     * same response, so the caller can credit the wallet directly instead
+     * of calling captureOrder() again (which would otherwise fail with
+     * ORDER_ALREADY_CAPTURED — see DepositService.initiatePaypalDeposit).
      */
+    public record CreateOrderResult(
+            String orderId,
+            String approveUrl,
+            String status,
+            String captureId,
+            String vaultId,
+            String customerId,
+            String payerEmail,
+            String vaultStatus
+    ) {}
+
+    /** Result of captureOrder / getOrder. Fields other than captureId are null unless vaulted. */
     public record CaptureResult(
             String captureId,
             String vaultId,
@@ -140,26 +141,6 @@ public class PaypalService {
             String vaultStatus
     ) {}
 
-    /**
-     * Creates a PayPal Order for wallet deposits, in USD.
-     *
-     * @param existingVaultId    if the wallet already has a saved PayPal
-     *                           account, its vault_id — reused via
-     *                           payment_source.paypal.vault_id so the payer
-     *                           may not need to approve at all. PayPal may
-     *                           still return an approve link if
-     *                           re-authentication is required (fraud/risk
-     *                           signals, expired consent, etc.), so this
-     *                           does NOT assume a saved account is always
-     *                           redirect-free.
-     * @param existingCustomerId the PayPal customer.id tied to that saved
-     *                           account, sent alongside vault_id.
-     * @param requestVaulting    if true and there's no existing vault,
-     *                           requests that this order's payment source be
-     *                           vaulted on success (payment_source.paypal.attributes.vault).
-     * @return orderId + approveUrl (approveUrl is null when no payer action
-     *         is required — i.e. the saved vault_id was reused successfully)
-     */
     public CreateOrderResult createOrder(BigDecimal usdAmount, String currency, String idempotencyKey,
                                           String existingVaultId, String existingCustomerId,
                                           boolean requestVaulting) {
@@ -174,22 +155,26 @@ public class PaypalService {
                 "description", "Premisave wallet deposit"
         );
 
+        Map<String, Object> experienceContext = Map.of(
+                "return_url", returnUrl,
+                "cancel_url", cancelUrl
+        );
+
         Map<String, Object> requestBody;
 
         if (existingVaultId != null && !existingVaultId.isBlank()) {
-            // Reuse the saved PayPal account.
             Map<String, Object> paypalSource = new HashMap<>();
             paypalSource.put("vault_id", existingVaultId);
             if (existingCustomerId != null && !existingCustomerId.isBlank()) {
                 paypalSource.put("customer_id", existingCustomerId);
             }
+            paypalSource.put("experience_context", experienceContext);
             requestBody = Map.of(
                     "intent", "CAPTURE",
                     "purchase_units", List.of(purchaseUnit),
                     "payment_source", Map.of("paypal", paypalSource)
             );
         } else if (requestVaulting) {
-            // Request vaulting so future deposits can reuse this account.
             Map<String, Object> attributes = Map.of(
                     "vault", Map.of(
                             "store_in_vault", "ON_SUCCESS",
@@ -200,7 +185,10 @@ public class PaypalService {
             requestBody = Map.of(
                     "intent", "CAPTURE",
                     "purchase_units", List.of(purchaseUnit),
-                    "payment_source", Map.of("paypal", Map.of("attributes", attributes))
+                    "payment_source", Map.of("paypal", Map.of(
+                            "attributes", attributes,
+                            "experience_context", experienceContext
+                    ))
             );
         } else {
             requestBody = Map.of(
@@ -231,7 +219,8 @@ public class PaypalService {
                 String orderId = node.path("id").asText();
                 String approveUrl = null;
                 for (JsonNode link : node.path("links")) {
-                    if ("approve".equals(link.path("rel").asText())) {
+                    String rel = link.path("rel").asText();
+                    if ("approve".equals(rel) || "payer-action".equals(rel)) {
                         approveUrl = link.path("href").asText();
                         break;
                     }
@@ -241,32 +230,47 @@ public class PaypalService {
                     throw new RuntimeException("PayPal createOrder response missing id: " + responseBody);
                 }
 
-                log.info("PayPal Order created: id={} vaultReused={} approveRequired={}",
-                        orderId, existingVaultId != null && !existingVaultId.isBlank(), approveUrl != null);
-                return new CreateOrderResult(orderId, approveUrl);
+                // When an existing vault_id is reused and no payer action is
+                // required, PayPal captures the order synchronously as part
+                // of THIS response — status comes back "COMPLETED" with the
+                // capture/vault details already present, rather than
+                // "CREATED" awaiting a separate /capture call. Extract that
+                // here so the caller never has to call captureOrder() on an
+                // order PayPal has already finished.
+                String status = node.path("status").asText(null);
+                String captureId = null;
+                String vaultId = null;
+                String customerId = null;
+                String payerEmail = null;
+                String vaultStatus = null;
+
+                if ("COMPLETED".equals(status)) {
+                    JsonNode purchaseUnits = node.path("purchase_units");
+                    if (purchaseUnits.isArray() && purchaseUnits.size() > 0) {
+                        JsonNode captures = purchaseUnits.get(0).path("payments").path("captures");
+                        if (captures.isArray() && captures.size() > 0) {
+                            captureId = captures.get(0).path("id").asText(null);
+                        }
+                    }
+                    JsonNode paypalSource = node.path("payment_source").path("paypal");
+                    JsonNode vaultNode = paypalSource.path("attributes").path("vault");
+                    vaultId = vaultNode.path("id").asText(null);
+                    vaultStatus = vaultNode.path("status").asText(null);
+                    customerId = vaultNode.path("customer").path("id").asText(null);
+                    payerEmail = paypalSource.path("email_address").asText(null);
+                }
+
+                log.info("PayPal Order created: id={} status={} vaultReused={} approveRequired={} autoCaptured={}",
+                        orderId, status, existingVaultId != null && !existingVaultId.isBlank(),
+                        approveUrl != null, captureId != null);
+                return new CreateOrderResult(orderId, approveUrl, status, captureId, vaultId,
+                        customerId, payerEmail, vaultStatus);
             }
         } catch (Exception e) {
             throw new RuntimeException("PayPal createOrder failed: " + e.getMessage(), e);
         }
     }
 
-    /**
-     * Captures (completes) a PayPal Order after the user approves it (or
-     * immediately, if a saved vault_id required no payer action). Call this
-     * from your PayPal return/webhook handler.
-     *
-     * If this order's payment source was vaulted (or reused an existing
-     * vault_id), the response's vaultId/customerId/payerEmail/vaultStatus
-     * are populated so the caller can persist them on the wallet. If
-     * vaultStatus comes back "APPROVED" rather than "VAULTED", vaulting was
-     * still processing asynchronously at capture time — the
-     * VAULT.PAYMENT-TOKEN.CREATED webhook is the authoritative backstop for
-     * that case (see PaymentCallbackController / DepositService.attachPaypalVaultToken).
-     *
-     * @throws PaypalCaptureException if PayPal rejects the capture — check
-     *         isAlreadyCaptured() to distinguish idempotent no-ops from
-     *         genuine failures.
-     */
     public CaptureResult captureOrder(String orderId) {
         String token = getAccessToken();
         RequestBody rb = RequestBody.create("{}", MediaType.parse("application/json"));
@@ -297,7 +301,6 @@ public class PaypalService {
 
             String captureId = captures.get(0).path("id").asText();
 
-            // Vaulting info, if a payment_source.paypal is present in the response.
             JsonNode paypalSource = node.path("payment_source").path("paypal");
             JsonNode vaultNode = paypalSource.path("attributes").path("vault");
             String vaultId = vaultNode.path("id").asText(null);
@@ -315,12 +318,60 @@ public class PaypalService {
         }
     }
 
+    /**
+     * Fetches an existing Order's current state — the reconciliation
+     * fallback when captureOrder() reports ORDER_ALREADY_CAPTURED (see
+     * DepositService.confirmPaypalDepositInternal). Rather than giving up
+     * and leaving the local transaction stuck PENDING, this looks up what
+     * PayPal already captured (typically via vault-reuse auto-capture at
+     * order-creation time, or a race with the webhook) so the caller can
+     * credit the wallet against the real capture.
+     */
+    public CaptureResult getOrder(String orderId) {
+        String token = getAccessToken();
+
+        Request request = new Request.Builder()
+                .url(baseUrl() + "/v2/checkout/orders/" + orderId)
+                .addHeader("Authorization", "Bearer " + token)
+                .get()
+                .build();
+
+        try (Response response = http.newCall(request).execute()) {
+            String responseBody = response.body().string();
+            JsonNode node = objectMapper.readTree(responseBody);
+
+            if (!response.isSuccessful()) {
+                throw new RuntimeException("PayPal getOrder failed (" + response.code() + "): " + responseBody);
+            }
+
+            JsonNode purchaseUnits = node.path("purchase_units");
+            JsonNode captures = (purchaseUnits.isArray() && purchaseUnits.size() > 0)
+                    ? purchaseUnits.get(0).path("payments").path("captures")
+                    : null;
+
+            if (captures == null || !captures.isArray() || captures.isEmpty()) {
+                throw new RuntimeException("PayPal getOrder: order " + orderId + " has no captures yet: " + responseBody);
+            }
+
+            String captureId = captures.get(0).path("id").asText(null);
+
+            JsonNode paypalSource = node.path("payment_source").path("paypal");
+            JsonNode vaultNode = paypalSource.path("attributes").path("vault");
+            String vaultId = vaultNode.path("id").asText(null);
+            String vaultStatus = vaultNode.path("status").asText(null);
+            String customerId = vaultNode.path("customer").path("id").asText(null);
+            String payerEmail = paypalSource.path("email_address").asText(null);
+
+            log.info("PayPal Order fetched for reconciliation: orderId={} captureId={} vaultStatus={}",
+                    orderId, captureId, vaultStatus);
+            return new CaptureResult(captureId, vaultId, customerId, payerEmail, vaultStatus);
+        } catch (Exception e) {
+            throw new RuntimeException("PayPal getOrder failed: " + e.getMessage(), e);
+        }
+    }
+
     // ─── Disbursement (Payouts API) ───────────────────────────────────────────
 
-    /**
-     * Sends money to a PayPal email address (Payouts API), in USD.
-     * Returns the Payout batch ID.
-     */
     public String processPayout(String recipientEmail, BigDecimal usdAmount, String currency) {
         String token = getAccessToken();
         String senderBatchId = UUID.randomUUID().toString();
@@ -376,27 +427,6 @@ public class PaypalService {
 
     // ─── Webhook signature verification ───────────────────────────────────────
 
-    /**
-     * Verifies that an incoming /payments/paypal/webhook request genuinely
-     * came from PayPal, using PayPal's Verify Webhook Signature API rather
-     * than trusting the request body outright. Without this, anyone who
-     * discovers the webhook URL could POST a fake CHECKOUT.ORDER.APPROVED
-     * event and trigger a deposit confirmation for an order ID they don't
-     * own (bounded in practice since the order still has to genuinely
-     * exist and be capturable on PayPal's side — but this closes the gap
-     * properly instead of relying on that as the only defense).
-     *
-     * Requires paypal.webhook-id to be configured (see application.yml) —
-     * obtained from Developer Dashboard → your app → Webhooks after
-     * registering https://<your-domain>/payments/paypal/webhook there.
-     *
-     * @param headers     the incoming request's HTTP headers (case-sensitive
-     *                    keys as sent by PayPal: PAYPAL-TRANSMISSION-ID,
-     *                    PAYPAL-TRANSMISSION-TIME, PAYPAL-CERT-URL,
-     *                    PAYPAL-AUTH-ALGO, PAYPAL-TRANSMISSION-SIG)
-     * @param rawBody     the exact raw request body PayPal sent, unmodified
-     * @return true if PayPal confirms the signature is valid
-     */
     public boolean verifyWebhookSignature(Map<String, String> headers, String rawBody) {
         if (webhookId == null || webhookId.isBlank()) {
             log.error("PayPal webhook signature verification skipped — paypal.webhook-id is not configured. " +
