@@ -109,6 +109,18 @@ public class Wallet {
      */
     private String paypalConnectedEmail;
 
+    /**
+     * The PayPal Vault setup token id issued by DepositService.createPaypalLinkToken,
+     * held here until confirmPaypalLink completes (or a new link attempt overwrites
+     * it). Ownership of a link-confirmation request is checked against this value —
+     * NOT against PayPal's returned customer.id, which for PayPal-wallet vaulting
+     * (unlike card vaulting) is a PayPal-generated identifier unrelated to whatever
+     * merchant customer.id was supplied at setup-token creation, so it cannot be used
+     * to verify the setup token belongs to this wallet. Cleared back to null once
+     * confirmPaypalLink succeeds.
+     */
+    private String pendingPaypalSetupTokenId;
+
     @CreatedDate
     private LocalDateTime createdAt;
 

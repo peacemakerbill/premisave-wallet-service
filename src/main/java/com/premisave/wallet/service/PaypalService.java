@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HashMap;
@@ -351,6 +352,7 @@ public class PaypalService {
      */
     public SetupTokenResult createSetupToken(String customerId) {
         String token = getAccessToken();
+        String paypalCustomerId = derivePaypalCustomerId(customerId);
 
         Map<String, Object> requestBody = Map.of(
                 "payment_source", Map.of(
@@ -363,7 +365,7 @@ public class PaypalService {
                                 )
                         )
                 ),
-                "customer", Map.of("id", customerId)
+                "customer", Map.of("id", paypalCustomerId)
         );
 
         try {
@@ -398,11 +400,37 @@ public class PaypalService {
                     throw new RuntimeException("PayPal createSetupToken response missing id/approve link: " + responseBody);
                 }
 
-                log.info("PayPal setup token created: id={} customerId={}", setupTokenId, customerId);
+                log.info("PayPal setup token created: id={} userId={} paypalCustomerId={}",
+                        setupTokenId, customerId, paypalCustomerId);
                 return new SetupTokenResult(setupTokenId, approveUrl);
             }
         } catch (Exception e) {
             throw new RuntimeException("PayPal createSetupToken failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * PayPal's customer.id field for merchant-generated IDs has a hard
+     * 22-character limit (INVALID_STRING_LENGTH otherwise) — our own userId
+     * is a 24-char Mongo ObjectId (occasionally an email, per
+     * WalletController's fallback), either of which can exceed that.
+     * Deriving a fixed-length, deterministic id via SHA-256 + base64url
+     * keeps every PayPal customer.id reference (setup token creation here,
+     * and vault reuse in createOrder's existingCustomerId) consistent
+     * regardless of what the raw userId looks like.
+     *
+     * Callers that need to check "does this returned customerId belong to
+     * userId X" (see DepositService.confirmPaypalLink) must call this same
+     * method and compare against the result — comparing the raw userId to
+     * PayPal's returned customerId directly will never match anymore.
+     */
+    public String derivePaypalCustomerId(String userId) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(userId.getBytes(StandardCharsets.UTF_8));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(hash).substring(0, 22);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to derive PayPal customer id", e);
         }
     }
 

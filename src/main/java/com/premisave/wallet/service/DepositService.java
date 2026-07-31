@@ -380,7 +380,14 @@ public class DepositService {
      * createStripeSetupIntent. Rejects up front if an account is already
      * linked, so the frontend can show the message before ever redirecting
      * the user to PayPal.
+     *
+     * Persists the issued setupTokenId on the wallet as
+     * pendingPaypalSetupTokenId — confirmPaypalLink checks the setupTokenId
+     * submitted at confirm time against this value, since PayPal's
+     * payment-token response does not reliably echo back our merchant
+     * customer.id for PayPal-wallet vaulting (see confirmPaypalLink).
      */
+    @Transactional
     public Map<String, String> createPaypalLinkToken(String userId) {
         Wallet wallet = walletRepository.findByUserId(userId)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found. Please create a wallet first."));
@@ -394,6 +401,9 @@ public class DepositService {
         PaypalService.SetupTokenResult result = paypalService.createSetupToken(userId);
         log.info("PayPal setup token created for account linking: userId={} setupTokenId={}", userId, result.setupTokenId());
 
+        wallet.setPendingPaypalSetupTokenId(result.setupTokenId());
+        walletRepository.save(wallet);
+
         return Map.of("setupTokenId", result.setupTokenId(), "approveUrl", result.approveUrl());
     }
 
@@ -402,11 +412,14 @@ public class DepositService {
      * setup token (returns from PayPal's approval redirect). Exchanges it
      * for the real vault_id and saves it on the wallet.
      *
-     * Security: verifies the payment token's customer.id matches the
-     * authenticated caller. createPaypalLinkToken always creates the setup
-     * token with customer.id=userId, so a mismatch here means the
-     * setupTokenId being confirmed wasn't minted for this user — reject
-     * rather than link the wrong account.
+     * Security: verifies the submitted setupTokenId matches the one this
+     * wallet was issued by createPaypalLinkToken (pendingPaypalSetupTokenId)
+     * — NOT PayPal's returned customer.id. For PayPal-wallet vaulting
+     * (unlike card vaulting), PayPal's payment-token response returns its
+     * own PayPal-generated customer.id, unrelated to whatever merchant
+     * customer.id was supplied at setup-token creation, so that value can't
+     * be used to verify ownership. Checking against the setupTokenId we
+     * persisted ourselves is the reliable binding.
      */
     @Transactional
     public void confirmPaypalLink(String setupTokenId, String userId) {
@@ -419,21 +432,22 @@ public class DepositService {
                             + "Disconnect it first before linking a new one.");
         }
 
-        PaypalService.LinkAccountResult result = paypalService.createPaymentTokenFromSetupToken(setupTokenId);
-
-        if (result.customerId() == null || !result.customerId().equals(userId)) {
-            log.error("PayPal link confirm rejected — customer mismatch: expected userId={} got={}",
-                    userId, result.customerId());
+        if (setupTokenId == null || !setupTokenId.equals(wallet.getPendingPaypalSetupTokenId())) {
+            log.error("PayPal link confirm rejected — setupTokenId mismatch: walletId={} expected={} got={}",
+                    wallet.getId(), wallet.getPendingPaypalSetupTokenId(), setupTokenId);
             throw new IllegalArgumentException("This PayPal setup token does not belong to the authenticated user");
         }
+
+        PaypalService.LinkAccountResult result = paypalService.createPaymentTokenFromSetupToken(setupTokenId);
 
         wallet.setPaypalVaultId(result.vaultId());
         wallet.setPaypalCustomerId(result.customerId());
         wallet.setPaypalConnectedEmail(result.payerEmail());
+        wallet.setPendingPaypalSetupTokenId(null);
         walletRepository.save(wallet);
 
-        log.info("PayPal account linked: walletId={} vaultId={} email={}",
-                wallet.getId(), result.vaultId(), result.payerEmail());
+        log.info("PayPal account linked: walletId={} vaultId={} customerId={} email={}",
+                wallet.getId(), result.vaultId(), result.customerId(), result.payerEmail());
     }
 
     @Transactional
