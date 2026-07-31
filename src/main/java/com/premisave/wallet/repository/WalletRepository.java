@@ -9,4 +9,12 @@ public interface WalletRepository extends MongoRepository<Wallet, String> {
     Optional<Wallet> findByAccountNumber(String accountNumber);
     Optional<Wallet> findByUserId(String userId);
     Optional<Wallet> findByStripeCustomerId(String stripeCustomerId);
+
+    /**
+     * Resolves which wallet a VAULT.PAYMENT-TOKEN.CREATED webhook belongs
+     * to, when PayPal finalizes vaulting asynchronously after a capture
+     * that returned vault.status="APPROVED" rather than "VAULTED" — see
+     * DepositService.attachPaypalVaultToken.
+     */
+    Optional<Wallet> findByPaypalCustomerId(String paypalCustomerId);
 }

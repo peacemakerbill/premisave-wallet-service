@@ -58,6 +58,16 @@ public class PaymentCallbackController {
 
     // ─── M-Pesa STK Push Callback ────────────────────────────────────────────
 
+    /**
+     * Receives M-Pesa STK Push callback from Safaricom Daraja.
+     * Secured via IP allowlist at the gateway/firewall level (no JWT).
+     *
+     * Safaricom's payload is nested under Body.stkCallback — see
+     * MpesaStkCallbackRequest for the exact shape. On success (ResultCode == 0)
+     * the paid amount, receipt number, and phone are inside CallbackMetadata.Item;
+     * there is no account number or email in this payload, so the transaction is
+     * matched back to a wallet via CheckoutRequestID (see DepositService).
+     */
     @PostMapping("/stk-callback")
     public ResponseEntity<ApiResponse<Void>> handleMpesaCallback(@RequestBody MpesaStkCallbackRequest callback) {
         MpesaStkCallbackRequest.StkCallback stk = callback.getBody().getStkCallback();
@@ -68,6 +78,7 @@ public class PaymentCallbackController {
 
         try {
             if (stk.getResultCode() != 0) {
+                // Not an error on our side — user cancelled, wrong PIN, timed out, etc.
                 depositService.markStkTransactionFailed(checkoutRequestId, stk.getResultDesc());
                 return ResponseEntity.ok(ApiResponse.success("Callback processed (payment not completed)"));
             }
@@ -88,6 +99,7 @@ public class PaymentCallbackController {
             return ResponseEntity.ok(ApiResponse.success("Callback processed"));
         } catch (Exception e) {
             log.error("Failed to process M-Pesa STK callback: checkoutRequestId={}", checkoutRequestId, e);
+            // Always return 200 to Safaricom — they retry on non-200
             return ResponseEntity.ok(ApiResponse.error("Callback processing failed: " + e.getMessage()));
         }
     }
@@ -358,14 +370,22 @@ public class PaymentCallbackController {
     // ─── PayPal Webhook ──────────────────────────────────────────────────────
 
     /**
-     * PayPal sends events here after order approval.
-     * Key event: CHECKOUT.ORDER.APPROVED → capture + credit wallet.
+     * PayPal sends events here after order approval, and after a vaulted
+     * payment source finishes saving.
      *
      * Verified via PayPal's Verify Webhook Signature API (see
      * PaypalService.verifyWebhookSignature) before any processing happens.
      * An unverifiable or invalid signature is rejected with 400 rather than
      * trusted, since a forged event here could otherwise trigger a deposit
      * confirmation for an arbitrary order ID.
+     *
+     * Key events:
+     *  - CHECKOUT.ORDER.APPROVED → capture + credit wallet (see
+     *    DepositService.confirmPaypalDeposit)
+     *  - VAULT.PAYMENT-TOKEN.CREATED → backstop for vaulting that was still
+     *    "APPROVED" (not "VAULTED") at capture time — finalizes the saved
+     *    account's vault_id/email on the wallet (see
+     *    DepositService.attachPaypalVaultToken)
      */
     @PostMapping("/paypal/webhook")
     public ResponseEntity<Void> paypalWebhook(
@@ -390,10 +410,18 @@ public class PaymentCallbackController {
 
             if ("CHECKOUT.ORDER.APPROVED".equals(payload.getEventType()) && payload.getResource() != null) {
                 depositService.confirmPaypalDeposit(payload.getResource().getId());
+            } else if ("VAULT.PAYMENT-TOKEN.CREATED".equals(payload.getEventType()) && payload.getResource() != null) {
+                var resource = payload.getResource();
+                String vaultId = resource.getId();
+                String customerId = resource.getCustomer() != null ? resource.getCustomer().getId() : null;
+                String email = resource.getPaymentSource() != null && resource.getPaymentSource().getPaypal() != null
+                        ? resource.getPaymentSource().getPaypal().getEmailAddress() : null;
+                depositService.attachPaypalVaultToken(vaultId, customerId, email);
             }
-            // Other event types (PAYMENT.CAPTURE.COMPLETED, etc.) intentionally
-            // ignored — capture is already triggered above or by the frontend
-            // confirm endpoint; confirmPaypalDeposit is idempotent either way.
+            // Other event types intentionally ignored — capture is already
+            // triggered above or by the frontend confirm endpoint;
+            // confirmPaypalDeposit/attachPaypalVaultToken are idempotent
+            // either way.
         } catch (Exception e) {
             // Always ACK 200 to PayPal regardless of internal outcome — same
             // pattern as MpesaC2BController.confirm.

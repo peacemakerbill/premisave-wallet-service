@@ -30,4 +30,10 @@ public class WalletResponse {
     /** Display-only, null if hasSavedCard is false. Never expose raw Stripe IDs here. */
     private String cardBrand;
     private String cardLast4;
+
+    /** True once a PayPal account is saved (vaulted) for faster repeat deposits. */
+    private boolean hasPaypalConnected;
+
+    /** Display-only, null if hasPaypalConnected is false. Never expose the raw vault_id/customer_id here. */
+    private String paypalConnectedEmail;
 }

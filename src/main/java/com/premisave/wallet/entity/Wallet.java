@@ -35,6 +35,9 @@ public class Wallet {
      * taken from the disbursement request itself, same reasoning as M-Pesa's
      * verified-phone-number pattern: eliminates typo/mistargeted-payout risk.
      * Set via PUT /wallet/paypal-email.
+     *
+     * NOTE: this is a manually-typed, unverified destination — distinct from
+     * paypalConnectedEmail below, which PayPal itself confirms via Vault.
      */
     private String paypalEmail;
 
@@ -73,6 +76,38 @@ public class Wallet {
     /** Display-only — safe to store (not sensitive), lets the frontend show "Visa •••• 4242" without an extra Stripe call. */
     private String stripeCardBrand;
     private String stripeCardLast4;
+
+    /**
+     * PayPal Vault payment token id (see PaypalService Vault methods) for
+     * this wallet's saved PayPal account — lets returning depositors pay
+     * without a full re-approval flow. Set after a successful vaulted
+     * capture (see DepositService.confirmPaypalDepositInternal) or, if
+     * vaulting was still processing at capture time (vault.status
+     * "APPROVED" rather than "VAULTED"), finalized later via the
+     * VAULT.PAYMENT-TOKEN.CREATED webhook (see
+     * DepositService.attachPaypalVaultToken). Sandbox and production
+     * vault tokens are entirely separate, same caveat as Stripe above.
+     */
+    @Indexed(sparse = true)
+    private String paypalVaultId;
+
+    /**
+     * PayPal-generated customer.id tied to this wallet's saved payment
+     * source(s). Passed back to PayPal on subsequent createOrder calls
+     * alongside paypalVaultId, and used to resolve which wallet a
+     * VAULT.PAYMENT-TOKEN.CREATED webhook belongs to when vaulting
+     * finalizes asynchronously (see WalletRepository.findByPaypalCustomerId).
+     */
+    @Indexed(unique = true, sparse = true)
+    private String paypalCustomerId;
+
+    /**
+     * Display-only — the PayPal account email PayPal itself confirmed
+     * during vaulting (returned alongside vault.id at capture). Distinct
+     * from paypalEmail above, which is a manually-typed, unverified payout
+     * destination. Safe to show in the frontend as "Connected: user@example.com".
+     */
+    private String paypalConnectedEmail;
 
     @CreatedDate
     private LocalDateTime createdAt;

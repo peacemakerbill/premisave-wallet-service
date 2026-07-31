@@ -278,6 +278,8 @@ public class WalletService {
         response.setHasSavedCard(wallet.getStripeDefaultPaymentMethodId() != null);
         response.setCardBrand(wallet.getStripeCardBrand());
         response.setCardLast4(wallet.getStripeCardLast4());
+        response.setHasPaypalConnected(wallet.getPaypalVaultId() != null);
+        response.setPaypalConnectedEmail(wallet.getPaypalConnectedEmail());
         return response;
     }
 }

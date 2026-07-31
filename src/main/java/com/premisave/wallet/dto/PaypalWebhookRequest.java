@@ -1,17 +1,13 @@
 package com.premisave.wallet.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 import java.util.List;
 
-/**
- * Minimal parse of PayPal's webhook payload — only the fields Premisave
- * actually needs to identify and reconcile an order. Real PayPal webhook
- * payloads carry many more fields; this DTO intentionally captures just
- * what's used for reconciliation.
- */
 @Data
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class PaypalWebhookRequest {
 
     @JsonProperty("event_type")
@@ -21,18 +17,48 @@ public class PaypalWebhookRequest {
     private Resource resource;
 
     @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Resource {
         @JsonProperty("id")
-        private String id; // PayPal Order ID — matches our Transaction.reference
+        private String id; // PayPal Order ID, or vault token id for VAULT.PAYMENT-TOKEN.CREATED
 
         @JsonProperty("status")
         private String status;
 
         @JsonProperty("purchase_units")
         private List<PurchaseUnit> purchaseUnits;
+
+        // Present on VAULT.PAYMENT-TOKEN.CREATED events
+        @JsonProperty("customer")
+        private Customer customer;
+
+        @JsonProperty("payment_source")
+        private PaymentSource paymentSource;
     }
 
     @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class Customer {
+        @JsonProperty("id")
+        private String id;
+    }
+
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class PaymentSource {
+        @JsonProperty("paypal")
+        private Paypal paypal;
+    }
+
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class Paypal {
+        @JsonProperty("email_address")
+        private String emailAddress;
+    }
+
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class PurchaseUnit {
         @JsonProperty("reference_id")
         private String referenceId;
@@ -42,6 +68,7 @@ public class PaypalWebhookRequest {
     }
 
     @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Amount {
         @JsonProperty("currency_code")
         private String currencyCode;

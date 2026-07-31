@@ -12,14 +12,15 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * PayPal v2 Orders API (deposits) + Payouts API (disbursements).
- * Uses OkHttp directly — no heavyweight PayPal SDK.
+ * PayPal v2 Orders API (deposits, with Vault support) + Payouts API
+ * (disbursements). Uses OkHttp directly — no heavyweight PayPal SDK.
  *
  * PayPal's official generated SDK (com.paypal.sdk:paypal-server-sdk) was
  * evaluated and deliberately NOT adopted: it doesn't cover the Payouts API
@@ -121,29 +122,92 @@ public class PaypalService {
         }
     }
 
-    // ─── Deposit (Orders API v2) ──────────────────────────────────────────────
+    // ─── Deposit (Orders API v2, with Vault support) ──────────────────────────
+
+    /** Result of createOrder — approveUrl is null when no payer action is required. */
+    public record CreateOrderResult(String orderId, String approveUrl) {}
+
+    /**
+     * Result of captureOrder. vaultId/customerId/payerEmail/vaultStatus are
+     * null unless this order's payment source was vaulted (or an existing
+     * vault_id was reused).
+     */
+    public record CaptureResult(
+            String captureId,
+            String vaultId,
+            String customerId,
+            String payerEmail,
+            String vaultStatus
+    ) {}
 
     /**
      * Creates a PayPal Order for wallet deposits, in USD.
-     * Returns the "approve" link — redirect the user there to authorise payment.
-     * After approval, call captureOrder() with the returned order_id.
      *
-     * @return Map with "orderId" and "approveUrl"
+     * @param existingVaultId    if the wallet already has a saved PayPal
+     *                           account, its vault_id — reused via
+     *                           payment_source.paypal.vault_id so the payer
+     *                           may not need to approve at all. PayPal may
+     *                           still return an approve link if
+     *                           re-authentication is required (fraud/risk
+     *                           signals, expired consent, etc.), so this
+     *                           does NOT assume a saved account is always
+     *                           redirect-free.
+     * @param existingCustomerId the PayPal customer.id tied to that saved
+     *                           account, sent alongside vault_id.
+     * @param requestVaulting    if true and there's no existing vault,
+     *                           requests that this order's payment source be
+     *                           vaulted on success (payment_source.paypal.attributes.vault).
+     * @return orderId + approveUrl (approveUrl is null when no payer action
+     *         is required — i.e. the saved vault_id was reused successfully)
      */
-    public Map<String, String> createOrder(BigDecimal usdAmount, String currency, String idempotencyKey) {
+    public CreateOrderResult createOrder(BigDecimal usdAmount, String currency, String idempotencyKey,
+                                          String existingVaultId, String existingCustomerId,
+                                          boolean requestVaulting) {
         String token = getAccessToken();
 
-        Map<String, Object> requestBody = Map.of(
-                "intent", "CAPTURE",
-                "purchase_units", List.of(Map.of(
-                        "reference_id", idempotencyKey,
-                        "amount", Map.of(
-                                "currency_code", currency.toUpperCase(),
-                                "value", usdAmount.toPlainString()
-                        ),
-                        "description", "Premisave wallet deposit"
-                ))
+        Map<String, Object> purchaseUnit = Map.of(
+                "reference_id", idempotencyKey,
+                "amount", Map.of(
+                        "currency_code", currency.toUpperCase(),
+                        "value", usdAmount.toPlainString()
+                ),
+                "description", "Premisave wallet deposit"
         );
+
+        Map<String, Object> requestBody;
+
+        if (existingVaultId != null && !existingVaultId.isBlank()) {
+            // Reuse the saved PayPal account.
+            Map<String, Object> paypalSource = new HashMap<>();
+            paypalSource.put("vault_id", existingVaultId);
+            if (existingCustomerId != null && !existingCustomerId.isBlank()) {
+                paypalSource.put("customer_id", existingCustomerId);
+            }
+            requestBody = Map.of(
+                    "intent", "CAPTURE",
+                    "purchase_units", List.of(purchaseUnit),
+                    "payment_source", Map.of("paypal", paypalSource)
+            );
+        } else if (requestVaulting) {
+            // Request vaulting so future deposits can reuse this account.
+            Map<String, Object> attributes = Map.of(
+                    "vault", Map.of(
+                            "store_in_vault", "ON_SUCCESS",
+                            "usage_type", "MERCHANT",
+                            "customer_type", "CONSUMER"
+                    )
+            );
+            requestBody = Map.of(
+                    "intent", "CAPTURE",
+                    "purchase_units", List.of(purchaseUnit),
+                    "payment_source", Map.of("paypal", Map.of("attributes", attributes))
+            );
+        } else {
+            requestBody = Map.of(
+                    "intent", "CAPTURE",
+                    "purchase_units", List.of(purchaseUnit)
+            );
+        }
 
         try {
             String json = objectMapper.writeValueAsString(requestBody);
@@ -165,7 +229,7 @@ public class PaypalService {
                 }
 
                 String orderId = node.path("id").asText();
-                String approveUrl = "";
+                String approveUrl = null;
                 for (JsonNode link : node.path("links")) {
                     if ("approve".equals(link.path("rel").asText())) {
                         approveUrl = link.path("href").asText();
@@ -173,12 +237,13 @@ public class PaypalService {
                     }
                 }
 
-                if (orderId.isBlank() || approveUrl.isBlank()) {
-                    throw new RuntimeException("PayPal createOrder response missing id/approve link: " + responseBody);
+                if (orderId.isBlank()) {
+                    throw new RuntimeException("PayPal createOrder response missing id: " + responseBody);
                 }
 
-                log.info("PayPal Order created: id={}", orderId);
-                return Map.of("orderId", orderId, "approveUrl", approveUrl);
+                log.info("PayPal Order created: id={} vaultReused={} approveRequired={}",
+                        orderId, existingVaultId != null && !existingVaultId.isBlank(), approveUrl != null);
+                return new CreateOrderResult(orderId, approveUrl);
             }
         } catch (Exception e) {
             throw new RuntimeException("PayPal createOrder failed: " + e.getMessage(), e);
@@ -186,15 +251,23 @@ public class PaypalService {
     }
 
     /**
-     * Captures (completes) a PayPal Order after the user approves it.
-     * Call this from your PayPal return/webhook handler.
+     * Captures (completes) a PayPal Order after the user approves it (or
+     * immediately, if a saved vault_id required no payer action). Call this
+     * from your PayPal return/webhook handler.
      *
-     * @return PayPal capture ID (use as providerReference)
+     * If this order's payment source was vaulted (or reused an existing
+     * vault_id), the response's vaultId/customerId/payerEmail/vaultStatus
+     * are populated so the caller can persist them on the wallet. If
+     * vaultStatus comes back "APPROVED" rather than "VAULTED", vaulting was
+     * still processing asynchronously at capture time — the
+     * VAULT.PAYMENT-TOKEN.CREATED webhook is the authoritative backstop for
+     * that case (see PaymentCallbackController / DepositService.attachPaypalVaultToken).
+     *
      * @throws PaypalCaptureException if PayPal rejects the capture — check
      *         isAlreadyCaptured() to distinguish idempotent no-ops from
      *         genuine failures.
      */
-    public String captureOrder(String orderId) {
+    public CaptureResult captureOrder(String orderId) {
         String token = getAccessToken();
         RequestBody rb = RequestBody.create("{}", MediaType.parse("application/json"));
 
@@ -223,8 +296,18 @@ public class PaypalService {
             }
 
             String captureId = captures.get(0).path("id").asText();
-            log.info("PayPal Order captured: orderId={} captureId={}", orderId, captureId);
-            return captureId;
+
+            // Vaulting info, if a payment_source.paypal is present in the response.
+            JsonNode paypalSource = node.path("payment_source").path("paypal");
+            JsonNode vaultNode = paypalSource.path("attributes").path("vault");
+            String vaultId = vaultNode.path("id").asText(null);
+            String vaultStatus = vaultNode.path("status").asText(null);
+            String customerId = vaultNode.path("customer").path("id").asText(null);
+            String payerEmail = paypalSource.path("email_address").asText(null);
+
+            log.info("PayPal Order captured: orderId={} captureId={} vaultId={} vaultStatus={}",
+                    orderId, captureId, vaultId, vaultStatus);
+            return new CaptureResult(captureId, vaultId, customerId, payerEmail, vaultStatus);
         } catch (PaypalCaptureException e) {
             throw e;
         } catch (Exception e) {
