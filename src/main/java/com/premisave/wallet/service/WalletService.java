@@ -265,6 +265,42 @@ public class WalletService {
         return mapToResponse(wallet);
     }
 
+    /**
+     * Unlinks the wallet's saved PayPal account (vault_id/customer_id/
+     * connected email) so future PayPal deposits no longer auto-reuse it —
+     * the next deposit will create a fresh order and, if requestVaulting
+     * succeeds, save whatever account the user pays with next.
+     *
+     * NOT blocked while frozen — same reasoning as
+     * DepositService.createStripeSetupIntent: this doesn't move money, it
+     * only changes which saved account future deposits would reuse, so
+     * there's no reason to prevent it during a freeze.
+     *
+     * This does NOT revoke the vault token on PayPal's side — PayPal
+     * doesn't expose a safe customer-scoped "delete this vault_id" call via
+     * server API. It only stops Premisave from storing/reusing it. Distinct
+     * from paypalEmail (the manual payout destination set via
+     * updatePaypalEmail above) — that's left untouched here.
+     */
+    @Transactional
+    public WalletResponse disconnectPaypalAccount(String userId) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
+
+        if (wallet.getPaypalVaultId() == null) {
+            log.warn("PayPal disconnect rejected — no PayPal account linked for userId: {}", userId);
+            throw new IllegalStateException("No PayPal account is linked to this wallet.");
+        }
+
+        wallet.setPaypalVaultId(null);
+        wallet.setPaypalCustomerId(null);
+        wallet.setPaypalConnectedEmail(null);
+        wallet = walletRepository.save(wallet);
+        log.info("PayPal account disconnected for userId={}", userId);
+
+        return mapToResponse(wallet);
+    }
+
     private WalletResponse mapToResponse(Wallet wallet) {
         WalletResponse response = new WalletResponse();
         response.setId(wallet.getId());

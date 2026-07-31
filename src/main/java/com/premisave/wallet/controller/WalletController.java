@@ -122,6 +122,25 @@ public class WalletController {
     }
 
     /**
+     * Unlinks the wallet's saved PayPal account (vault_id/customer_id/
+     * connected email) so future deposits stop auto-reusing it. Not
+     * blocked while frozen — see WalletService.disconnectPaypalAccount.
+     * Does not revoke the token on PayPal's side, only unlinks it from
+     * Premisave's records.
+     * PUT /wallet/paypal/disconnect
+     */
+    @PutMapping("/paypal/disconnect")
+    public ResponseEntity<ApiResponse<WalletResponse>> disconnectPaypal(
+            Authentication auth,
+            HttpServletRequest request) {
+        String userId = (String) request.getAttribute("userId");
+        if (userId == null) userId = auth.getName();
+        WalletResponse response = walletService.disconnectPaypalAccount(userId);
+        return ResponseEntity.ok(ApiResponse.success(
+                "PayPal account unlinked. Note: this does not revoke access on PayPal's side.", response));
+    }
+
+    /**
      * Sets/updates the M-Pesa phone number used for quick deposits (STK
      * push — no need to type a number every time) and disbursements.
      * Resolved authoritatively from here by DepositService/

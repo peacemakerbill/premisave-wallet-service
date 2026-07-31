@@ -1,5 +1,6 @@
 package com.premisave.wallet.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.premisave.wallet.dto.ApiResponse;
 import com.premisave.wallet.dto.B2BExpressCheckoutCallbackRequest;
@@ -370,8 +371,12 @@ public class PaymentCallbackController {
     // ─── PayPal Webhook ──────────────────────────────────────────────────────
 
     /**
-     * PayPal sends events here after order approval, and after a vaulted
-     * payment source finishes saving.
+     * PayPal sends events here after order approval, after a vaulted
+     * payment source finishes saving, and — critically for vault-reuse
+     * deposits — after a capture that happened synchronously at order
+     * creation time (no CHECKOUT.ORDER.APPROVED fires for that case, since
+     * there was no separate approval step; PAYMENT.CAPTURE.COMPLETED is the
+     * only event PayPal sends).
      *
      * Verified via PayPal's Verify Webhook Signature API (see
      * PaypalService.verifyWebhookSignature) before any processing happens.
@@ -382,6 +387,10 @@ public class PaymentCallbackController {
      * Key events:
      *  - CHECKOUT.ORDER.APPROVED → capture + credit wallet (see
      *    DepositService.confirmPaypalDeposit)
+     *  - PAYMENT.CAPTURE.COMPLETED → backstop for orders captured
+     *    synchronously at creation time (vault reuse) or any other capture
+     *    this service didn't already reconcile — confirmPaypalDeposit is
+     *    idempotent either way
      *  - VAULT.PAYMENT-TOKEN.CREATED → backstop for vaulting that was still
      *    "APPROVED" (not "VAULTED") at capture time — finalizes the saved
      *    account's vault_id/email on the wallet (see
@@ -417,6 +426,23 @@ public class PaymentCallbackController {
                 String email = resource.getPaymentSource() != null && resource.getPaymentSource().getPaypal() != null
                         ? resource.getPaymentSource().getPaypal().getEmailAddress() : null;
                 depositService.attachPaypalVaultToken(vaultId, customerId, email);
+            } else if ("PAYMENT.CAPTURE.COMPLETED".equals(payload.getEventType())) {
+                // Backstop for vault-reuse auto-capture: when an order was
+                // captured synchronously at creation time (existing vault_id,
+                // no re-auth required), PayPal sends this event instead of
+                // CHECKOUT.ORDER.APPROVED. The order_id lives under
+                // resource.supplementary_data.related_ids.order_id, which
+                // PaypalWebhookRequest doesn't model — parsed from the raw
+                // body directly instead.
+                JsonNode capturePayload = objectMapper.readTree(rawBody);
+                String orderId = capturePayload.path("resource").path("supplementary_data")
+                        .path("related_ids").path("order_id").asText(null);
+
+                if (orderId != null && !orderId.isBlank()) {
+                    depositService.confirmPaypalDeposit(orderId);
+                } else {
+                    log.warn("PAYMENT.CAPTURE.COMPLETED webhook missing resource.supplementary_data.related_ids.order_id — cannot reconcile");
+                }
             }
             // Other event types intentionally ignored — capture is already
             // triggered above or by the frontend confirm endpoint;
