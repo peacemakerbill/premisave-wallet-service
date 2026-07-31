@@ -139,6 +139,58 @@ public class WalletController {
         return ResponseEntity.ok(ApiResponse.success(
                 "PayPal account unlinked. Note: this does not revoke access on PayPal's side.", response));
     }
+    
+    /**
+     * Starts a standalone PayPal account link (no payment) — mirrors
+     * createStripeSetupIntent. Rejects with 409-style error if a PayPal
+     * account is already linked.
+     * POST /wallet/paypal/link
+     */
+    @PostMapping("/paypal/link")
+    public ResponseEntity<ApiResponse<Map<String, String>>> createPaypalLink(
+            Authentication auth,
+            HttpServletRequest request) {
+        String userId = (String) request.getAttribute("userId");
+        if (userId == null) userId = auth.getName();
+        Map<String, String> result = depositService.createPaypalLinkToken(userId);
+        return ResponseEntity.ok(ApiResponse.success("PayPal link initiated", result));
+    }
+
+    /**
+     * Called by the frontend after the user approves the PayPal setup
+     * token (returns from PayPal's approval redirect). Saves the linked
+     * account onto the wallet.
+     * POST /wallet/paypal/link/confirm
+     */
+    @PostMapping("/paypal/link/confirm")
+    public ResponseEntity<ApiResponse<Void>> confirmPaypalLink(
+            @RequestBody Map<String, String> body,
+            Authentication auth,
+            HttpServletRequest request) {
+        String setupTokenId = body.get("setupTokenId");
+        if (setupTokenId == null || setupTokenId.isBlank()) {
+            throw new IllegalArgumentException("setupTokenId is required");
+        }
+        String userId = (String) request.getAttribute("userId");
+        if (userId == null) userId = auth.getName();
+        depositService.confirmPaypalLink(setupTokenId, userId);
+        return ResponseEntity.ok(ApiResponse.success("PayPal account linked"));
+    }
+
+    /**
+     * Read-only — returns the wallet's linked PayPal account status for
+     * the frontend to display.
+     * GET /wallet/paypal
+     */
+    @GetMapping("/paypal")
+    public ResponseEntity<ApiResponse<PaypalAccountResponse>> getPaypalAccount(
+            Authentication auth,
+            HttpServletRequest request) {
+        String userId = (String) request.getAttribute("userId");
+        if (userId == null) userId = auth.getName();
+        return ResponseEntity.ok(ApiResponse.success("PayPal account status retrieved",
+                walletService.getPaypalAccount(userId)));
+    }
 
     /**
      * Sets/updates the M-Pesa phone number used for quick deposits (STK

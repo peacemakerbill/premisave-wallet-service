@@ -19,21 +19,9 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * PayPal v2 Orders API (deposits, with Vault support) + Payouts API
- * (disbursements). Uses OkHttp directly — no heavyweight PayPal SDK.
- *
- * PayPal's official generated SDK (com.paypal.sdk:paypal-server-sdk) was
- * evaluated and deliberately NOT adopted: it doesn't cover the Payouts API
- * at all, so using it would still require hand-rolled OkHttp calls for
- * payouts anyway — splitting PayPal integration across two different HTTP
- * clients and two different error-handling styles for no real benefit.
- * Keeping everything on OkHttp/Jackson also preserves the custom
- * PaypalCaptureException.isAlreadyCaptured() distinction that
- * DepositService's reconciliation logic depends on.
- *
- * All amounts handled by this service are in USD (see DepositService and
- * DisbursementService for the KES<->USD conversion applied around these
- * calls, since PayPal doesn't support KES as a transaction currency).
+ * PayPal v2 Orders API (deposits, with Vault support) + Vault v3 API
+ * (standalone account linking, no payment) + Payouts API (disbursements).
+ * Uses OkHttp directly — no heavyweight PayPal SDK.
  */
 @Slf4j
 @Service
@@ -111,16 +99,6 @@ public class PaypalService {
 
     // ─── Deposit (Orders API v2, with Vault support) ──────────────────────────
 
-    /**
-     * Result of createOrder. approveUrl is null when no payer action is
-     * required. When PayPal captures the order synchronously as part of
-     * order creation itself — which happens when an existing vault_id is
-     * reused and no re-authentication is needed — status will be
-     * "COMPLETED" and captureId/vaultId/etc. will be populated from that
-     * same response, so the caller can credit the wallet directly instead
-     * of calling captureOrder() again (which would otherwise fail with
-     * ORDER_ALREADY_CAPTURED — see DepositService.initiatePaypalDeposit).
-     */
     public record CreateOrderResult(
             String orderId,
             String approveUrl,
@@ -132,7 +110,6 @@ public class PaypalService {
             String vaultStatus
     ) {}
 
-    /** Result of captureOrder / getOrder. Fields other than captureId are null unless vaulted. */
     public record CaptureResult(
             String captureId,
             String vaultId,
@@ -230,13 +207,6 @@ public class PaypalService {
                     throw new RuntimeException("PayPal createOrder response missing id: " + responseBody);
                 }
 
-                // When an existing vault_id is reused and no payer action is
-                // required, PayPal captures the order synchronously as part
-                // of THIS response — status comes back "COMPLETED" with the
-                // capture/vault details already present, rather than
-                // "CREATED" awaiting a separate /capture call. Extract that
-                // here so the caller never has to call captureOrder() on an
-                // order PayPal has already finished.
                 String status = node.path("status").asText(null);
                 String captureId = null;
                 String vaultId = null;
@@ -318,15 +288,6 @@ public class PaypalService {
         }
     }
 
-    /**
-     * Fetches an existing Order's current state — the reconciliation
-     * fallback when captureOrder() reports ORDER_ALREADY_CAPTURED (see
-     * DepositService.confirmPaypalDepositInternal). Rather than giving up
-     * and leaving the local transaction stuck PENDING, this looks up what
-     * PayPal already captured (typically via vault-reuse auto-capture at
-     * order-creation time, or a race with the webhook) so the caller can
-     * credit the wallet against the real capture.
-     */
     public CaptureResult getOrder(String orderId) {
         String token = getAccessToken();
 
@@ -367,6 +328,136 @@ public class PaypalService {
             return new CaptureResult(captureId, vaultId, customerId, payerEmail, vaultStatus);
         } catch (Exception e) {
             throw new RuntimeException("PayPal getOrder failed: " + e.getMessage(), e);
+        }
+    }
+
+    // ─── Standalone Account Linking (Vault v3 — no payment) ───────────────────
+
+    /** Result of createSetupToken — approveUrl is where the payer approves the link. */
+    public record SetupTokenResult(String setupTokenId, String approveUrl) {}
+
+    /** Result of createPaymentTokenFromSetupToken — the linked account's vault_id/customer/email. */
+    public record LinkAccountResult(String vaultId, String customerId, String payerEmail) {}
+
+    /**
+     * Creates a PayPal Vault v3 setup token — the "link an account without
+     * paying" analogue of Stripe's SetupIntent (see
+     * DepositService.createStripeSetupIntent). customerId is set explicitly
+     * to our own userId so createPaymentTokenFromSetupToken's response can
+     * be checked against the caller at confirm time (see
+     * DepositService.confirmPaypalLink) — without that, a setupTokenId
+     * minted for one user could otherwise be replayed to link a different
+     * user's PayPal account.
+     */
+    public SetupTokenResult createSetupToken(String customerId) {
+        String token = getAccessToken();
+
+        Map<String, Object> requestBody = Map.of(
+                "payment_source", Map.of(
+                        "paypal", Map.of(
+                                "usage_type", "MERCHANT",
+                                "customer_type", "CONSUMER",
+                                "experience_context", Map.of(
+                                        "return_url", returnUrl,
+                                        "cancel_url", cancelUrl
+                                )
+                        )
+                ),
+                "customer", Map.of("id", customerId)
+        );
+
+        try {
+            String json = objectMapper.writeValueAsString(requestBody);
+            RequestBody rb = RequestBody.create(json, MediaType.parse("application/json"));
+
+            Request request = new Request.Builder()
+                    .url(baseUrl() + "/v3/vault/setup-tokens")
+                    .addHeader("Authorization", "Bearer " + token)
+                    .addHeader("PayPal-Request-Id", UUID.randomUUID().toString())
+                    .post(rb)
+                    .build();
+
+            try (Response response = http.newCall(request).execute()) {
+                String responseBody = response.body().string();
+                JsonNode node = objectMapper.readTree(responseBody);
+
+                if (!response.isSuccessful()) {
+                    throw new RuntimeException("PayPal createSetupToken failed (" + response.code() + "): " + responseBody);
+                }
+
+                String setupTokenId = node.path("id").asText();
+                String approveUrl = null;
+                for (JsonNode link : node.path("links")) {
+                    if ("approve".equals(link.path("rel").asText())) {
+                        approveUrl = link.path("href").asText();
+                        break;
+                    }
+                }
+
+                if (setupTokenId.isBlank() || approveUrl == null) {
+                    throw new RuntimeException("PayPal createSetupToken response missing id/approve link: " + responseBody);
+                }
+
+                log.info("PayPal setup token created: id={} customerId={}", setupTokenId, customerId);
+                return new SetupTokenResult(setupTokenId, approveUrl);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("PayPal createSetupToken failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Exchanges an approved setup token for a payment token — the actual
+     * vault_id that can be reused in future createOrder() calls (see
+     * DepositService.initiatePaypalDeposit's existingVaultId param). Call
+     * this after the payer returns from approving the setup token's
+     * approveUrl.
+     */
+    public LinkAccountResult createPaymentTokenFromSetupToken(String setupTokenId) {
+        String token = getAccessToken();
+
+        Map<String, Object> requestBody = Map.of(
+                "payment_source", Map.of(
+                        "token", Map.of(
+                                "id", setupTokenId,
+                                "type", "SETUP_TOKEN"
+                        )
+                )
+        );
+
+        try {
+            String json = objectMapper.writeValueAsString(requestBody);
+            RequestBody rb = RequestBody.create(json, MediaType.parse("application/json"));
+
+            Request request = new Request.Builder()
+                    .url(baseUrl() + "/v3/vault/payment-tokens")
+                    .addHeader("Authorization", "Bearer " + token)
+                    .addHeader("PayPal-Request-Id", UUID.randomUUID().toString())
+                    .post(rb)
+                    .build();
+
+            try (Response response = http.newCall(request).execute()) {
+                String responseBody = response.body().string();
+                JsonNode node = objectMapper.readTree(responseBody);
+
+                if (!response.isSuccessful()) {
+                    throw new RuntimeException("PayPal createPaymentToken failed (" + response.code() + "): " + responseBody);
+                }
+
+                String vaultId = node.path("id").asText(null);
+                String customerId = node.path("customer").path("id").asText(null);
+                String payerEmail = node.path("payment_source").path("paypal").path("email_address").asText(null);
+
+                if (vaultId == null || vaultId.isBlank()) {
+                    throw new RuntimeException("PayPal createPaymentToken response missing id: " + responseBody);
+                }
+
+                log.info("PayPal payment token created: vaultId={} customerId={} email={}",
+                        vaultId, customerId, payerEmail);
+                return new LinkAccountResult(vaultId, customerId, payerEmail);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("PayPal createPaymentToken failed: " + e.getMessage(), e);
         }
     }
 

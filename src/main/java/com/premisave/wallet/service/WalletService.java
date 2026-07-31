@@ -300,6 +300,19 @@ public class WalletService {
 
         return mapToResponse(wallet);
     }
+    
+    /**
+     * Read-only lookup of the wallet's linked PayPal account, for the
+     * frontend to render (e.g. a "Connected: user@example.com" / "Not
+     * connected" state on a payment methods screen). Allowed while frozen —
+     * same reasoning as getStatement: it's read-only.
+     */
+    public PaypalAccountResponse getPaypalAccount(String userId) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
+
+        return new PaypalAccountResponse(wallet.getPaypalVaultId() != null, wallet.getPaypalConnectedEmail());
+    }
 
     private WalletResponse mapToResponse(Wallet wallet) {
         WalletResponse response = new WalletResponse();

@@ -374,6 +374,67 @@ public class DepositService {
                 "Redirect the user to the PayPal approval URL to complete the deposit. "
                         + "USD " + usdAmount + " will be credited as approximately KES " + kesEquivalent + ".");
     }
+    
+    /**
+     * Starts a standalone PayPal account link — no payment, mirrors
+     * createStripeSetupIntent. Rejects up front if an account is already
+     * linked, so the frontend can show the message before ever redirecting
+     * the user to PayPal.
+     */
+    public Map<String, String> createPaypalLinkToken(String userId) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found. Please create a wallet first."));
+
+        if (wallet.getPaypalVaultId() != null) {
+            throw new IllegalStateException(
+                    "A PayPal account (" + wallet.getPaypalConnectedEmail() + ") is already linked to this wallet. "
+                            + "Disconnect it first before linking a new one.");
+        }
+
+        PaypalService.SetupTokenResult result = paypalService.createSetupToken(userId);
+        log.info("PayPal setup token created for account linking: userId={} setupTokenId={}", userId, result.setupTokenId());
+
+        return Map.of("setupTokenId", result.setupTokenId(), "approveUrl", result.approveUrl());
+    }
+
+    /**
+     * Called by the frontend after the user approves the PayPal Vault
+     * setup token (returns from PayPal's approval redirect). Exchanges it
+     * for the real vault_id and saves it on the wallet.
+     *
+     * Security: verifies the payment token's customer.id matches the
+     * authenticated caller. createPaypalLinkToken always creates the setup
+     * token with customer.id=userId, so a mismatch here means the
+     * setupTokenId being confirmed wasn't minted for this user — reject
+     * rather than link the wrong account.
+     */
+    @Transactional
+    public void confirmPaypalLink(String setupTokenId, String userId) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
+
+        if (wallet.getPaypalVaultId() != null) {
+            throw new IllegalStateException(
+                    "A PayPal account (" + wallet.getPaypalConnectedEmail() + ") is already linked to this wallet. "
+                            + "Disconnect it first before linking a new one.");
+        }
+
+        PaypalService.LinkAccountResult result = paypalService.createPaymentTokenFromSetupToken(setupTokenId);
+
+        if (result.customerId() == null || !result.customerId().equals(userId)) {
+            log.error("PayPal link confirm rejected — customer mismatch: expected userId={} got={}",
+                    userId, result.customerId());
+            throw new IllegalArgumentException("This PayPal setup token does not belong to the authenticated user");
+        }
+
+        wallet.setPaypalVaultId(result.vaultId());
+        wallet.setPaypalCustomerId(result.customerId());
+        wallet.setPaypalConnectedEmail(result.payerEmail());
+        walletRepository.save(wallet);
+
+        log.info("PayPal account linked: walletId={} vaultId={} email={}",
+                wallet.getId(), result.vaultId(), result.payerEmail());
+    }
 
     @Transactional
     public PaymentResponse confirmPaypalDeposit(String orderId) {
