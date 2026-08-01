@@ -372,17 +372,18 @@ public class PaymentCallbackController {
 
     /**
      * PayPal sends events here after order approval, after a vaulted
-     * payment source finishes saving, and — critically for vault-reuse
-     * deposits — after a capture that happened synchronously at order
-     * creation time (no CHECKOUT.ORDER.APPROVED fires for that case, since
-     * there was no separate approval step; PAYMENT.CAPTURE.COMPLETED is the
-     * only event PayPal sends).
+     * payment source finishes saving, after a capture that happened
+     * synchronously at order creation time (no CHECKOUT.ORDER.APPROVED fires
+     * for that case, since there was no separate approval step;
+     * PAYMENT.CAPTURE.COMPLETED is the only event PayPal sends), and after a
+     * Payouts batch item resolves (the Payouts API is asynchronous — a
+     * successful create-payout response only means the batch was queued).
      *
      * Verified via PayPal's Verify Webhook Signature API (see
      * PaypalService.verifyWebhookSignature) before any processing happens.
      * An unverifiable or invalid signature is rejected with 400 rather than
      * trusted, since a forged event here could otherwise trigger a deposit
-     * confirmation for an arbitrary order ID.
+     * confirmation for an arbitrary order ID (or a false payout success).
      *
      * Key events:
      *  - CHECKOUT.ORDER.APPROVED → capture + credit wallet (see
@@ -395,6 +396,12 @@ public class PaymentCallbackController {
      *    "APPROVED" (not "VAULTED") at capture time — finalizes the saved
      *    account's vault_id/email on the wallet (see
      *    DepositService.attachPaypalVaultToken)
+     *  - PAYMENT.PAYOUTS-ITEM.* (SUCCEEDED/FAILED/DENIED/BLOCKED/RETURNED/
+     *    REFUNDED/UNCLAIMED/HELD/CANCELED) → reconciles a PayPal disbursement
+     *    (see DisbursementService.completePaypalDisbursement). Not modeled in
+     *    PaypalWebhookRequest (its Resource type is shaped for orders/vault
+     *    events), so these fields are read straight off the raw JSON body,
+     *    same approach as the PAYMENT.CAPTURE.COMPLETED backstop below.
      */
     @PostMapping("/paypal/webhook")
     public ResponseEntity<Void> paypalWebhook(
@@ -443,11 +450,35 @@ public class PaymentCallbackController {
                 } else {
                     log.warn("PAYMENT.CAPTURE.COMPLETED webhook missing resource.supplementary_data.related_ids.order_id — cannot reconcile");
                 }
+            } else if (payload.getEventType() != null && payload.getEventType().startsWith("PAYMENT.PAYOUTS-ITEM.")) {
+                // Payouts item webhook — resource shape (payout_batch_id,
+                // payout_item_id, transaction_id, transaction_status, errors)
+                // isn't modeled in PaypalWebhookRequest, so read it straight
+                // off the raw body, same as the PAYMENT.CAPTURE.COMPLETED
+                // backstop above.
+                JsonNode payoutPayload = objectMapper.readTree(rawBody);
+                JsonNode resource = payoutPayload.path("resource");
+                String payoutBatchId = resource.path("payout_batch_id").asText(null);
+                String payoutItemId = resource.path("payout_item_id").asText(null);
+                String paypalTransactionId = resource.path("transaction_id").asText(null);
+                String transactionStatus = resource.path("transaction_status").asText(null);
+                String errorMessage = resource.path("errors").path("message").asText(null);
+
+                log.info("PayPal payout item webhook: eventType={} payoutBatchId={} payoutItemId={} transactionStatus={}",
+                        payload.getEventType(), payoutBatchId, payoutItemId, transactionStatus);
+
+                if (payoutBatchId != null && !payoutBatchId.isBlank()) {
+                    disbursementService.completePaypalDisbursement(
+                            payoutBatchId, transactionStatus, paypalTransactionId, errorMessage);
+                } else {
+                    log.warn("PayPal payout item webhook missing resource.payout_batch_id — cannot reconcile: eventType={}",
+                            payload.getEventType());
+                }
             }
             // Other event types intentionally ignored — capture is already
             // triggered above or by the frontend confirm endpoint;
-            // confirmPaypalDeposit/attachPaypalVaultToken are idempotent
-            // either way.
+            // confirmPaypalDeposit/attachPaypalVaultToken/completePaypalDisbursement
+            // are idempotent either way.
         } catch (Exception e) {
             // Always ACK 200 to PayPal regardless of internal outcome — same
             // pattern as MpesaC2BController.confirm.

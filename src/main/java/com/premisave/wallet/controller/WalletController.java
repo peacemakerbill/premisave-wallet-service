@@ -49,6 +49,9 @@ public class WalletController {
         return ResponseEntity.ok(ApiResponse.success("Wallet created", wallet));
     }
 
+    /**
+     * Load Funds to your Wallet(M-Pesa/PayPal/Stripe)
+     */
     @PostMapping("/deposit")
     public ResponseEntity<ApiResponse<PaymentResponse>> deposit(
             @Valid @RequestBody DepositRequest depositRequest,

@@ -51,6 +51,19 @@ public class DisbursementService {
     private final UserProfileClient userProfileClient;
     private final FxRateService fxRateService;
 
+    /**
+     * Terminal PayPal payout item transaction_status values (or, equivalently,
+     * PAYMENT.PAYOUTS-ITEM.* webhook event suffixes) that will never resolve
+     * on their own — treated the same as a hard failure: refund the wallet
+     * and mark the disbursement FAILED. Deliberately excludes UNCLAIMED and
+     * HELD/ONHOLD, since those can still turn into SUCCESS or FAILED later
+     * (recipient claims it, hold gets released/reviewed) — a disbursement in
+     * one of those states is left PENDING for a subsequent webhook event to
+     * finalize.
+     */
+    private static final List<String> PAYPAL_TERMINAL_FAILURE_STATUSES =
+            List.of("FAILED", "DENIED", "BLOCKED", "RETURNED", "REFUNDED", "REVERSED", "CANCELED");
+
     // No static PayPal rate here anymore — see disbursePaypal, which now
     // fetches a live rate from Frankfurter (FxRateService) on every call.
 
@@ -139,8 +152,23 @@ public class DisbursementService {
         disbursement.setChannel(provider + "_PAYOUT");
 
         if (result.success()) {
-            disbursement.setStatus(DisbursementStatus.SUCCESS);
             disbursement.setProviderReference(result.providerRef());
+
+            if ("PAYPAL".equals(provider)) {
+                // The Payouts API is asynchronous — a successful response here
+                // only means PayPal accepted and queued the batch, not that the
+                // recipient was actually paid. Stay PENDING until a
+                // PAYMENT.PAYOUTS-ITEM.* webhook reconciles the real outcome
+                // (see completePaypalDisbursement below) — same PENDING-until-
+                // callback pattern as M-Pesa B2C above. The transaction record
+                // is created there too, only once success is confirmed, not here.
+                disbursement.setStatus(DisbursementStatus.PENDING);
+                disbursementRepository.save(disbursement);
+                return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
+                        "Disbursement queued with PayPal — awaiting confirmation");
+            }
+
+            disbursement.setStatus(DisbursementStatus.SUCCESS);
             saveDisbursementTransaction(userId, wallet.getId(), request.getAmount(), disbursement, reference);
         } else {
             refund(wallet, request.getAmount());
@@ -347,6 +375,66 @@ public class DisbursementService {
             log.warn("M-Pesa disbursement queue timeout: id={} conversationId={} — awaiting eventual result or manual reconciliation",
                     d.getId(), conversationId);
         }, () -> log.warn("Timeout callback for unknown ConversationID={}", conversationId));
+    }
+
+    // ─── Reconciliation from PayPal's Payouts webhook ────────────────────────
+
+    /**
+     * Reconciles a PayPal Payouts item webhook (PAYMENT.PAYOUTS-ITEM.*) back
+     * to the disbursement that started it, looked up by payout_batch_id
+     * (stored as providerReference — see processDisbursement's PAYPAL branch
+     * above). Safe to key off the batch id rather than the item id because
+     * disbursePaypal only ever sends a single item per batch.
+     *
+     * transactionStatus is PayPal's resource.transaction_status value
+     * (SUCCESS/FAILED/DENIED/BLOCKED/RETURNED/REFUNDED/UNCLAIMED/ONHOLD/...).
+     * SUCCESS credits nothing extra (the wallet was already debited
+     * up-front in processDisbursement) — it just flips the disbursement to
+     * SUCCESS and records the completed transaction, same as
+     * completeMpesaDisbursement's B2C branch. A terminal failure status
+     * refunds the wallet and marks FAILED. Anything else (UNCLAIMED, held
+     * for review, etc.) is logged only — the disbursement stays PENDING for
+     * a later webhook event to resolve.
+     */
+    @Transactional
+    public void completePaypalDisbursement(String payoutBatchId, String transactionStatus,
+                                            String paypalTransactionId, String errorMessage) {
+        Disbursement d = disbursementRepository.findByProviderReference(payoutBatchId).orElse(null);
+        if (d == null) {
+            log.warn("PayPal payout webhook for unknown payout_batch_id={} — ignoring", payoutBatchId);
+            return;
+        }
+
+        if (d.getStatus() != DisbursementStatus.PENDING) {
+            log.warn("PayPal payout webhook for already-finalized disbursement id={} status={} — ignoring duplicate",
+                    d.getId(), d.getStatus());
+            return;
+        }
+
+        if ("SUCCESS".equals(transactionStatus)) {
+            d.setStatus(DisbursementStatus.SUCCESS);
+            disbursementRepository.save(d);
+
+            if (d.getWalletId() != null) {
+                saveDisbursementTransaction(d.getUserId(), d.getWalletId(), d.getAmount(), d, d.getReference());
+            }
+            log.info("PayPal disbursement completed: id={} payoutBatchId={} paypalTransactionId={}",
+                    d.getId(), payoutBatchId, paypalTransactionId);
+        } else if (PAYPAL_TERMINAL_FAILURE_STATUSES.contains(transactionStatus)) {
+            if (d.getWalletId() != null) {
+                Wallet wallet = walletRepository.findById(d.getWalletId())
+                        .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + d.getWalletId()));
+                refund(wallet, d.getAmount());
+            }
+            d.setStatus(DisbursementStatus.FAILED);
+            d.setFailureReason(errorMessage != null && !errorMessage.isBlank() ? errorMessage : transactionStatus);
+            disbursementRepository.save(d);
+            log.warn("PayPal disbursement failed ({}), refunded where applicable: id={} payoutBatchId={} reason={}",
+                    transactionStatus, d.getId(), payoutBatchId, errorMessage);
+        } else {
+            log.info("PayPal disbursement id={} payoutBatchId={} in non-terminal state={} — awaiting further webhook",
+                    d.getId(), payoutBatchId, transactionStatus);
+        }
     }
 
     // ─── Stuck-disbursement sweeper ──────────────────────────────────────────
