@@ -31,14 +31,14 @@ public class DisbursementController {
     }
 
     /**
-     * Pays directly into the caller's own Pochi la Biashara business wallet
-     * (CommandID BusinessPayToPochi) instead of their main M-Pesa balance.
-     * Unlike the generic /disbursements above, this does NOT deduct from
-     * the caller's own Premisave wallet — it's a disbursement from Premisave's
-     * B2C shortcode float, tracked for audit/reconciliation via the
-     * Disbursement record (channel=B2C_POCHI), same as B2B/B2C Top Up. The
-     * recipient phone number is always resolved from the caller's own
-     * verified profile, same as the B2C endpoint above.
+     * Withdraws from the caller's own Premisave wallet directly into their
+     * own Pochi la Biashara business account (CommandID BusinessPayToPochi)
+     * instead of their main M-Pesa balance. Same as the generic
+     * POST /disbursements above — checks wallet exists/not frozen/sufficient
+     * balance, debits the wallet up front, and refunds on failure — just a
+     * different M-Pesa destination type. The recipient phone number is
+     * always resolved from the caller's own verified profile, same as the
+     * generic endpoint.
      * POST /disbursements/b2pochi
      */
     @PostMapping("/b2pochi")

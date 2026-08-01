@@ -16,4 +16,15 @@ public interface DisbursementRepository extends MongoRepository<Disbursement, St
 
     /** Used by the stuck-disbursement sweeper. */
     List<Disbursement> findByStatusAndCreatedAtBefore(DisbursementStatus status, LocalDateTime cutoff);
+
+    /**
+     * Used by IdempotencyService to detect a duplicate disbursement request.
+     * Necessary because a Disbursement record is created immediately (status
+     * PENDING/SUCCESS/FAILED) while the corresponding Transaction row is only
+     * created later, once success is actually confirmed (synchronously for
+     * Stripe, or via webhook for M-Pesa/PayPal) — checking TransactionRepository
+     * alone lets a resubmitted reference slip through and trigger a second
+     * real payout while the first is still PENDING.
+     */
+    boolean existsByReference(String reference);
 }

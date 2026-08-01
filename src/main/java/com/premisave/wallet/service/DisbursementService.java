@@ -7,6 +7,7 @@ import com.premisave.wallet.dto.DisbursementRequest;
 import com.premisave.wallet.dto.DisbursementResponse;
 import com.premisave.wallet.dto.MpesaAsyncResponse;
 import com.premisave.wallet.dto.MpesaB2BRequest;
+import com.premisave.wallet.dto.MpesaB2CResponse;
 import com.premisave.wallet.dto.QueryOrgInfoRequest;
 import com.premisave.wallet.dto.QueryOrgInfoResponse;
 import com.premisave.wallet.entity.Disbursement;
@@ -125,9 +126,32 @@ public class DisbursementService {
         disbursement.setReference(reference);
         disbursement.setStatus(DisbursementStatus.PENDING);
 
+        disbursement.setCurrency(Currency.KES);
+
         if ("MPESA".equals(provider)) {
             disbursement.setChannel("B2C");
-            var result = mpesaService.sendB2C(destination, request.getAmount());
+
+            // sendB2C's own Safaricom HTTP call is already wrapped in a
+            // try/catch internally and always returns a result — but
+            // getAccessToken() (OAuth, retried 3x then throws) and the
+            // SecurityCredential RSA encryption both run BEFORE that
+            // try/catch even starts. Either one throwing here would
+            // otherwise propagate straight out of this method, past the
+            // point where the wallet was already debited and saved above,
+            // with no Disbursement record ever created and no refund.
+            MpesaB2CResponse result;
+            try {
+                result = mpesaService.sendB2C(destination, request.getAmount());
+            } catch (Exception e) {
+                log.error("M-Pesa B2C disbursement threw before a result could be returned — refunding: userId={}",
+                        userId, e);
+                refund(wallet, request.getAmount());
+                disbursement.setStatus(DisbursementStatus.FAILED);
+                disbursement.setFailureReason("M-Pesa B2C initiation failed: " + e.getMessage());
+                disbursementRepository.save(disbursement);
+                return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
+                        disbursement.getFailureReason());
+            }
 
             if (!result.isSuccess()) {
                 refund(wallet, request.getAmount());
@@ -293,7 +317,23 @@ public class DisbursementService {
     public DisbursementResponse processB2PochiPayment(String initiatedByUserId, B2PochiRequest request) {
         idempotencyService.checkIdempotency(request.getReference());
 
-        String phoneNumber = resolveVerifiedPhoneNumber(initiatedByUserId);
+        // This withdraws the caller's OWN wallet funds to their OWN Pochi la
+        // Biashara account — same checks as the generic phone-number M-Pesa
+        // withdrawal in processDisbursement above (wallet must exist, not be
+        // frozen, and have sufficient balance). Previously this method never
+        // debited the wallet at all, meaning the payout came free out of
+        // Premisave's own M-Pesa float instead of the user's balance.
+        Wallet wallet = walletRepository.findByUserId(initiatedByUserId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + initiatedByUserId));
+
+        if (wallet.isFrozen()) throw new WalletFrozenException("Wallet is frozen");
+        if (wallet.getBalance().compareTo(request.getAmount()) < 0)
+            throw new InsufficientFundsException("Insufficient funds for disbursement");
+
+        String phoneNumber = resolveVerifiedPhoneNumber(initiatedByUserId, wallet);
+
+        wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
+        walletRepository.save(wallet);
 
         String reference = request.getReference() != null
                 ? request.getReference()
@@ -307,10 +347,9 @@ public class DisbursementService {
         resolvedRequest.setOccasion(request.getOccasion());
         resolvedRequest.setReference(reference);
 
-        MpesaAsyncResponse result = mpesaService.sendToPochi(resolvedRequest, originatorConversationId);
-
         Disbursement disbursement = new Disbursement();
         disbursement.setUserId(initiatedByUserId);
+        disbursement.setWalletId(wallet.getId());
         disbursement.setAmount(request.getAmount());
         disbursement.setCurrency(Currency.KES);
         disbursement.setDestination(phoneNumber);
@@ -318,10 +357,25 @@ public class DisbursementService {
         disbursement.setChannel("B2C_POCHI");
         disbursement.setReference(reference);
 
+        MpesaAsyncResponse result;
+        try {
+            result = mpesaService.sendToPochi(resolvedRequest, originatorConversationId);
+        } catch (Exception e) {
+            log.error("B2Pochi withdrawal threw before a result could be returned — refunding: userId={}",
+                    initiatedByUserId, e);
+            refund(wallet, request.getAmount());
+            disbursement.setStatus(DisbursementStatus.FAILED);
+            disbursement.setFailureReason("B2Pochi initiation failed: " + e.getMessage());
+            disbursementRepository.save(disbursement);
+            return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
+                    disbursement.getFailureReason());
+        }
+
         if (result.isSuccess()) {
             disbursement.setStatus(DisbursementStatus.PENDING);
             disbursement.setProviderReference(result.getConversationId());
         } else {
+            refund(wallet, request.getAmount());
             disbursement.setStatus(DisbursementStatus.FAILED);
             disbursement.setFailureReason(result.getMessage());
         }
@@ -351,7 +405,7 @@ public class DisbursementService {
             d.setStatus(DisbursementStatus.SUCCESS);
             disbursementRepository.save(d);
 
-            if ("B2C".equals(d.getChannel()) && d.getWalletId() != null) {
+            if (("B2C".equals(d.getChannel()) || "B2C_POCHI".equals(d.getChannel())) && d.getWalletId() != null) {
                 saveDisbursementTransaction(d.getUserId(), d.getWalletId(), d.getAmount(), d, d.getReference());
             }
             log.info("M-Pesa {} disbursement completed: id={} conversationId={} mpesaTxId={}",
