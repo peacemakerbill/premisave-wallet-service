@@ -266,6 +266,32 @@ public class WalletService {
     }
 
     /**
+     * Sets/updates the phone number the user's Pochi la Biashara business
+     * account is registered under — distinct from mpesaPhoneNumber above,
+     * since a Pochi account can be registered on a different line than a
+     * user's regular personal M-Pesa number. Resolved authoritatively from
+     * here by DisbursementService (see resolveVerifiedPochiPhoneNumber) —
+     * never taken from a disbursement request itself — same reasoning as
+     * mpesaPhoneNumber/paypalEmail above (eliminates typo/mistargeted-payout
+     * risk). Blocked while frozen — same reasoning as updateMpesaPhoneNumber.
+     */
+    @Transactional
+    public WalletResponse updatePochiPhoneNumber(String userId, String phoneNumber) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
+
+        if (wallet.isFrozen()) {
+            throw new WalletFrozenException(
+                    "Wallet is frozen — payout details cannot be changed until it is unfrozen");
+        }
+
+        wallet.setPochiPhoneNumber(mpesaService.normalizePhone(phoneNumber));
+        wallet = walletRepository.save(wallet);
+        log.info("Pochi phone number updated for userId={}", userId);
+        return mapToResponse(wallet);
+    }
+
+    /**
      * Unlinks the wallet's saved PayPal account (vault_id/customer_id/
      * connected email) so future PayPal deposits no longer auto-reuse it —
      * the next deposit will create a fresh order and, if requestVaulting
@@ -324,6 +350,7 @@ public class WalletService {
         response.setFrozen(wallet.isFrozen());
         response.setPaypalEmail(wallet.getPaypalEmail());
         response.setMpesaPhoneNumber(wallet.getMpesaPhoneNumber());
+        response.setPochiPhoneNumber(wallet.getPochiPhoneNumber());
         response.setHasSavedCard(wallet.getStripeDefaultPaymentMethodId() != null);
         response.setCardBrand(wallet.getStripeCardBrand());
         response.setCardLast4(wallet.getStripeCardLast4());

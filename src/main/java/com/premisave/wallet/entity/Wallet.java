@@ -55,6 +55,22 @@ public class Wallet {
     private String mpesaPhoneNumber;
 
     /**
+     * Phone number the user's Pochi la Biashara business account is
+     * registered under — used specifically for B2Pochi withdrawals (see
+     * DisbursementService.resolveVerifiedPochiPhoneNumber). Distinct from
+     * mpesaPhoneNumber above: a user's Pochi account can be registered on a
+     * different line than their regular personal M-Pesa number, so reusing
+     * mpesaPhoneNumber for B2Pochi risks sending the payout to a number that
+     * doesn't actually have a Pochi account (or, worse, one that happens to
+     * belong to someone else's Pochi account entirely). Resolved
+     * authoritatively from here — never taken from the disbursement request
+     * itself — same reasoning as mpesaPhoneNumber/paypalEmail. Falls back to
+     * mpesaPhoneNumber if unset. Stored normalized to 254XXXXXXXXX. Set via
+     * PUT /wallet/pochi-phone.
+     */
+    private String pochiPhoneNumber;
+
+    /**
      * Stripe Customer object id (cus_xxx) for this wallet's owner. Created
      * lazily on first Stripe deposit or first setup-intent request. A
      * test-mode customer and a live-mode customer are entirely separate

@@ -49,9 +49,6 @@ public class WalletController {
         return ResponseEntity.ok(ApiResponse.success("Wallet created", wallet));
     }
 
-    /**
-     * Load Funds to your Wallet(M-Pesa/PayPal/Stripe)
-     */
     @PostMapping("/deposit")
     public ResponseEntity<ApiResponse<PaymentResponse>> deposit(
             @Valid @RequestBody DepositRequest depositRequest,
@@ -213,6 +210,26 @@ public class WalletController {
         if (userId == null) userId = auth.getName();
         WalletResponse response = walletService.updateMpesaPhoneNumber(userId, updateRequest.getMpesaPhoneNumber());
         return ResponseEntity.ok(ApiResponse.success("M-Pesa phone number updated", response));
+    }
+
+    /**
+     * Sets/updates the phone number the user's Pochi la Biashara business
+     * account is registered under. Used by DisbursementService for B2Pochi
+     * withdrawals (POST /disbursements/b2pochi) — resolved authoritatively
+     * from here, never taken from the withdrawal request itself, same
+     * reasoning as PUT /wallet/mpesa-phone above. Falls back to
+     * mpesaPhoneNumber if never set.
+     * PUT /wallet/pochi-phone
+     */
+    @PutMapping("/pochi-phone")
+    public ResponseEntity<ApiResponse<WalletResponse>> updatePochiPhone(
+            @Valid @RequestBody UpdatePochiPhoneRequest updateRequest,
+            Authentication auth,
+            HttpServletRequest request) {
+        String userId = (String) request.getAttribute("userId");
+        if (userId == null) userId = auth.getName();
+        WalletResponse response = walletService.updatePochiPhoneNumber(userId, updateRequest.getPochiPhoneNumber());
+        return ResponseEntity.ok(ApiResponse.success("Pochi phone number updated", response));
     }
 
     /**

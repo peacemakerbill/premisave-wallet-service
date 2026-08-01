@@ -24,6 +24,9 @@ public class WalletResponse {
     /** Null if never set. Normalized to 254XXXXXXXXX. */
     private String mpesaPhoneNumber;
 
+    /** Phone number the user's Pochi la Biashara account is registered under, used for B2Pochi withdrawals. Null if never set — falls back to mpesaPhoneNumber. Normalized to 254XXXXXXXXX. */
+    private String pochiPhoneNumber;
+
     /** True once a card is saved for one-click deposit reloads. */
     private boolean hasSavedCard;
 

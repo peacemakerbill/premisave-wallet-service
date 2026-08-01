@@ -330,7 +330,7 @@ public class DisbursementService {
         if (wallet.getBalance().compareTo(request.getAmount()) < 0)
             throw new InsufficientFundsException("Insufficient funds for disbursement");
 
-        String phoneNumber = resolveVerifiedPhoneNumber(initiatedByUserId, wallet);
+        String phoneNumber = resolveVerifiedPochiPhoneNumber(initiatedByUserId, wallet);
 
         wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
         walletRepository.save(wallet);
@@ -534,23 +534,37 @@ public class DisbursementService {
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
     /**
-     * Resolves the phone number an M-Pesa disbursement (B2C or B2Pochi)
-     * should be sent to. Looks up the wallet fresh — use the overload below
-     * when a Wallet is already in hand to avoid a redundant DB round trip.
+     * Resolves the phone number a B2Pochi disbursement should be sent to.
+     * Prefers the wallet's own pochiPhoneNumber (set via PUT
+     * /wallet/pochi-phone) since a user's Pochi la Biashara account can be
+     * registered under a different line than their regular mpesaPhoneNumber
+     * (used for STK deposits and phone withdrawals) — same "resolved
+     * authoritatively here, never from the request" reasoning as
+     * mpesaPhoneNumber/paypalEmail elsewhere. Falls back to
+     * resolveVerifiedPhoneNumber (mpesaPhoneNumber, then the auth-service
+     * profile) if no dedicated Pochi number has been set yet, so nothing
+     * breaks for users who haven't configured one.
      */
-    private String resolveVerifiedPhoneNumber(String userId) {
-        return resolveVerifiedPhoneNumber(userId, walletRepository.findByUserId(userId).orElse(null));
+    private String resolveVerifiedPochiPhoneNumber(String userId, Wallet wallet) {
+        if (wallet != null && wallet.getPochiPhoneNumber() != null && !wallet.getPochiPhoneNumber().isBlank()) {
+            return wallet.getPochiPhoneNumber();
+        }
+        return resolveVerifiedPhoneNumber(userId, wallet);
     }
 
     /**
-     * Resolves the phone number an M-Pesa disbursement (B2C or B2Pochi)
-     * should be sent to. Prefers the wallet's own mpesaPhoneNumber (set via
-     * PUT /wallet/mpesa-phone) if present — same reasoning as the PayPal
-     * email field: the user's own verified choice of destination, resolved
-     * authoritatively here rather than taken from the disbursement request.
-     * Falls back to the auth-service profile's phone number if the wallet
-     * doesn't have one set yet, so nothing breaks for existing users who
-     * haven't set a wallet phone number.
+     * Resolves the phone number a plain M-Pesa phone withdrawal (the generic
+     * /disbursements endpoint) should be sent to. Prefers the wallet's own
+     * mpesaPhoneNumber (set via PUT /wallet/mpesa-phone) if present — same
+     * reasoning as the PayPal email field: the user's own verified choice of
+     * destination, resolved authoritatively here rather than taken from the
+     * disbursement request. Falls back to the auth-service profile's phone
+     * number if the wallet doesn't have one set yet, so nothing breaks for
+     * existing users who haven't set a wallet phone number.
+     *
+     * Also used as the fallback layer for B2Pochi withdrawals — see
+     * resolveVerifiedPochiPhoneNumber above, which prefers a dedicated
+     * pochiPhoneNumber first and only falls back to this method.
      */
     private String resolveVerifiedPhoneNumber(String userId, Wallet wallet) {
         if (wallet != null && wallet.getMpesaPhoneNumber() != null && !wallet.getMpesaPhoneNumber().isBlank()) {
