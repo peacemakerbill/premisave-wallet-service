@@ -1,15 +1,21 @@
 package com.premisave.wallet.config;
 
+import com.premisave.wallet.dto.ApiResponse;
 import com.premisave.wallet.security.InternalApiKeyFilter;
 import com.premisave.wallet.security.JwtAuthenticationFilter;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -23,13 +29,50 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
     private final InternalApiKeyFilter internalApiKeyFilter;
+    private final ObjectMapper objectMapper;
 
     @Value("${frontend.url:http://localhost:3000}")
     private String frontendUrl;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthFilter, InternalApiKeyFilter internalApiKeyFilter) {
+    public SecurityConfig(JwtAuthenticationFilter jwtAuthFilter, InternalApiKeyFilter internalApiKeyFilter,
+                           ObjectMapper objectMapper) {
         this.jwtAuthFilter = jwtAuthFilter;
         this.internalApiKeyFilter = internalApiKeyFilter;
+        this.objectMapper = objectMapper;
+    }
+
+    /**
+     * Fires when an authenticated request hits a role-restricted route it
+     * doesn't have the authority for (e.g. a HOME_OWNER hitting an
+     * ADMIN/OPERATIONS-only endpoint). Without this, Spring Security's
+     * default AccessDeniedHandler returns a bare 403 with an empty body —
+     * this instead returns the same ApiResponse JSON shape as the rest of
+     * the API, so callers get an actual message to act on.
+     */
+    @Bean
+    public AccessDeniedHandler accessDeniedHandler() {
+        return (request, response, accessDeniedException) -> {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.getWriter().write(objectMapper.writeValueAsString(
+                    ApiResponse.error("You do not have permission to access this resource.")));
+        };
+    }
+
+    /**
+     * Fires when a request to a protected route has no valid authentication
+     * at all (missing/expired/malformed JWT) — the 401 counterpart to
+     * accessDeniedHandler's 403 above, same reasoning: a real JSON message
+     * instead of an empty default body.
+     */
+    @Bean
+    public AuthenticationEntryPoint authenticationEntryPoint() {
+        return (request, response, authException) -> {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.getWriter().write(objectMapper.writeValueAsString(
+                    ApiResponse.error("Authentication is required to access this resource.")));
+        };
     }
 
     @Bean
@@ -37,6 +80,9 @@ public class SecurityConfig {
         http
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .csrf(csrf -> csrf.disable())
+            .exceptionHandling(exceptions -> exceptions
+                .accessDeniedHandler(accessDeniedHandler())
+                .authenticationEntryPoint(authenticationEntryPoint()))
             .authorizeHttpRequests(auth -> auth
 
                 // ── 1. Public: health & docs ───────────────────────────────
