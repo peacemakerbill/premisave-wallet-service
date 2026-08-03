@@ -72,7 +72,7 @@ public class MpesaC2BService {
             RequestBody rb = RequestBody.create(json, MediaType.parse("application/json"));
 
             Request request = new Request.Builder()
-                    .url(config.baseUrl() + "/mpesa/c2b/v1/registerurl")
+                    .url(config.baseUrl() + "/mpesa/c2b/v2/registerurl")
                     .addHeader("Authorization", "Bearer " + token)
                     .post(rb)
                     .build();

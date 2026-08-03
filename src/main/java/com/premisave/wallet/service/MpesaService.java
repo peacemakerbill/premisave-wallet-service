@@ -23,7 +23,6 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
@@ -32,7 +31,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 @Service
@@ -41,59 +39,20 @@ public class MpesaService {
 
     private final MpesaConfig config;
     private final MpesaSecurityCredentialService securityCredentialService;
+    private final MpesaTokenService mpesaTokenService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final OkHttpClient http = new OkHttpClient();
 
-    // ─── OAuth (cached) ──────────────────────────────────────────────────────
+    // ─── OAuth ────────────────────────────────────────────────────────────
+    //
+    // Token generation/caching/proactive background refresh now lives in
+    // MpesaTokenService (warmed up at application startup, refreshed on a
+    // schedule ahead of expiry, all logged there). This method is kept as a
+    // thin delegate so every existing call site below (and any external
+    // caller) doesn't need to change.
 
-    private record CachedToken(String token, Instant expiresAt) {}
-    private final AtomicReference<CachedToken> tokenCache = new AtomicReference<>();
-
-    public synchronized String getAccessToken() {
-        CachedToken cached = tokenCache.get();
-        if (cached != null && Instant.now().isBefore(cached.expiresAt())) {
-            return cached.token();
-        }
-
-        String credentials = config.getConsumerKey() + ":" + config.getConsumerSecret();
-        String encoded = Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
-
-        Request request = new Request.Builder()
-                .url(config.baseUrl() + "/oauth/v1/generate?grant_type=client_credentials")
-                .addHeader("Authorization", "Basic " + encoded)
-                .get()
-                .build();
-
-        RuntimeException lastError = null;
-        for (int attempt = 1; attempt <= 3; attempt++) {
-            try (Response response = http.newCall(request).execute()) {
-                String body = response.body().string();
-                JsonNode node = objectMapper.readTree(body);
-                String token = node.path("access_token").asText();
-                int expiresIn = node.path("expires_in").asInt(3599);
-
-                if (token.isBlank()) {
-                    throw new RuntimeException("Empty access_token in OAuth response: " + body);
-                }
-
-                CachedToken fresh = new CachedToken(token, Instant.now().plusSeconds(Math.max(60, expiresIn - 60)));
-                tokenCache.set(fresh);
-                return token;
-            } catch (Exception e) {
-                lastError = new RuntimeException("Failed to obtain M-Pesa access token (attempt " + attempt + "/3)", e);
-                log.warn(lastError.getMessage());
-                sleepBackoff(attempt);
-            }
-        }
-        throw lastError;
-    }
-
-    private void sleepBackoff(int attempt) {
-        try {
-            Thread.sleep(200L * attempt);
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-        }
+    public String getAccessToken() {
+        return mpesaTokenService.getAccessToken();
     }
 
     // ─── STK Push (C2B — customer-initiated deposit) ────────────────────────
