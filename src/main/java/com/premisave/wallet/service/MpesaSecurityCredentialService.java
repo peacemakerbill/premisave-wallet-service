@@ -9,6 +9,8 @@ import org.springframework.stereotype.Service;
 import javax.crypto.Cipher;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
@@ -36,7 +38,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * mpesa.daraja.certificate-path points at the correct one per environment.
  *
  * Result is cached per (certPath, password) pair since it never changes
- * unless the initiator password itself is rotated.
+ * unless the initiator password itself is rotated. The cache key hashes
+ * the password with SHA-256 rather than String.hashCode() — this service
+ * handles several distinct initiator passwords (B2C, B2B, TopUp,
+ * TransactionStatus, AccountBalance, Reversal, Pochi), and a 32-bit hash
+ * collision between any two of them would silently serve one password's
+ * SecurityCredential in place of another's.
  */
 @Slf4j
 @Service
@@ -54,8 +61,28 @@ public class MpesaSecurityCredentialService {
                     "mpesa.daraja.certificate-path is not configured — required to generate SecurityCredential");
         }
 
-        String cacheKey = certificatePath + ":" + plainInitiatorPassword.hashCode();
+        // SHA-256 rather than String.hashCode() (32-bit — collision-prone
+        // across the half-dozen+ distinct initiator passwords this service
+        // handles) so two different passwords can never share a cache
+        // entry and silently serve each other's SecurityCredential.
+        String cacheKey = certificatePath + ":" + sha256Hex(plainInitiatorPassword);
         return cache.computeIfAbsent(cacheKey, k -> doEncrypt(plainInitiatorPassword, certificatePath));
+    }
+
+    private static String sha256Hex(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is guaranteed available on every standard JVM — this
+            // is unreachable in practice, but must be handled since
+            // MessageDigest.getInstance is a checked-exception API.
+            throw new IllegalStateException("SHA-256 algorithm unavailable", e);
+        }
     }
 
     private String doEncrypt(String plainPassword, String certificatePath) {
