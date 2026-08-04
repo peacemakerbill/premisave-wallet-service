@@ -138,6 +138,22 @@ public class MpesaService {
 
     // ─── B2C (Business to Customer — disbursement to a phone number) ────────
 
+    /**
+     * Uses the v3 B2C endpoint (/mpesa/b2c/v3/paymentrequest), per Safaricom's
+     * current Daraja documentation (developer.safaricom.co.ke/apis/BusinessToCustomer).
+     *
+     * Unlike v1/B2B/top-up (where Safaricom generates OriginatorConversationID
+     * server-side), v3 REQUIRES the caller to generate and send it — its
+     * documented purpose is specifically to let Safaricom detect and reject a
+     * duplicate/retried disbursement before it double-pays. Omitting it is
+     * what produced errorCode 400.002.02 "Invalid OriginatorConversationID".
+     * Generated fresh per call via generateOriginatorConversationId, same
+     * helper already used for B2Pochi.
+     *
+     * Also note: the optional field is spelled "Occassion" (double-s) in v3's
+     * request body — same non-standard spelling as the B2Pochi API, not
+     * "Occasion".
+     */
     public MpesaB2CResponse sendB2C(String phone, BigDecimal amount) {
         MpesaConfig.B2c b2c = config.getB2c();
 
@@ -153,6 +169,7 @@ public class MpesaService {
                 b2c.getInitiatorPassword(), config.getCertificatePath());
 
         Map<String, Object> body = new LinkedHashMap<>();
+        body.put("OriginatorConversationID", generateOriginatorConversationId("B2C"));
         body.put("InitiatorName",       b2c.getInitiatorName());
         body.put("SecurityCredential",  securityCredential);
         body.put("CommandID",           b2c.getCommandId() != null ? b2c.getCommandId() : "BusinessPayment");
@@ -162,13 +179,27 @@ public class MpesaService {
         body.put("Remarks",             "Premisave Disbursement");
         body.put("QueueTimeOutURL",     b2c.getQueueTimeoutUrl());
         body.put("ResultURL",           b2c.getResultUrl());
-        body.put("Occasion",            "Wallet Cashout");
+        // Field name below intentionally matches Safaricom's v3 spec — "Occassion"
+        // (double-s), same non-standard spelling as B2Pochi's "Occassion" field.
+        body.put("Occassion",           "Wallet Cashout");
 
         try {
             String respBody = post(config.baseUrl() + "/mpesa/b2c/v3/paymentrequest", token, body);
             log.info("B2C response: {}", respBody);
             JsonNode node = objectMapper.readTree(respBody);
 
+            // ── Rejection shape: {requestId, errorCode, errorMessage} ──────
+            // Same two-shapes issue as STK Push above — a well-formed Safaricom
+            // rejection doesn't include ResponseCode/ResponseDescription at all,
+            // which previously left MpesaB2CResponse.message as "Unknown".
+            String errorCode = node.path("errorCode").asText(null);
+            if (errorCode != null && !errorCode.isBlank()) {
+                String errorMessage = node.path("errorMessage").asText("Unknown B2C error");
+                log.warn("B2C rejected by Safaricom: errorCode={} errorMessage={}", errorCode, errorMessage);
+                return new MpesaB2CResponse(false, errorCode + ": " + errorMessage, null, null);
+            }
+
+            // ── Acceptance shape ─────────────────────────────────────────
             boolean accepted = "0".equals(node.path("ResponseCode").asText("1"));
             String conversationId = node.path("ConversationID").asText("");
             String originatorId   = node.path("OriginatorConversationID").asText("");
