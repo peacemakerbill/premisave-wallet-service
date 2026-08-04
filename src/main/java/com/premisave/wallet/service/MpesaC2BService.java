@@ -56,6 +56,18 @@ public class MpesaC2BService {
      * get wrapped in ApiResponse.success(...) by the controller, masking a
      * real failure as a fake success. This now throws on either shape of
      * rejection so the failure surfaces honestly instead.
+     *
+     * ResponseCode success value is NOT consistently "0" for this specific
+     * endpoint — sandbox has been observed returning "00000000" (all zeros)
+     * instead of a bare "0" (unlike STK Push/B2B/B2C, which do use a bare
+     * "0"). An exact-match check against "0" therefore misclassifies a real
+     * Safaricom success as a failure. success is now determined by BOTH:
+     *   1. ResponseCode being present and consisting entirely of '0' chars
+     *      (covers "0", "00000000", or any other zero-padding Safaricom
+     *      might use), OR
+     *   2. ResponseDescription itself reading "success" (case-insensitive),
+     *      as a fallback in case ResponseCode is ever blank/malformed but
+     *      the description clearly indicates acceptance.
      */
     public Map<String, Object> registerUrls() {
         String token = mpesaService.getAccessToken();
@@ -94,20 +106,28 @@ public class MpesaC2BService {
 
                 // ── Acceptance shape ─────────────────────────────────────────
                 String responseCode = node.path("ResponseCode").asText("");
-                boolean success = "0".equals(responseCode);
+                String description  = node.path("ResponseDescription").asText("");
+
+                boolean codeIndicatesSuccess = !responseCode.isBlank()
+                        && responseCode.chars().allMatch(c -> c == '0');
+                boolean descriptionIndicatesSuccess = "success".equalsIgnoreCase(description.trim());
+
+                boolean success = codeIndicatesSuccess || descriptionIndicatesSuccess;
 
                 if (!success) {
-                    String desc = node.path("ResponseDescription").asText("Unknown failure");
+                    String desc = !description.isBlank() ? description : "Unknown failure";
                     log.warn("C2B URL registration not accepted: responseCode={} description={} raw={}",
                             responseCode, desc, respBody);
                     throw new RuntimeException(
                             "C2B URL registration was not accepted (ResponseCode=" + responseCode + "): " + desc);
                 }
 
+                log.info("C2B URL registration accepted: responseCode={} description={}", responseCode, description);
+
                 return Map.of(
                         "success",             true,
                         "ResponseCode",        responseCode,
-                        "ResponseDescription", node.path("ResponseDescription").asText(),
+                        "ResponseDescription", description,
                         "CustomerMessage",     node.path("CustomerMessage").asText()
                 );
             }

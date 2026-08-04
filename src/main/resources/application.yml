@@ -64,6 +64,9 @@ mpesa:
     # STK push callback — must be HTTPS and publicly reachable (use ngrok locally)
     callback-url: ${MPESA_CALLBACK_URL}
     environment: ${MPESA_ENV:sandbox}
+#		Safaricom Test Phone Numbers
+#		    254705912645
+#		    254708374149
 
     # Safaricom's public certificate, used to RSA-encrypt initiator passwords
     # into a SecurityCredential for B2C/B2B (see MpesaSecurityCredentialService).
