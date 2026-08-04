@@ -558,8 +558,8 @@ public class DisbursementService {
         }
 
         throw new PhoneNumberUnavailableException(
-                "No Pochi la Biashara phone number is set on your wallet — please add one "
-                        + "(PUT /wallet/pochi-phone) before requesting a B2Pochi disbursement.");
+                "You haven't added a Pochi la Biashara phone number to your wallet yet. "
+                        + "Please add one in your wallet settings before requesting a Pochi withdrawal.");
     }
 
     /**
@@ -585,8 +585,8 @@ public class DisbursementService {
         }
 
         throw new PhoneNumberUnavailableException(
-                "No M-Pesa phone number is set on your wallet — please add one (PUT /wallet/mpesa-phone) "
-                        + "before requesting an M-Pesa disbursement.");
+                "You haven't added an M-Pesa phone number to your wallet yet. "
+                        + "Please add one in your wallet settings before requesting a withdrawal.");
     }
 
     private void refund(Wallet wallet, BigDecimal amount) {
