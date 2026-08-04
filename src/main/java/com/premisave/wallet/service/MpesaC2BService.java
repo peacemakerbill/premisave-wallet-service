@@ -421,8 +421,8 @@ public class MpesaC2BService {
         tx.setReference(transId);
         transactionRepository.save(tx);
 
-        log.info("C2B deposit processed: mpesaPhoneNumber={} amount={} transId={} sender={}",
-                normalizedPhone, amount, transId, senderName);
+        log.info("C2B deposit processed: accountNumber={} mpesaPhoneNumber={} amount={} transId={} sender={}",
+                wallet.getAccountNumber(), normalizedPhone, amount, transId, senderName);
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────

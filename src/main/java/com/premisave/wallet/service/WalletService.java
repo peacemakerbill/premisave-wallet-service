@@ -280,7 +280,7 @@ public class WalletService {
 
         wallet.setMpesaPhoneNumber(normalizedPhone);
         wallet = walletRepository.save(wallet);
-        log.info("M-Pesa phone number updated for userId={}", userId);
+        log.info("M-Pesa phone number updated for userId={} accountNumber={}", userId, wallet.getAccountNumber());
         return mapToResponse(wallet);
     }
 
