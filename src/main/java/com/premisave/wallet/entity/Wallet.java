@@ -46,10 +46,15 @@ public class Wallet {
      * and disbursements sent to. Resolved authoritatively from here — never
      * taken from a deposit/disbursement request itself — same reasoning as
      * paypalEmail: eliminates typo/mistargeted-payout risk and lets the user
-     * pick which verified number to use. If unset, disbursements fall back
-     * to the auth-service profile's phone number (see
-     * DisbursementService.resolveVerifiedPhoneNumber); deposits require the
-     * caller to supply a phoneNumber explicitly instead.
+     * pick which verified number to use.
+     *
+     * SECURITY: for B2C/B2Pochi withdrawals, this being unset is a hard
+     * rejection — DisbursementService.resolveVerifiedPhoneNumber requires it
+     * to be present and throws PhoneNumberUnavailableException otherwise.
+     * There is intentionally no fallback to the auth-service profile's phone
+     * number; only a number explicitly attached to this wallet via PUT
+     * /wallet/mpesa-phone is ever used as a payout destination. Deposits
+     * require the caller to supply a phoneNumber explicitly instead.
      *
      * Unique across wallets (sparse — many wallets may still have this
      * unset) — this is now also the account reference customers type into
@@ -72,8 +77,10 @@ public class Wallet {
      * belong to someone else's Pochi account entirely). Resolved
      * authoritatively from here — never taken from the disbursement request
      * itself — same reasoning as mpesaPhoneNumber/paypalEmail. Falls back to
-     * mpesaPhoneNumber if unset. Stored normalized to 254XXXXXXXXX. Set via
-     * PUT /wallet/pochi-phone.
+     * mpesaPhoneNumber if unset; if that is also unset, the withdrawal is
+     * rejected outright (see mpesaPhoneNumber's SECURITY note above — no
+     * external fallback for either field). Stored normalized to
+     * 254XXXXXXXXX. Set via PUT /wallet/pochi-phone.
      */
     private String pochiPhoneNumber;
 

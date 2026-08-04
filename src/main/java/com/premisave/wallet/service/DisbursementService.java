@@ -1,6 +1,5 @@
 package com.premisave.wallet.service;
 
-import com.premisave.wallet.client.UserProfileClient;
 import com.premisave.wallet.dto.B2CTopUpRequest;
 import com.premisave.wallet.dto.B2PochiRequest;
 import com.premisave.wallet.dto.DisbursementRequest;
@@ -34,7 +33,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -49,7 +47,6 @@ public class DisbursementService {
     private final StripeService stripeService;
     private final PaypalService paypalService;
     private final IdempotencyService idempotencyService;
-    private final UserProfileClient userProfileClient;
     private final FxRateService fxRateService;
 
     /**
@@ -96,9 +93,14 @@ public class DisbursementService {
         // eliminating typo/mistargeted-payout risk for both. STRIPE still
         // requires an explicit destination (Stripe Connect isn't wired up yet,
         // so there's no per-user Stripe payout identity to resolve from).
+        //
+        // SECURITY: resolveVerifiedPhoneNumber below is called — and will
+        // throw — BEFORE the wallet is debited a few lines down, so a
+        // wallet with no mpesaPhoneNumber set is rejected outright with no
+        // money ever leaving the balance.
         String destination;
         if ("MPESA".equals(provider)) {
-            destination = resolveVerifiedPhoneNumber(userId, wallet);
+            destination = resolveVerifiedPhoneNumber(wallet);
         } else if ("PAYPAL".equals(provider)) {
             if (wallet.getPaypalEmail() == null || wallet.getPaypalEmail().isBlank()) {
                 throw new IllegalArgumentException(
@@ -330,7 +332,10 @@ public class DisbursementService {
         if (wallet.getBalance().compareTo(request.getAmount()) < 0)
             throw new InsufficientFundsException("Insufficient funds for disbursement");
 
-        String phoneNumber = resolveVerifiedPochiPhoneNumber(initiatedByUserId, wallet);
+        // SECURITY: throws (rejecting the request outright, no wallet debit)
+        // if neither pochiPhoneNumber nor mpesaPhoneNumber is set on the
+        // wallet — see resolveVerifiedPochiPhoneNumber/resolveVerifiedPhoneNumber.
+        String phoneNumber = resolveVerifiedPochiPhoneNumber(wallet);
 
         wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
         walletRepository.save(wallet);
@@ -541,53 +546,45 @@ public class DisbursementService {
      * (used for STK deposits and phone withdrawals) — same "resolved
      * authoritatively here, never from the request" reasoning as
      * mpesaPhoneNumber/paypalEmail elsewhere. Falls back to
-     * resolveVerifiedPhoneNumber (mpesaPhoneNumber, then the auth-service
-     * profile) if no dedicated Pochi number has been set yet, so nothing
-     * breaks for users who haven't configured one.
+     * resolveVerifiedPhoneNumber (wallet's mpesaPhoneNumber only) if no
+     * dedicated Pochi number has been set yet.
+     *
+     * SECURITY: both this method and resolveVerifiedPhoneNumber below are
+     * strict — if neither pochiPhoneNumber nor mpesaPhoneNumber is set on
+     * the wallet, this throws PhoneNumberUnavailableException and rejects
+     * the withdrawal outright. There is no fallback to any external source
+     * (e.g. the auth-service profile) for either B2C or B2Pochi withdrawals.
      */
-    private String resolveVerifiedPochiPhoneNumber(String userId, Wallet wallet) {
+    private String resolveVerifiedPochiPhoneNumber(Wallet wallet) {
         if (wallet != null && wallet.getPochiPhoneNumber() != null && !wallet.getPochiPhoneNumber().isBlank()) {
             return wallet.getPochiPhoneNumber();
         }
-        return resolveVerifiedPhoneNumber(userId, wallet);
+        return resolveVerifiedPhoneNumber(wallet);
     }
 
     /**
      * Resolves the phone number a plain M-Pesa phone withdrawal (the generic
-     * /disbursements endpoint) should be sent to. Prefers the wallet's own
-     * mpesaPhoneNumber (set via PUT /wallet/mpesa-phone) if present — same
-     * reasoning as the PayPal email field: the user's own verified choice of
-     * destination, resolved authoritatively here rather than taken from the
-     * disbursement request. Falls back to the auth-service profile's phone
-     * number if the wallet doesn't have one set yet, so nothing breaks for
-     * existing users who haven't set a wallet phone number.
+     * /disbursements endpoint) should be sent to — the wallet's own
+     * mpesaPhoneNumber (set via PUT /wallet/mpesa-phone).
      *
-     * Also used as the fallback layer for B2Pochi withdrawals — see
-     * resolveVerifiedPochiPhoneNumber above, which prefers a dedicated
-     * pochiPhoneNumber first and only falls back to this method.
+     * SECURITY: strictly requires wallet.mpesaPhoneNumber to already be set.
+     * There is intentionally no fallback to the auth-service profile's
+     * phone number here — falling back to an unverified, externally-sourced
+     * value would let a withdrawal succeed against a number the user never
+     * explicitly attached to this wallet, undermining the exact
+     * mistargeted-payout protection the mpesaPhoneNumber/paypalEmail fields
+     * exist for (see their javadoc on Wallet). Callers (processDisbursement,
+     * resolveVerifiedPochiPhoneNumber) call this BEFORE the wallet is
+     * debited, so a missing number rejects the request with no funds moved.
      */
-    private String resolveVerifiedPhoneNumber(String userId, Wallet wallet) {
+    private String resolveVerifiedPhoneNumber(Wallet wallet) {
         if (wallet != null && wallet.getMpesaPhoneNumber() != null && !wallet.getMpesaPhoneNumber().isBlank()) {
             return wallet.getMpesaPhoneNumber();
         }
 
-        Map<String, Object> profile;
-        try {
-            profile = userProfileClient.getPublicProfile(userId);
-        } catch (Exception e) {
-            log.error("Failed to fetch profile for userId={} while resolving disbursement phone number", userId, e);
-            throw new PhoneNumberUnavailableException(
-                    "Could not verify your phone number right now — please try again shortly.");
-        }
-
-        Object phoneObj = profile != null ? profile.get("phoneNumber") : null;
-        String phone = phoneObj != null ? String.valueOf(phoneObj).trim() : null;
-
-        if (phone == null || phone.isBlank()) {
-            throw new PhoneNumberUnavailableException(
-                    "No phone number is set on your profile — please add one before requesting for an M-Pesa disbursement.");
-        }
-        return phone;
+        throw new PhoneNumberUnavailableException(
+                "No M-Pesa phone number is set on your wallet — please add one (PUT /wallet/mpesa-phone) "
+                        + "before requesting an M-Pesa disbursement.");
     }
 
     private void refund(Wallet wallet, BigDecimal amount) {
