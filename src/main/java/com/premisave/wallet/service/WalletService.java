@@ -4,6 +4,7 @@ import com.premisave.wallet.dto.*;
 import com.premisave.wallet.entity.Transaction;
 import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.enums.Currency;
+import com.premisave.wallet.exception.DuplicateMpesaPhoneNumberException;
 import com.premisave.wallet.exception.InsufficientFundsException;
 import com.premisave.wallet.exception.WalletAlreadyExistsException;
 import com.premisave.wallet.exception.WalletAlreadyFrozenException;
@@ -247,6 +248,12 @@ public class WalletService {
      * DisbursementService — never taken from a deposit/disbursement
      * request itself — same reasoning as the PayPal email pattern above
      * (eliminates typo/mistargeted-payout risk).
+     *
+     * Must be unique across wallets — this number now doubles as the C2B
+     * Pay Bill account reference (see MpesaC2BService), so two wallets
+     * sharing it would misdirect deposits. Rejected with
+     * DuplicateMpesaPhoneNumberException if another wallet already owns it.
+     *
      * Blocked while frozen — same reasoning as updatePaypalEmail above.
      */
     @Transactional
@@ -259,7 +266,19 @@ public class WalletService {
                     "Wallet is frozen — payout details cannot be changed until it is unfrozen");
         }
 
-        wallet.setMpesaPhoneNumber(mpesaService.normalizePhone(phoneNumber));
+        String normalizedPhone = mpesaService.normalizePhone(phoneNumber);
+        final String currentWalletId = wallet.getId();
+
+        walletRepository.findByMpesaPhoneNumber(normalizedPhone)
+                .filter(other -> !other.getId().equals(currentWalletId))
+                .ifPresent(other -> {
+                    log.warn("M-Pesa phone update rejected — {} already registered to a different wallet (userId={})",
+                            normalizedPhone, other.getUserId());
+                    throw new DuplicateMpesaPhoneNumberException(
+                            "This M-Pesa number is already registered to another account.");
+                });
+
+        wallet.setMpesaPhoneNumber(normalizedPhone);
         wallet = walletRepository.save(wallet);
         log.info("M-Pesa phone number updated for userId={}", userId);
         return mapToResponse(wallet);

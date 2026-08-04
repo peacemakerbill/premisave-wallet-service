@@ -17,4 +17,14 @@ public interface WalletRepository extends MongoRepository<Wallet, String> {
      * DepositService.attachPaypalVaultToken.
      */
     Optional<Wallet> findByPaypalCustomerId(String paypalCustomerId);
+
+    /**
+     * Used by WalletService.updateMpesaPhoneNumber to enforce uniqueness
+     * before saving, and by MpesaC2BService as the primary account lookup
+     * for C2B deposits — the M-Pesa "Account Number" a customer types on
+     * Pay Bill is now this number, not the wallet's email.
+     * Normalized to 254XXXXXXXXX before querying/saving (see
+     * MpesaService.normalizePhone).
+     */
+    Optional<Wallet> findByMpesaPhoneNumber(String mpesaPhoneNumber);
 }

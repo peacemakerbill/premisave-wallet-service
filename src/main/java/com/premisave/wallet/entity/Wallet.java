@@ -50,8 +50,15 @@ public class Wallet {
      * to the auth-service profile's phone number (see
      * DisbursementService.resolveVerifiedPhoneNumber); deposits require the
      * caller to supply a phoneNumber explicitly instead.
+     *
+     * Unique across wallets (sparse — many wallets may still have this
+     * unset) — this is now also the account reference customers type into
+     * the M-Pesa Pay Bill "Account Number" field for C2B deposits (see
+     * MpesaC2BService.validateAccount/processConfirmation), so two wallets
+     * sharing a number would misdirect deposits.
      * Stored normalized to 254XXXXXXXXX. Set via PUT /wallet/mpesa-phone.
      */
+    @Indexed(unique = true, sparse = true)
     private String mpesaPhoneNumber;
 
     /**

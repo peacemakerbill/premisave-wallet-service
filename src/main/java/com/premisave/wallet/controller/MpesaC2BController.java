@@ -58,14 +58,15 @@ public class MpesaC2BController {
      * sandbox — see MpesaC2BService.simulateC2BPayment.
      *
      * Call POST /register-urls first so Safaricom has our callback URLs
-     * on file, and make sure billRefNumber matches a wallet that actually
-     * exists — Safaricom will pass it straight to our validation endpoint.
+     * on file, and make sure billRefNumber matches a wallet's registered
+     * mpesaPhoneNumber (not email) — Safaricom will pass it straight to
+     * our validation endpoint.
      *
      * Body:
      * {
-     *   "amount": "100",                        // optional, defaults to "100"
-     *   "msisdn": "254708374149",                // optional, defaults to a sandbox test number
-     *   "billRefNumber": "existing-user@email.com"  // required — must have a wallet
+     *   "amount": "100",                  // optional, defaults to "100"
+     *   "msisdn": "254705912645",          // optional, defaults to a sandbox test number
+     *   "billRefNumber": "254712345678"    // required — must match an existing wallet's mpesaPhoneNumber
      * }
      */
     @PostMapping("/simulate")

@@ -21,8 +21,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.net.SocketTimeoutException;
-import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
@@ -31,24 +31,26 @@ import java.util.concurrent.TimeUnit;
 public class MpesaC2BService {
 
     private final MpesaConfig config;
-    private final MpesaService mpesaService;   // reuse getAccessToken()
+    private final MpesaService mpesaService;   // reuse getAccessToken() + normalizePhone()
     private final WalletRepository walletRepository;
     private final TransactionRepository transactionRepository;
     private final AuthServiceClient authServiceClient;
 
     /**
-     * Safaricom's sandbox negotiates HTTP/2 via ALPN but is flaky about
-     * promptly sending response headers on that path — OkHttp's Http2Stream
-     * stalls and throws SocketTimeoutException even though the request was
-     * actually accepted server-side (observed repeatedly against
-     * /mpesa/c2b/v2/registerurl: several timeouts, then a call that
-     * eventually succeeds with the exact same request shape). Pinning to
-     * HTTP/1.1 avoids that stream-level stall entirely. Timeouts are also
-     * bumped up from OkHttp's 10s default, since the sandbox can be slow —
-     * especially on the first call right after service startup.
+     * Timeouts bumped up from OkHttp's 10s default, since Safaricom's
+     * sandbox can be slow — especially right after service startup.
+     *
+     * Deliberately does NOT pin the protocol list (no forced HTTP/1.1).
+     * An earlier version of this client forced Protocol.HTTP_1_1 to work
+     * around what looked like an HTTP/2 stream stall on registerurl — but
+     * that pin has since correlated with connection failures (Permission
+     * denied / unexpected end of stream) against this same sandbox host,
+     * while MpesaTokenService's plain default-protocol OkHttpClient (no
+     * pinning at all) has succeeded on every single call to this same host
+     * throughout testing. Left as OkHttp's default protocol negotiation
+     * (h2 + http/1.1) to match that proven-working client instead.
      */
     private final OkHttpClient http = new OkHttpClient.Builder()
-            .protocols(List.of(Protocol.HTTP_1_1))
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
@@ -230,14 +232,15 @@ public class MpesaC2BService {
      *      Safaricom has our validation/confirmation URLs on file.
      *   2. This service is reachable via a public HTTPS tunnel (e.g.
      *      ngrok) matching mpesa.daraja.c2b.validation-url/confirmation-url.
-     *   3. billRefNumber is the email of a wallet that actually exists —
-     *      Safaricom will call our validation URL with it as BillRefNumber,
-     *      same as processConfirmation/validateAccount expect elsewhere.
+     *   3. billRefNumber matches an existing wallet's mpesaPhoneNumber —
+     *      Safaricom will call our validation URL with it as
+     *      BillRefNumber, same as processConfirmation/validateAccount
+     *      expect elsewhere.
      *
      * @param amount        transaction amount, e.g. "100"
-     * @param msisdn        Safaricom sandbox test MSISDN, e.g. "254708374149"
+     * @param msisdn        Safaricom sandbox test MSISDN, e.g. "254705912645"
      * @param billRefNumber account reference — must match an existing wallet's
-     *                      account number/email to pass validation
+     *                      mpesaPhoneNumber to pass validation
      */
     public Map<String, Object> simulateC2BPayment(String amount, String msisdn, String billRefNumber) {
         if (!"sandbox".equalsIgnoreCase(config.getEnvironment())) {
@@ -256,7 +259,7 @@ public class MpesaC2BService {
                 "ShortCode",     config.getC2b().getShortcode(),
                 "CommandID",     "CustomerPayBillOnline",
                 "Amount",        amount != null && !amount.isBlank() ? amount : "100",
-                "Msisdn",        msisdn != null && !msisdn.isBlank() ? msisdn : "254708374149",
+                "Msisdn",        msisdn != null && !msisdn.isBlank() ? msisdn : "254705912645",
                 "BillRefNumber", billRefNumber
         );
 
@@ -314,50 +317,64 @@ public class MpesaC2BService {
     /**
      * Dual-layer account validation for M-Pesa C2B (external validation enabled).
      *
-     * Layer 1 — Auth Service: confirms the email belongs to a real, active,
-     *            verified, non-archived user. Calls the internal endpoint via
-     *            Feign with X-API-Key. Fail-safe: if auth service is unreachable,
-     *            we REJECT (fail closed) — better to decline than accept an unknown account.
+     * The "account" a customer types into the Pay Bill Account Number field
+     * is now the wallet's M-Pesa phone number (mpesaPhoneNumber) — not the
+     * email used previously. Normalized the same way it's stored
+     * (MpesaService.normalizePhone) before lookup.
      *
-     * Layer 2 — Wallet Service: confirms a wallet actually exists locally for
-     *            that email, so we have somewhere to credit the funds.
+     * Layer 1 — Local wallet lookup: confirms a wallet is actually
+     *            registered under this number, so we have somewhere to
+     *            credit the funds. Checked FIRST now (order flipped from
+     *            the email-keyed version) since there's no email to
+     *            validate against auth-service until we've resolved the
+     *            wallet.
+     *
+     * Layer 2 — Auth Service: confirms the wallet owner's account is
+     *            active, verified, non-archived, using the email resolved
+     *            from the wallet. Fail-safe: if auth service is
+     *            unreachable, we REJECT (fail closed) — better to decline
+     *            than accept an unknown/unverifiable account.
      *
      * Safaricom must receive a response within 8 seconds — both checks are
      * fast indexed lookups designed to stay well within that window.
      */
-    public boolean validateAccount(String email) {
-        if (email == null || email.isBlank()) {
-            log.warn("C2B validation: empty account number received");
+    public boolean validateAccount(String billRefNumber) {
+        if (billRefNumber == null || billRefNumber.isBlank()) {
+            log.warn("C2B validation: empty account reference received");
             return false;
         }
 
-        String normalizedEmail = email.trim().toLowerCase();
+        String normalizedPhone = mpesaService.normalizePhone(billRefNumber.trim());
 
-        // ── Layer 1: Verify user exists and is active in auth service ──────
+        // ── Layer 1: Confirm a wallet actually exists locally for this number ──
+        Optional<Wallet> walletOpt = walletRepository.findByMpesaPhoneNumber(normalizedPhone);
+        if (walletOpt.isEmpty()) {
+            log.warn("C2B validation: no wallet registered for mpesaPhoneNumber={}", normalizedPhone);
+            return false;
+        }
+        Wallet wallet = walletOpt.get();
+
+        // ── Layer 2: Verify the wallet owner is active/verified in auth service ──
         try {
-            Map<String, Object> result = authServiceClient.validateEmail(normalizedEmail);
+            Map<String, Object> result = authServiceClient.validateEmail(wallet.getAccountNumber());
             boolean valid = Boolean.TRUE.equals(result.get("valid"));
 
             if (!valid) {
                 String reason = (String) result.getOrDefault("reason", "UNKNOWN");
-                log.warn("C2B validation: auth service rejected email={} reason={}", normalizedEmail, reason);
+                log.warn("C2B validation: auth service rejected email={} (mpesaPhoneNumber={}) reason={}",
+                        wallet.getAccountNumber(), normalizedPhone, reason);
                 return false;
             }
 
-            log.debug("C2B validation: auth service confirmed email={}", normalizedEmail);
+            log.debug("C2B validation: auth service confirmed mpesaPhoneNumber={} email={}",
+                    normalizedPhone, wallet.getAccountNumber());
+            return true;
         } catch (Exception e) {
             // Auth service is down — FAIL CLOSED (reject payment)
-            log.error("C2B validation: auth service unreachable for email={} — rejecting (fail-safe). Error: {}",
-                    normalizedEmail, e.getMessage());
+            log.error("C2B validation: auth service unreachable for mpesaPhoneNumber={} — rejecting (fail-safe). Error: {}",
+                    normalizedPhone, e.getMessage());
             return false;
         }
-
-        // ── Layer 2: Verify a wallet exists locally to receive funds ───────
-        boolean walletExists = walletRepository.findByAccountNumber(normalizedEmail).isPresent();
-        if (!walletExists) {
-            log.warn("C2B validation: auth account valid but no wallet found for email={}", normalizedEmail);
-        }
-        return walletExists;
     }
 
     // ─── Confirmation ─────────────────────────────────────────────────────────
@@ -365,12 +382,14 @@ public class MpesaC2BService {
     /**
      * Called after Safaricom confirms the payment on their side.
      * Idempotent — skips duplicate TransIDs already in the DB.
+     * BillRefNumber is now the wallet's M-Pesa phone number, not email —
+     * normalized before lookup, same as validateAccount above.
      */
     @Transactional
     public void processConfirmation(MpesaC2BCallbackRequest req) {
-        String email     = req.getBillRefNumber().trim().toLowerCase();
-        String transId   = req.getTransID();
-        BigDecimal amount = new BigDecimal(req.getTransAmount());
+        String normalizedPhone = mpesaService.normalizePhone(req.getBillRefNumber().trim());
+        String transId    = req.getTransID();
+        BigDecimal amount  = new BigDecimal(req.getTransAmount());
 
         // Idempotency — skip if we've already processed this M-Pesa transaction
         if (transactionRepository.existsByProviderReference(transId)) {
@@ -378,9 +397,9 @@ public class MpesaC2BService {
             return;
         }
 
-        Wallet wallet = walletRepository.findByAccountNumber(email)
+        Wallet wallet = walletRepository.findByMpesaPhoneNumber(normalizedPhone)
                 .orElseThrow(() -> new WalletNotFoundException(
-                        "C2B confirmation: no wallet for account=" + email));
+                        "C2B confirmation: no wallet for mpesaPhoneNumber=" + normalizedPhone));
 
         // Credit the wallet
         wallet.setBalance(wallet.getBalance().add(amount));
@@ -402,8 +421,8 @@ public class MpesaC2BService {
         tx.setReference(transId);
         transactionRepository.save(tx);
 
-        log.info("C2B deposit processed: email={} amount={} transId={} sender={}",
-                email, amount, transId, senderName);
+        log.info("C2B deposit processed: mpesaPhoneNumber={} amount={} transId={} sender={}",
+                normalizedPhone, amount, transId, senderName);
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────

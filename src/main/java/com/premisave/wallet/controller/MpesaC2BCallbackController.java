@@ -23,7 +23,8 @@ import java.util.Map;
  * confirmation-url env values, free of "mpesa".
  *
  * Customer flow:
- *   M-Pesa → Lipa Na M-Pesa → Pay Bill → Shortcode → Account = their email → Amount → PIN
+ *   M-Pesa → Lipa Na M-Pesa → Pay Bill → Shortcode → Account = their M-Pesa
+ *   number → Amount → PIN
  */
 @Slf4j
 @RestController
@@ -34,7 +35,7 @@ public class MpesaC2BCallbackController {
 
     /**
      * Safaricom calls this BEFORE processing payment to ask: "is this account valid?"
-     * We check whether a wallet exists for the email (BillRefNumber).
+     * We check whether a wallet exists for the M-Pesa number (BillRefNumber).
      * Must respond within 8 seconds with ResultCode 0 (accept) or 1 (reject).
      */
     @PostMapping("/payments/c2b-validation")
