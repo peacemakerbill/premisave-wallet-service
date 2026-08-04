@@ -72,6 +72,18 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ex.getMessage()));
     }
 
+    /**
+     * A wallet's M-Pesa number is already registered to a different wallet
+     * (PUT /wallet/mpesa-phone). 409 Conflict — same "resource-already-exists
+     * under this key" category as WalletAlreadyExistsException /
+     * DuplicateTransactionException above, not a validation failure.
+     */
+    @ExceptionHandler(DuplicateMpesaPhoneNumberException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDuplicateMpesaPhoneNumber(DuplicateMpesaPhoneNumberException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
     @ExceptionHandler(PhoneNumberUnavailableException.class)
     public ResponseEntity<ApiResponse<Void>> handlePhoneNumberUnavailable(PhoneNumberUnavailableException ex) {
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
