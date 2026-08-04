@@ -210,6 +210,105 @@ public class MpesaC2BService {
         );
     }
 
+    // ─── Simulate Transaction (sandbox testing only) ─────────────────────────
+
+    /**
+     * Calls Safaricom's C2B Simulate Transaction endpoint, which pretends a
+     * customer paid our Pay Bill shortcode — Safaricom then calls OUR
+     * registered validation URL, and (if accepted) OUR confirmation URL,
+     * exactly like a real payment would. This is the standard way to
+     * exercise the full C2B flow end-to-end without a real phone, since
+     * Daraja's sandbox has no live MSISDNs.
+     *
+     * HARD-BLOCKED outside sandbox (config.getEnvironment() != "sandbox")
+     * — Safaricom does not expose this endpoint in production at all, but
+     * we still guard it here defensively so a misconfigured environment
+     * can't silently attempt it.
+     *
+     * Prerequisites for this to actually complete the flow:
+     *   1. registerUrls() has already been called successfully, so
+     *      Safaricom has our validation/confirmation URLs on file.
+     *   2. This service is reachable via a public HTTPS tunnel (e.g.
+     *      ngrok) matching mpesa.daraja.c2b.validation-url/confirmation-url.
+     *   3. billRefNumber is the email of a wallet that actually exists —
+     *      Safaricom will call our validation URL with it as BillRefNumber,
+     *      same as processConfirmation/validateAccount expect elsewhere.
+     *
+     * @param amount        transaction amount, e.g. "100"
+     * @param msisdn        Safaricom sandbox test MSISDN, e.g. "254708374149"
+     * @param billRefNumber account reference — must match an existing wallet's
+     *                      account number/email to pass validation
+     */
+    public Map<String, Object> simulateC2BPayment(String amount, String msisdn, String billRefNumber) {
+        if (!"sandbox".equalsIgnoreCase(config.getEnvironment())) {
+            throw new IllegalStateException(
+                    "C2B simulate is a sandbox-only testing tool and is disabled because "
+                            + "mpesa.daraja.environment=" + config.getEnvironment());
+        }
+
+        if (billRefNumber == null || billRefNumber.isBlank()) {
+            throw new IllegalArgumentException("billRefNumber is required");
+        }
+
+        String token = mpesaService.getAccessToken();
+
+        Map<String, Object> body = Map.of(
+                "ShortCode",     config.getC2b().getShortcode(),
+                "CommandID",     "CustomerPayBillOnline",
+                "Amount",        amount != null && !amount.isBlank() ? amount : "100",
+                "Msisdn",        msisdn != null && !msisdn.isBlank() ? msisdn : "254708374149",
+                "BillRefNumber", billRefNumber
+        );
+
+        String json;
+        try {
+            json = objectMapper.writeValueAsString(body);
+        } catch (Exception e) {
+            throw new RuntimeException("C2B simulate failed: " + e.getMessage(), e);
+        }
+
+        RequestBody rb = RequestBody.create(json, MediaType.parse("application/json"));
+        Request request = new Request.Builder()
+                .url(config.baseUrl() + "/mpesa/c2b/v2/simulate")
+                .addHeader("Authorization", "Bearer " + token)
+                .post(rb)
+                .build();
+
+        try (Response response = http.newCall(request).execute()) {
+            String respBody = response.body().string();
+            log.info("C2B simulate response: {}", respBody);
+            return parseSimulateResponse(respBody);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("C2B simulate failed: " + e.getMessage(), e);
+        }
+    }
+
+    private Map<String, Object> parseSimulateResponse(String respBody) throws Exception {
+        JsonNode node = objectMapper.readTree(respBody);
+
+        String errorCode = node.path("errorCode").asText(null);
+        if (errorCode != null && !errorCode.isBlank()) {
+            String errorMessage = node.path("errorMessage").asText("Unknown C2B simulate error");
+            log.warn("C2B simulate rejected by Safaricom: errorCode={} errorMessage={}",
+                    errorCode, errorMessage);
+            throw new RuntimeException("C2B simulate failed (" + errorCode + "): " + errorMessage);
+        }
+
+        String responseDescription = node.path("ResponseDescription").asText("");
+        log.info("C2B simulate accepted: {}", responseDescription);
+
+        return Map.of(
+                "success", true,
+                "message", "Simulated payment accepted by Safaricom — check application logs for the "
+                        + "validation/confirmation callback, then verify the wallet balance.",
+                "ConversationID",           node.path("ConversationID").asText(""),
+                "OriginatorConversationID", node.path("OriginatorConversationID").asText(""),
+                "ResponseDescription",      responseDescription
+        );
+    }
+
     // ─── Validation ───────────────────────────────────────────────────────────
 
     /**

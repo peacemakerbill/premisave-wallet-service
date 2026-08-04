@@ -48,4 +48,35 @@ public class MpesaC2BController {
                 "message", "C2B URLs registered successfully");
         return ResponseEntity.ok(ApiResponse.success(friendlyMessage, result));
     }
+
+    /**
+     * Sandbox-only testing helper — triggers Safaricom's C2B Simulate
+     * Transaction endpoint, which pretends a customer paid our Pay Bill.
+     * Safaricom then calls our own registered validation URL, and (if
+     * accepted) our confirmation URL, exercising the full deposit flow
+     * end-to-end without needing a real phone. Hard-blocked outside
+     * sandbox — see MpesaC2BService.simulateC2BPayment.
+     *
+     * Call POST /register-urls first so Safaricom has our callback URLs
+     * on file, and make sure billRefNumber matches a wallet that actually
+     * exists — Safaricom will pass it straight to our validation endpoint.
+     *
+     * Body:
+     * {
+     *   "amount": "100",                        // optional, defaults to "100"
+     *   "msisdn": "254708374149",                // optional, defaults to a sandbox test number
+     *   "billRefNumber": "existing-user@email.com"  // required — must have a wallet
+     * }
+     */
+    @PostMapping("/simulate")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> simulate(@RequestBody Map<String, String> body) {
+        String amount = body.get("amount");
+        String msisdn = body.get("msisdn");
+        String billRefNumber = body.get("billRefNumber");
+
+        Map<String, Object> result = c2bService.simulateC2BPayment(amount, msisdn, billRefNumber);
+        String friendlyMessage = (String) result.getOrDefault(
+                "message", "C2B simulate request submitted");
+        return ResponseEntity.ok(ApiResponse.success(friendlyMessage, result));
+    }
 }
