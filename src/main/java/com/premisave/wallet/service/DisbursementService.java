@@ -333,8 +333,8 @@ public class DisbursementService {
             throw new InsufficientFundsException("Insufficient funds for disbursement");
 
         // SECURITY: throws (rejecting the request outright, no wallet debit)
-        // if neither pochiPhoneNumber nor mpesaPhoneNumber is set on the
-        // wallet — see resolveVerifiedPochiPhoneNumber/resolveVerifiedPhoneNumber.
+        // if pochiPhoneNumber isn't set on the wallet — see
+        // resolveVerifiedPochiPhoneNumber. No fallback to mpesaPhoneNumber.
         String phoneNumber = resolveVerifiedPochiPhoneNumber(wallet);
 
         wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
@@ -539,27 +539,27 @@ public class DisbursementService {
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
     /**
-     * Resolves the phone number a B2Pochi disbursement should be sent to.
-     * Prefers the wallet's own pochiPhoneNumber (set via PUT
-     * /wallet/pochi-phone) since a user's Pochi la Biashara account can be
-     * registered under a different line than their regular mpesaPhoneNumber
-     * (used for STK deposits and phone withdrawals) — same "resolved
-     * authoritatively here, never from the request" reasoning as
-     * mpesaPhoneNumber/paypalEmail elsewhere. Falls back to
-     * resolveVerifiedPhoneNumber (wallet's mpesaPhoneNumber only) if no
-     * dedicated Pochi number has been set yet.
+     * Resolves the phone number a B2Pochi disbursement should be sent to —
+     * the wallet's own pochiPhoneNumber (set via PUT /wallet/pochi-phone).
      *
-     * SECURITY: both this method and resolveVerifiedPhoneNumber below are
-     * strict — if neither pochiPhoneNumber nor mpesaPhoneNumber is set on
-     * the wallet, this throws PhoneNumberUnavailableException and rejects
-     * the withdrawal outright. There is no fallback to any external source
-     * (e.g. the auth-service profile) for either B2C or B2Pochi withdrawals.
+     * SECURITY: strictly requires wallet.pochiPhoneNumber to already be
+     * set. There is NO fallback to mpesaPhoneNumber (or to any external
+     * source) — a user's Pochi la Biashara account can be registered under
+     * a different line than their regular mpesaPhoneNumber, so silently
+     * reusing mpesaPhoneNumber here risks sending the payout to a number
+     * that doesn't actually have a Pochi account (or, worse, one that
+     * belongs to someone else's Pochi account entirely). Callers
+     * (processB2PochiPayment) call this BEFORE the wallet is debited, so a
+     * missing pochiPhoneNumber rejects the request with no funds moved.
      */
     private String resolveVerifiedPochiPhoneNumber(Wallet wallet) {
         if (wallet != null && wallet.getPochiPhoneNumber() != null && !wallet.getPochiPhoneNumber().isBlank()) {
             return wallet.getPochiPhoneNumber();
         }
-        return resolveVerifiedPhoneNumber(wallet);
+
+        throw new PhoneNumberUnavailableException(
+                "No Pochi la Biashara phone number is set on your wallet — please add one "
+                        + "(PUT /wallet/pochi-phone) before requesting a B2Pochi disbursement.");
     }
 
     /**
@@ -573,9 +573,11 @@ public class DisbursementService {
      * value would let a withdrawal succeed against a number the user never
      * explicitly attached to this wallet, undermining the exact
      * mistargeted-payout protection the mpesaPhoneNumber/paypalEmail fields
-     * exist for (see their javadoc on Wallet). Callers (processDisbursement,
-     * resolveVerifiedPochiPhoneNumber) call this BEFORE the wallet is
-     * debited, so a missing number rejects the request with no funds moved.
+     * exist for (see their javadoc on Wallet). processDisbursement calls
+     * this BEFORE the wallet is debited, so a missing number rejects the
+     * request with no funds moved. B2Pochi does NOT use this method — see
+     * resolveVerifiedPochiPhoneNumber, which requires pochiPhoneNumber
+     * specifically with no fallback here.
      */
     private String resolveVerifiedPhoneNumber(Wallet wallet) {
         if (wallet != null && wallet.getMpesaPhoneNumber() != null && !wallet.getMpesaPhoneNumber().isBlank()) {

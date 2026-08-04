@@ -76,11 +76,17 @@ public class Wallet {
      * doesn't actually have a Pochi account (or, worse, one that happens to
      * belong to someone else's Pochi account entirely). Resolved
      * authoritatively from here — never taken from the disbursement request
-     * itself — same reasoning as mpesaPhoneNumber/paypalEmail. Falls back to
-     * mpesaPhoneNumber if unset; if that is also unset, the withdrawal is
-     * rejected outright (see mpesaPhoneNumber's SECURITY note above — no
-     * external fallback for either field). Stored normalized to
-     * 254XXXXXXXXX. Set via PUT /wallet/pochi-phone.
+     * itself — same reasoning as mpesaPhoneNumber/paypalEmail.
+     *
+     * SECURITY: for B2Pochi withdrawals this being unset is a hard
+     * rejection — DisbursementService.resolveVerifiedPochiPhoneNumber
+     * requires it to be present and throws PhoneNumberUnavailableException
+     * otherwise. There is intentionally NO fallback to mpesaPhoneNumber (a
+     * user's Pochi account can live on a different line than their regular
+     * M-Pesa number, so reusing it risks paying out to a number with no
+     * Pochi account, or someone else's Pochi account) and no fallback to
+     * any external source either. Stored normalized to 254XXXXXXXXX. Set
+     * via PUT /wallet/pochi-phone.
      */
     private String pochiPhoneNumber;
 
