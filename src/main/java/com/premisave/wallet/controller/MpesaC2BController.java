@@ -34,10 +34,18 @@ public class MpesaC2BController {
      * One-time registration — call this endpoint manually (or on startup)
      * to register your validation + confirmation URLs with Safaricom.
      * Restricted to ADMIN/OPERATIONS via SecurityConfig.
+     *
+     * The top-level ApiResponse message reuses the friendly, human-readable
+     * "message" that MpesaC2BService builds (rather than Safaricom's
+     * CustomerMessage field, which is always blank for this endpoint — see
+     * MpesaC2BService.parseRegisterUrlsResponse for why) so API consumers
+     * and UIs get a clear confirmation without having to dig into `data`.
      */
     @PostMapping("/register-urls")
     public ResponseEntity<ApiResponse<Map<String, Object>>> registerUrls() {
         Map<String, Object> result = c2bService.registerUrls();
-        return ResponseEntity.ok(ApiResponse.success("C2B URLs registered", result));
+        String friendlyMessage = (String) result.getOrDefault(
+                "message", "C2B URLs registered successfully");
+        return ResponseEntity.ok(ApiResponse.success(friendlyMessage, result));
     }
 }

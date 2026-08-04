@@ -20,7 +20,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.net.SocketTimeoutException;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
@@ -33,7 +36,26 @@ public class MpesaC2BService {
     private final TransactionRepository transactionRepository;
     private final AuthServiceClient authServiceClient;
 
-    private final OkHttpClient http = new OkHttpClient();
+    /**
+     * Safaricom's sandbox negotiates HTTP/2 via ALPN but is flaky about
+     * promptly sending response headers on that path — OkHttp's Http2Stream
+     * stalls and throws SocketTimeoutException even though the request was
+     * actually accepted server-side (observed repeatedly against
+     * /mpesa/c2b/v2/registerurl: several timeouts, then a call that
+     * eventually succeeds with the exact same request shape). Pinning to
+     * HTTP/1.1 avoids that stream-level stall entirely. Timeouts are also
+     * bumped up from OkHttp's 10s default, since the sandbox can be slow —
+     * especially on the first call right after service startup.
+     */
+    private final OkHttpClient http = new OkHttpClient.Builder()
+            .protocols(List.of(Protocol.HTTP_1_1))
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .callTimeout(45, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build();
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     // ─── URL Registration ─────────────────────────────────────────────────────
@@ -46,6 +68,12 @@ public class MpesaC2BService {
      * confirmation-url) instead of deriving paths from the STK callback URL —
      * the C2B test shortcode is different from the STK Push test shortcode
      * in Daraja sandbox, so they must be configured independently.
+     *
+     * Retries up to 3 times on SocketTimeoutException — the sandbox has been
+     * observed to time out on the first couple of attempts and then succeed
+     * on an identical retry, so a transient stall shouldn't surface as a
+     * hard failure to the caller. A real rejection from Safaricom (parsed
+     * error/failure response) is NOT retried — it's thrown immediately.
      *
      * Safaricom uses TWO DIFFERENT response shapes here, and both are valid
      * JSON, so parsing alone doesn't tell you which one you got:
@@ -79,63 +107,107 @@ public class MpesaC2BService {
                 "ValidationURL",    config.getC2b().getValidationUrl()
         );
 
+        String json;
         try {
-            String json = objectMapper.writeValueAsString(body);
-            RequestBody rb = RequestBody.create(json, MediaType.parse("application/json"));
-
-            Request request = new Request.Builder()
-                    .url(config.baseUrl() + "/mpesa/c2b/v2/registerurl")
-                    .addHeader("Authorization", "Bearer " + token)
-                    .post(rb)
-                    .build();
-
-            try (Response response = http.newCall(request).execute()) {
-                String respBody = response.body().string();
-                log.info("C2B URL registration response: {}", respBody);
-                JsonNode node = objectMapper.readTree(respBody);
-
-                // ── Rejection shape: {requestId, errorCode, errorMessage} ──────
-                String errorCode = node.path("errorCode").asText(null);
-                if (errorCode != null && !errorCode.isBlank()) {
-                    String errorMessage = node.path("errorMessage").asText("Unknown C2B registration error");
-                    log.warn("C2B URL registration rejected by Safaricom: errorCode={} errorMessage={}",
-                            errorCode, errorMessage);
-                    throw new RuntimeException(
-                            "C2B URL registration failed (" + errorCode + "): " + errorMessage);
-                }
-
-                // ── Acceptance shape ─────────────────────────────────────────
-                String responseCode = node.path("ResponseCode").asText("");
-                String description  = node.path("ResponseDescription").asText("");
-
-                boolean codeIndicatesSuccess = !responseCode.isBlank()
-                        && responseCode.chars().allMatch(c -> c == '0');
-                boolean descriptionIndicatesSuccess = "success".equalsIgnoreCase(description.trim());
-
-                boolean success = codeIndicatesSuccess || descriptionIndicatesSuccess;
-
-                if (!success) {
-                    String desc = !description.isBlank() ? description : "Unknown failure";
-                    log.warn("C2B URL registration not accepted: responseCode={} description={} raw={}",
-                            responseCode, desc, respBody);
-                    throw new RuntimeException(
-                            "C2B URL registration was not accepted (ResponseCode=" + responseCode + "): " + desc);
-                }
-
-                log.info("C2B URL registration accepted: responseCode={} description={}", responseCode, description);
-
-                return Map.of(
-                        "success",             true,
-                        "ResponseCode",        responseCode,
-                        "ResponseDescription", description,
-                        "CustomerMessage",     node.path("CustomerMessage").asText()
-                );
-            }
-        } catch (RuntimeException e) {
-            throw e;
+            json = objectMapper.writeValueAsString(body);
         } catch (Exception e) {
             throw new RuntimeException("C2B URL registration failed: " + e.getMessage(), e);
         }
+
+        RequestBody rb = RequestBody.create(json, MediaType.parse("application/json"));
+        Request request = new Request.Builder()
+                .url(config.baseUrl() + "/mpesa/c2b/v2/registerurl")
+                .addHeader("Authorization", "Bearer " + token)
+                .post(rb)
+                .build();
+
+        final int maxAttempts = 3;
+        SocketTimeoutException lastTimeout = null;
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try (Response response = http.newCall(request).execute()) {
+                String respBody = response.body().string();
+                log.info("C2B URL registration response (attempt {}/{}): {}", attempt, maxAttempts, respBody);
+                return parseRegisterUrlsResponse(respBody);
+            } catch (SocketTimeoutException e) {
+                lastTimeout = e;
+                log.warn("C2B URL registration timed out (attempt {}/{}) — retrying...", attempt, maxAttempts);
+                if (attempt < maxAttempts) {
+                    try {
+                        Thread.sleep(1500L * attempt);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            } catch (RuntimeException e) {
+                // Real rejection/parsing failure from Safaricom — don't retry, surface immediately.
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException("C2B URL registration failed: " + e.getMessage(), e);
+            }
+        }
+
+        throw new RuntimeException(
+                "C2B URL registration failed: timeout after " + maxAttempts + " attempts", lastTimeout);
+    }
+
+    /**
+     * Parses Safaricom's registerurl response body, distinguishing the
+     * rejection shape from the acceptance shape, and applying the
+     * all-zeros ResponseCode / "success" description success check
+     * described above.
+     *
+     * NOTE on CustomerMessage: Safaricom returns this field on several
+     * Daraja APIs (most notably STK Push) as text meant to be shown to the
+     * end customer on their phone/UI. Register URL has no end-customer in
+     * the loop — it's a backend/admin action — so Safaricom always returns
+     * it blank here. That's expected, not a parsing bug; we still pass it
+     * through in the raw payload for completeness, but build our own
+     * "message" below rather than relying on it.
+     */
+    private Map<String, Object> parseRegisterUrlsResponse(String respBody) throws Exception {
+        JsonNode node = objectMapper.readTree(respBody);
+
+        // ── Rejection shape: {requestId, errorCode, errorMessage} ──────
+        String errorCode = node.path("errorCode").asText(null);
+        if (errorCode != null && !errorCode.isBlank()) {
+            String errorMessage = node.path("errorMessage").asText("Unknown C2B registration error");
+            log.warn("C2B URL registration rejected by Safaricom: errorCode={} errorMessage={}",
+                    errorCode, errorMessage);
+            throw new RuntimeException(
+                    "C2B URL registration failed (" + errorCode + "): " + errorMessage);
+        }
+
+        // ── Acceptance shape ─────────────────────────────────────────
+        String responseCode = node.path("ResponseCode").asText("");
+        String description  = node.path("ResponseDescription").asText("");
+
+        boolean codeIndicatesSuccess = !responseCode.isBlank()
+                && responseCode.chars().allMatch(c -> c == '0');
+        boolean descriptionIndicatesSuccess = "success".equalsIgnoreCase(description.trim());
+
+        boolean success = codeIndicatesSuccess || descriptionIndicatesSuccess;
+
+        if (!success) {
+            String desc = !description.isBlank() ? description : "Unknown failure";
+            log.warn("C2B URL registration not accepted: responseCode={} description={} raw={}",
+                    responseCode, desc, respBody);
+            throw new RuntimeException(
+                    "C2B URL registration was not accepted (ResponseCode=" + responseCode + "): " + desc);
+        }
+
+        log.info("C2B URL registration accepted: responseCode={} description={}", responseCode, description);
+
+        String friendlyMessage = "C2B URLs have been registered successfully with Safaricom.";
+
+        return Map.of(
+                "success",             true,
+                "message",             friendlyMessage,
+                "ResponseCode",        responseCode,
+                "ResponseDescription", description,
+                "CustomerMessage",     node.path("CustomerMessage").asText()
+        );
     }
 
     // ─── Validation ───────────────────────────────────────────────────────────
