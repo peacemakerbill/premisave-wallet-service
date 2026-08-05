@@ -16,6 +16,7 @@ import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.enums.DisbursementStatus;
 import com.premisave.wallet.enums.TransactionStatus;
 import com.premisave.wallet.enums.TransactionType;
+import com.premisave.wallet.exception.FlutterwaveTransferException;
 import com.premisave.wallet.exception.InsufficientFundsException;
 import com.premisave.wallet.exception.PhoneNumberUnavailableException;
 import com.premisave.wallet.exception.WalletFrozenException;
@@ -31,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -46,26 +48,28 @@ public class DisbursementService {
     private final MpesaService mpesaService;
     private final StripeService stripeService;
     private final PaypalService paypalService;
+    private final FlutterwaveService flutterwaveService;
     private final IdempotencyService idempotencyService;
     private final FxRateService fxRateService;
 
     private static final List<String> PAYPAL_TERMINAL_FAILURE_STATUSES =
             List.of("FAILED", "DENIED", "BLOCKED", "RETURNED", "REFUNDED", "REVERSED", "CANCELED");
 
- // ─── User-facing disbursement (phone / PayPal / Stripe) ─────────────────
+ // ─── User-facing disbursement (phone / PayPal / Stripe / Flutterwave) ───
 
     /**
      * NOTE ON BALANCE TIMING: the wallet is NOT debited here anymore. It's
      * only debited once the disbursement is CONFIRMED — by M-Pesa's
-     * ResultURL callback (see completeMpesaDisbursement) or PayPal's Payouts
-     * webhook (see completePaypalDisbursement) — except for Stripe, which
-     * resolves synchronously below, so it's debited right at that point.
-     * Previously the wallet was debited up front and refunded on failure;
-     * that meant a customer's balance was reduced for money that hadn't
-     * actually left yet, and a PENDING disbursement stuck for hours (e.g.
-     * during the recent callback URL misconfiguration) held their funds
-     * hostage the whole time even though M-Pesa/PayPal had already
-     * processed the payout successfully.
+     * ResultURL callback (see completeMpesaDisbursement), PayPal's Payouts
+     * webhook (see completePaypalDisbursement), or Flutterwave's
+     * transfer.completed webhook (see completeFlutterwaveDisbursement) —
+     * except for Stripe, which resolves synchronously below, so it's
+     * debited right at that point. Previously the wallet was debited up
+     * front and refunded on failure; that meant a customer's balance was
+     * reduced for money that hadn't actually left yet, and a PENDING
+     * disbursement stuck for hours (e.g. during the recent callback URL
+     * misconfiguration) held their funds hostage the whole time even though
+     * M-Pesa/PayPal had already processed the payout successfully.
      *
      * Trade-off to be aware of: since nothing is held/reserved at
      * initiation, two disbursement requests submitted in quick succession
@@ -89,6 +93,15 @@ public class DisbursementService {
         if ("MPESA".equals(provider) && request.getCurrency() != null
                 && !"KES".equalsIgnoreCase(request.getCurrency())) {
             throw new IllegalArgumentException("M-Pesa disbursements must be in KES");
+        }
+
+        // Flutterwave is handled as its own branch (not the generic
+        // Stripe/PayPal ProviderResult switch below) because a transfer
+        // destination is two fields (account_bank + account_number), not a
+        // single "destination" string — same reason MPESA gets its own
+        // early-return block above the switch.
+        if ("FLUTTERWAVE".equals(provider)) {
+            return processFlutterwaveDisbursement(userId, wallet, request);
         }
 
         String destination;
@@ -181,6 +194,143 @@ public class DisbursementService {
 
         disbursementRepository.save(disbursement);
         return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), result.message());
+    }
+
+    // ─── Flutterwave (bank account or mobile money wallet) ──────────────────
+
+    /**
+     * Same not-debited-until-confirmed pattern as MPESA/PAYPAL above —
+     * Flutterwave transfers resolve asynchronously via the
+     * transfer.completed webhook (see completeFlutterwaveDisbursement).
+     * KES→USD conversion mirrors disbursePaypal below; see
+     * FlutterwaveService.initiateTransfer's javadoc for the caveat that
+     * USD payouts may not be supported for every destination corridor —
+     * confirm with Flutterwave for your specific bank/mobile-money rails
+     * before relying on this in production.
+     */
+    private DisbursementResponse processFlutterwaveDisbursement(String userId, Wallet wallet,
+                                                                   DisbursementRequest request) {
+        if (request.getFlutterwaveAccountBank() == null || request.getFlutterwaveAccountBank().isBlank()) {
+            throw new IllegalArgumentException("flutterwaveAccountBank is required for FLUTTERWAVE disbursements");
+        }
+        if (request.getFlutterwaveAccountNumber() == null || request.getFlutterwaveAccountNumber().isBlank()) {
+            throw new IllegalArgumentException("flutterwaveAccountNumber is required for FLUTTERWAVE disbursements");
+        }
+        String transferType = request.getFlutterwaveTransferType() != null
+                ? request.getFlutterwaveTransferType().toUpperCase() : null;
+        if (!"BANK".equals(transferType) && !"MOBILE_MONEY".equals(transferType)) {
+            throw new IllegalArgumentException(
+                    "flutterwaveTransferType must be BANK or MOBILE_MONEY for FLUTTERWAVE disbursements");
+        }
+
+        String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
+        String displayDestination = request.getFlutterwaveAccountBank() + "-" + request.getFlutterwaveAccountNumber();
+
+        Disbursement disbursement = new Disbursement();
+        disbursement.setUserId(userId);
+        disbursement.setWalletId(wallet.getId());
+        disbursement.setAmount(request.getAmount());
+        disbursement.setDestination(displayDestination);
+        disbursement.setProvider("FLUTTERWAVE");
+        disbursement.setChannel("FLUTTERWAVE_" + transferType);
+        disbursement.setReference(reference);
+        disbursement.setStatus(DisbursementStatus.PENDING);
+        disbursement.setCurrency(Currency.KES);
+
+        BigDecimal usdToKesRate = fxRateService.getRate("USD", "KES");
+        BigDecimal usdAmount = request.getAmount()
+                .divide(usdToKesRate, 2, RoundingMode.HALF_UP);
+
+        FlutterwaveService.TransferResult result;
+        try {
+            result = flutterwaveService.initiateTransfer(
+                    request.getFlutterwaveAccountBank(), request.getFlutterwaveAccountNumber(),
+                    usdAmount, "USD", reference, request.getRemarks(),
+                    request.getFlutterwaveBeneficiaryName());
+        } catch (FlutterwaveTransferException e) {
+            log.error("Flutterwave transfer threw before a result could be returned: userId={} reference={}",
+                    userId, reference, e);
+            disbursement.setStatus(DisbursementStatus.FAILED);
+            disbursement.setFailureReason("Flutterwave transfer initiation failed: " + e.getMessage());
+            disbursementRepository.save(disbursement);
+            return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
+                    disbursement.getFailureReason());
+        }
+
+        log.info("Flutterwave disbursement: userId={} reference={} kesAmount={} usdAmount={} rate={}",
+                userId, reference, request.getAmount(), usdAmount, usdToKesRate);
+
+        if (!result.success()) {
+            disbursement.setStatus(DisbursementStatus.FAILED);
+            disbursement.setFailureReason(result.message());
+            disbursementRepository.save(disbursement);
+            return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), result.message());
+        }
+
+        disbursement.setProviderReference(result.transferId());
+        disbursementRepository.save(disbursement);
+        return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
+                "Disbursement queued with Flutterwave (USD " + usdAmount + ") — your wallet will be debited "
+                        + "once Flutterwave confirms the payout.");
+    }
+
+    /**
+     * Reconciliation from Flutterwave's transfer.completed webhook. Keyed
+     * by transferId (Flutterwave's own numeric id, stored as
+     * providerReference at initiation) rather than our own reference,
+     * since that's what the webhook payload's data.id carries — see
+     * PaymentCallbackController.flutterwaveWebhook.
+     */
+    @Transactional
+    public void completeFlutterwaveDisbursement(String transferId, boolean success, String statusDesc) {
+        Disbursement d = disbursementRepository.findByProviderReference(transferId).orElse(null);
+        if (d == null) {
+            log.warn("Flutterwave transfer webhook for unknown transferId={} — ignoring", transferId);
+            return;
+        }
+
+        if (d.getStatus() != DisbursementStatus.PENDING) {
+            log.warn("Flutterwave transfer webhook for already-finalized disbursement id={} status={} — ignoring duplicate",
+                    d.getId(), d.getStatus());
+            return;
+        }
+
+        if (success) {
+            d.setStatus(DisbursementStatus.SUCCESS);
+
+            if (d.getWalletId() != null) {
+                // First touch of the wallet for this disbursement — same
+                // negative-balance handling as completeMpesaDisbursement/
+                // completePaypalDisbursement above: funds have already left
+                // via Flutterwave, so this can't be pre-checked the way a
+                // synchronous debit could be.
+                Wallet wallet = walletRepository.findById(d.getWalletId())
+                        .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + d.getWalletId()));
+
+                BigDecimal newBalance = wallet.getBalance().subtract(d.getAmount());
+                if (newBalance.compareTo(BigDecimal.ZERO) < 0) {
+                    log.error("Wallet {} balance went negative ({}) debiting confirmed Flutterwave disbursement id={} — needs manual reconciliation",
+                            wallet.getId(), newBalance, d.getId());
+                }
+                wallet.setBalance(newBalance);
+                walletRepository.save(wallet);
+
+                disbursementRepository.save(d);
+                saveDisbursementTransaction(d.getUserId(), d.getWalletId(), d.getAmount(), d, d.getReference());
+            } else {
+                disbursementRepository.save(d);
+            }
+
+            log.info("Flutterwave disbursement completed: id={} transferId={}", d.getId(), transferId);
+        } else {
+            // No refund needed — the wallet was never debited for a
+            // PENDING Flutterwave disbursement (see
+            // processFlutterwaveDisbursement above).
+            d.setStatus(DisbursementStatus.FAILED);
+            d.setFailureReason(statusDesc);
+            disbursementRepository.save(d);
+            log.warn("Flutterwave disbursement failed: id={} transferId={} reason={}", d.getId(), transferId, statusDesc);
+        }
     }
 
     // ─── B2B (admin/finance-initiated, business-to-business payment) ───────

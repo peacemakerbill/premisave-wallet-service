@@ -321,4 +321,33 @@ public class WalletController {
         PaymentResponse response = depositService.confirmStripeDeposit(paymentIntentId, userId);
         return ResponseEntity.ok(ApiResponse.success("Stripe deposit processed", response));
     }
+
+    /**
+     * Called by the frontend after the user returns from Flutterwave's
+     * hosted checkout redirect (redirect_url carries tx_ref as a query
+     * param — the same value returned as PaymentResponse.transactionId is
+     * NOT used here; this field is actually the checkout link during
+     * initiation, so the frontend must persist the tx_ref it generated /
+     * was given at initiation time and echo it back here). Re-verifies the
+     * transaction server-side via Flutterwave's API rather than trusting
+     * redirect query params directly — see
+     * FlutterwaveService.verifyTransactionByReference's javadoc. The
+     * charge.completed webhook (see PaymentCallbackController) is a
+     * safety-net backstop and is idempotent against this same call.
+     * POST /wallet/deposit/flutterwave/confirm
+     */
+    @PostMapping("/deposit/flutterwave/confirm")
+    public ResponseEntity<ApiResponse<PaymentResponse>> confirmFlutterwaveDeposit(
+            @RequestBody Map<String, String> body,
+            Authentication auth,
+            HttpServletRequest request) {
+        String txRef = body.get("txRef");
+        if (txRef == null || txRef.isBlank()) {
+            throw new IllegalArgumentException("txRef is required");
+        }
+        String userId = (String) request.getAttribute("userId");
+        if (userId == null) userId = auth.getName();
+        PaymentResponse response = depositService.confirmFlutterwaveDeposit(txRef, userId);
+        return ResponseEntity.ok(ApiResponse.success("Flutterwave deposit processed", response));
+    }
 }

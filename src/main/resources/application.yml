@@ -64,9 +64,9 @@ mpesa:
     # STK push callback — must be HTTPS and publicly reachable (use ngrok locally)
     callback-url: ${MPESA_CALLBACK_URL}
     environment: ${MPESA_ENV:sandbox}
-#		Safaricom Test Phone Numbers
-#		    254705912645
-#		    254708374149
+#   Safaricom Test Phone Numbers
+#       254705912645
+#       254708374149
 
     # Safaricom's public certificate, used to RSA-encrypt initiator passwords
     # into a SecurityCredential for B2C/B2B (see MpesaSecurityCredentialService).
@@ -238,6 +238,42 @@ paypal:
   # or cached here anymore.
   return-url: ${PAYPAL_RETURN_URL}
   cancel-url: ${PAYPAL_CANCEL_URL}
+
+# ─── Flutterwave ──────────────────────────────────────────────────────────────
+# Deposits (Standard/Hosted Checkout: card, mobile money outside Kenya, bank
+# transfer, USSD) and disbursements (Transfers API: bank account or mobile
+# money wallet). Same USD-with-live-FX-to-KES pattern as PayPal — see
+# FxRateService. Kenyan mobile money deliberately stays on the direct M-Pesa
+# Daraja integration above rather than being routed through Flutterwave too.
+#
+# IMPORTANT: the actual webhook URL registered in the Flutterwave Dashboard
+# (Settings → Webhooks) must be
+#   https://<your-domain>/payments/flutterwave/webhook
+# — i.e. WITH the /payments prefix. Double-check this against
+# PaymentCallbackController's @RequestMapping("/payments") + the
+# @PostMapping("/flutterwave/webhook") method before going live; a mismatch
+# here reproduces exactly the silent-401/no-application-logs failure mode
+# documented in CallbackRequestLoggingFilter and PaymentCallbackController.
+flutterwave:
+  secret-key: ${FLUTTERWAVE_SECRET_KEY}
+  public-key: ${FLUTTERWAVE_PUBLIC_KEY}
+  encryption-key: ${FLUTTERWAVE_ENCRYPTION_KEY}
+  environment: ${FLUTTERWAVE_ENV:sandbox}   # informational only — see FlutterwaveConfig javadoc
+  # Arbitrary secret string YOU choose and set in the Flutterwave Dashboard
+  # (Settings → Webhooks → Secret Hash) — Flutterwave echoes it back in
+  # every webhook's "verif-hash" header. Must match exactly.
+  webhook-secret-hash: ${FLUTTERWAVE_WEBHOOK_SECRET_HASH}
+  # Where Flutterwave's hosted checkout page redirects the customer back to
+  # after payment — the frontend reads tx_ref/transaction_id query params
+  # from here and calls POST /wallet/deposit/flutterwave/confirm.
+  redirect-url: ${FLUTTERWAVE_REDIRECT_URL}
+  transfer:
+    # Optional per-transfer callback — Flutterwave also fires the
+    # account-wide "transfer.completed" webhook above regardless.
+    callback-url: ${FLUTTERWAVE_TRANSFER_CALLBACK_URL:}
+    # Confirm actual tier limits with Flutterwave for your account.
+    min-amount: 1
+    max-amount: 5000
 
 # Frontend URL for CORS
 frontend:

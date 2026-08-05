@@ -37,6 +37,7 @@ public class DepositService {
     private final MpesaService mpesaService;
     private final StripeService stripeService;
     private final PaypalService paypalService;
+    private final FlutterwaveService flutterwaveService;
     private final FxRateService fxRateService;
 
     public PaymentResponse initiateDeposit(String userId, String userEmail, DepositRequest request) {
@@ -55,6 +56,7 @@ public class DepositService {
             case "MPESA_TILL" -> initiateExpressCheckoutDeposit(userId, request, wallet);
             case "STRIPE" -> initiateStripeDeposit(userId, userEmail, request, wallet, idempotencyKey);
             case "PAYPAL" -> initiatePaypalDeposit(userId, request, wallet, idempotencyKey);
+            case "FLUTTERWAVE" -> initiateFlutterwaveDeposit(userId, userEmail, request, wallet, idempotencyKey);
             default -> new PaymentResponse(false, null, "Unsupported deposit provider: " + provider);
         };
     }
@@ -374,7 +376,7 @@ public class DepositService {
                 "Redirect the user to the PayPal approval URL to complete the deposit. "
                         + "USD " + usdAmount + " will be credited as approximately KES " + kesEquivalent + ".");
     }
-    
+
     /**
      * Starts a standalone PayPal account link — no payment, mirrors
      * createStripeSetupIntent. Rejects up front if an account is already
@@ -585,6 +587,161 @@ public class DepositService {
             walletRepository.save(wallet);
             log.info("PayPal vault token finalized via webhook: walletId={} vaultId={}", wallet.getId(), vaultId);
         }, () -> log.warn("VAULT.PAYMENT-TOKEN.CREATED webhook: no wallet found for customerId={}", customerId));
+    }
+
+    // ─── Flutterwave ─────────────────────────────────────────────────────────
+
+    /**
+     * Initiates a Flutterwave Standard/Hosted Checkout deposit (card, mobile
+     * money outside Kenya, bank transfer, or USSD — see
+     * DepositRequest.flutterwavePaymentOptions to restrict which channels
+     * show on the hosted page). Same USD-with-live-FX-to-KES pattern as
+     * PayPal: the wallet always operates in KES, so the USD amount charged
+     * on Flutterwave's side is converted at the live rate for crediting.
+     *
+     * No saved-instrument/vaulting support (unlike Stripe/PayPal) — every
+     * deposit redirects to a fresh hosted checkout page, matching how
+     * M-Pesa STK Push works (no saved payment method concept there either).
+     */
+    private PaymentResponse initiateFlutterwaveDeposit(String userId, String userEmail, DepositRequest request,
+                                                         Wallet wallet, String idempotencyKey) {
+        String requestedCurrency = request.getCurrency() != null ? request.getCurrency().toUpperCase() : "USD";
+        if (!"USD".equals(requestedCurrency)) {
+            throw new IllegalArgumentException("Flutterwave deposits must be in USD (got: " + requestedCurrency + ")");
+        }
+
+        BigDecimal usdAmount = request.getAmount();
+        BigDecimal usdToKesRate = fxRateService.getRate("USD", "KES");
+        BigDecimal kesEquivalent = usdAmount.multiply(usdToKesRate).setScale(2, RoundingMode.HALF_UP);
+
+        FlutterwaveService.CheckoutResult result = flutterwaveService.initiateCheckout(
+                usdAmount, "USD", idempotencyKey, userEmail,
+                request.getCustomerName(), request.getCustomerPhone(),
+                request.getFlutterwavePaymentOptions());
+
+        if (!result.success()) {
+            log.warn("Flutterwave checkout rejected: userId={} reason={}", userId, result.message());
+            return new PaymentResponse(false, null, "Flutterwave checkout failed: " + result.message());
+        }
+
+        log.info("Flutterwave checkout created: userId={} txRef={} usdAmount={} kesEquivalent={} rate={}",
+                userId, idempotencyKey, usdAmount, kesEquivalent, usdToKesRate);
+
+        Transaction tx = new Transaction();
+        tx.setUserId(userId);
+        tx.setWalletId(wallet.getId());
+        tx.setType(TransactionType.DEPOSIT);
+        tx.setStatus(TransactionStatus.PENDING);
+        tx.setAmount(kesEquivalent);
+        tx.setCurrency(Currency.KES);
+        tx.setDescription("Flutterwave deposit (pending checkout) - USD " + usdAmount
+                + " @ live rate " + usdToKesRate);
+        tx.setReference(idempotencyKey);
+        transactionRepository.save(tx);
+
+        return new PaymentResponse(true, result.checkoutLink(),
+                "Redirect the user to the Flutterwave checkout link to complete the deposit. "
+                        + "USD " + usdAmount + " will be credited as approximately KES " + kesEquivalent + ".");
+    }
+
+    /**
+     * Called by the frontend after the user returns from Flutterwave's
+     * hosted checkout redirect (redirect_url carries tx_ref/transaction_id
+     * as query params). Re-verifies the transaction server-side rather than
+     * trusting the redirect query params directly — Flutterwave's own
+     * guidance is that redirect params can be tampered with client-side,
+     * unlike a signed webhook.
+     */
+    @Transactional
+    public PaymentResponse confirmFlutterwaveDeposit(String txRef, String callerUserId) {
+        Transaction tx = transactionRepository.findByReference(txRef)
+                .orElseThrow(() -> new IllegalStateException(
+                        "No pending transaction found for Flutterwave txRef=" + txRef));
+
+        if (!tx.getUserId().equals(callerUserId)) {
+            throw new IllegalArgumentException("This Flutterwave deposit does not belong to the authenticated user");
+        }
+
+        if (tx.getStatus() == TransactionStatus.COMPLETED) {
+            return new PaymentResponse(true, tx.getId(), "Deposit already completed");
+        }
+
+        if (tx.getStatus() == TransactionStatus.FAILED) {
+            return new PaymentResponse(false, tx.getId(),
+                    "This Flutterwave deposit previously failed and cannot be retried with the same reference.");
+        }
+
+        FlutterwaveService.VerifyResult verify = flutterwaveService.verifyTransactionByReference(txRef);
+
+        if (!verify.success()) {
+            return new PaymentResponse(false, tx.getId(),
+                    "Payment has not completed yet (status: " + verify.status() + ")");
+        }
+
+        creditWalletFromFlutterwaveCallback(txRef, verify.flwRef());
+        return new PaymentResponse(true, tx.getId(), "Flutterwave deposit successful");
+    }
+
+    /**
+     * Shared credit path for a Flutterwave deposit — called both by
+     * confirmFlutterwaveDeposit (frontend redirect confirm) and by the
+     * charge.completed webhook handler in PaymentCallbackController.
+     * Always re-verifies against Flutterwave's API before crediting (see
+     * FlutterwaveService.verifyTransactionByReference's javadoc) rather than
+     * trusting whatever amount/status the caller passed in — this is why
+     * the method only takes txRef and flwRef (for the audit trail), not an
+     * amount: the credited amount always comes from the transaction record
+     * created at initiation time, which itself was computed from a live FX
+     * rate at that moment. A drifted amount between initiation and now
+     * would be a Flutterwave-side (or FX) reconciliation problem, not
+     * something this method should paper over by trusting a fresh number.
+     */
+    @Transactional
+    public void creditWalletFromFlutterwaveCallback(String txRef, String flwRef) {
+        Transaction tx = transactionRepository.findByReference(txRef).orElse(null);
+
+        if (tx == null) {
+            log.warn("Flutterwave reconciliation: no pending transaction found for txRef={} (flwRef={}) — " +
+                    "cannot credit; needs manual review", txRef, flwRef);
+            return;
+        }
+
+        if (tx.getStatus() == TransactionStatus.COMPLETED) {
+            log.info("Flutterwave deposit already processed for txRef={} — skipping duplicate credit", txRef);
+            return;
+        }
+
+        if (tx.getStatus() == TransactionStatus.FAILED) {
+            log.warn("Flutterwave credit attempted for previously-failed txRef={} — ignoring, needs manual review", txRef);
+            return;
+        }
+
+        Wallet wallet = walletRepository.findById(tx.getWalletId())
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + tx.getWalletId()));
+
+        wallet.setBalance(wallet.getBalance().add(tx.getAmount()));
+        walletRepository.save(wallet);
+
+        tx.setStatus(TransactionStatus.COMPLETED);
+        tx.setProviderReference(flwRef);
+        tx.setDescription("Flutterwave deposit (flw_ref " + flwRef + ")");
+        transactionRepository.save(tx);
+
+        log.info("Wallet credited via Flutterwave: txRef={} amount={} flwRef={}", txRef, tx.getAmount(), flwRef);
+    }
+
+    @Transactional
+    public void markFlutterwaveTransactionFailed(String txRef, String reason) {
+        transactionRepository.findByReference(txRef).ifPresentOrElse(tx -> {
+            if (tx.getStatus() == TransactionStatus.COMPLETED) {
+                log.warn("Ignoring failure callback for already-completed Flutterwave txRef={}", txRef);
+                return;
+            }
+            tx.setStatus(TransactionStatus.FAILED);
+            tx.setDescription("Flutterwave deposit failed: " + reason);
+            transactionRepository.save(tx);
+            log.warn("Flutterwave deposit failed: txRef={} reason={}", txRef, reason);
+        }, () -> log.warn("Failure callback for unknown Flutterwave txRef={}: {}", txRef, reason));
     }
 
     // ─── Other callbacks ─────────────────────────────────────────────────────

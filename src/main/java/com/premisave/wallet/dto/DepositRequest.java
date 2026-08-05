@@ -14,7 +14,7 @@ public class DepositRequest {
     private BigDecimal amount;
 
     /**
-     * Payment provider: MPESA | MPESA_TILL | STRIPE | PAYPAL
+     * Payment provider: MPESA | MPESA_TILL | STRIPE | PAYPAL | FLUTTERWAVE
      * Defaults to MPESA if omitted.
      */
     private String provider;
@@ -38,7 +38,28 @@ public class DepositRequest {
 
     /**
      * ISO 4217 currency code (e.g. KES, USD, EUR).
-     * Defaults to KES for M-Pesa, USD for PayPal.
+     * Defaults to KES for M-Pesa, USD for PayPal and Flutterwave.
      */
     private String currency;
+
+    /**
+     * Optional, provider=FLUTTERWAVE only — restricts which channels
+     * Flutterwave's hosted checkout page shows, e.g. "card",
+     * "banktransfer", "ussd", "mobilemoneyghana,mobilemoneyuganda,mobilemoneyrwanda,mobilemoneyzambia,mobilemoneyfranco",
+     * or any comma-separated combination. Left null/blank to let
+     * Flutterwave show every channel enabled on the account.
+     *
+     * Kenyan mobile money is intentionally not offered through this path —
+     * use provider=MPESA for that (direct Daraja STK Push integration).
+     */
+    private String flutterwavePaymentOptions;
+
+    /**
+     * Optional, provider=FLUTTERWAVE only — customer display name/phone
+     * pre-filled on Flutterwave's checkout page. Both optional; the
+     * customer's email is always taken from the authenticated user, never
+     * from this request.
+     */
+    private String customerName;
+    private String customerPhone;
 }

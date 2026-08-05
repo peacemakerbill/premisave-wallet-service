@@ -4,11 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.premisave.wallet.dto.ApiResponse;
 import com.premisave.wallet.dto.B2BExpressCheckoutCallbackRequest;
+import com.premisave.wallet.dto.FlutterwaveWebhookRequest;
 import com.premisave.wallet.dto.MpesaResultCallbackRequest;
 import com.premisave.wallet.dto.MpesaStkCallbackRequest;
 import com.premisave.wallet.dto.PaypalWebhookRequest;
 import com.premisave.wallet.service.DepositService;
 import com.premisave.wallet.service.DisbursementService;
+import com.premisave.wallet.service.FlutterwaveService;
 import com.premisave.wallet.service.MpesaOperationsService;
 import com.premisave.wallet.service.PaypalService;
 import com.premisave.wallet.service.PullTransactionService;
@@ -30,7 +32,7 @@ import java.util.Map;
 /**
  * Handles incoming webhooks/callbacks from all payment providers:
  * M-Pesa (STK Push, B2C, B2B, B2B Express Checkout, Account Balance,
- * Transaction Status, Reversal, B2Pochi), Stripe, and PayPal.
+ * Transaction Status, Reversal, B2Pochi), Stripe, PayPal, and Flutterwave.
  * All endpoints are PUBLIC (no JWT) — secured by signature verification
  * or IP allowlist at the gateway/firewall level.
  *
@@ -39,6 +41,15 @@ import java.util.Map;
  * that word with "400.002.02 Bad Request - Invalid CallBackURL", even when
  * the URL is otherwise valid and publicly reachable. Keep this path (and
  * the corresponding mpesa.daraja.callback-url env value) free of "mpesa".
+ *
+ * IMPORTANT — every path added here MUST also be added to:
+ *   1. SecurityConfig's two permitAll() matcher lists
+ *   2. WebConfig's rate-limiter exclude list
+ *   3. CallbackRequestLoggingFilter.CALLBACK_PATHS
+ * Missing any one of these means the provider's callback silently 401s
+ * with zero application logs (see the earlier B2C/B2Pochi ResultURL
+ * incident — a mismatched result-url env value produced exactly this
+ * failure mode, invisible everywhere except the provider's own retry logs).
  */
 @Slf4j
 @RestController
@@ -52,6 +63,7 @@ public class PaymentCallbackController {
     private final PullTransactionService pullTransactionService;
     private final StripeService stripeService;
     private final PaypalService paypalService;
+    private final FlutterwaveService flutterwaveService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${stripe.webhook-secret:}")
@@ -483,6 +495,74 @@ public class PaymentCallbackController {
             // Always ACK 200 to PayPal regardless of internal outcome — same
             // pattern as MpesaC2BController.confirm.
             log.error("PayPal webhook processing error: {}", e.getMessage(), e);
+        }
+        return ResponseEntity.ok().build();
+    }
+
+    // ─── Flutterwave Webhook ─────────────────────────────────────────────────
+
+    /**
+     * Flutterwave sends "charge.completed" (deposits) and
+     * "transfer.completed" (disbursements) to the same endpoint.
+     *
+     * Verified via the "verif-hash" header — a plain shared-secret string
+     * comparison against flutterwave.webhook-secret-hash (see
+     * FlutterwaveService.verifyWebhookSignature's javadoc for why this is a
+     * weaker guarantee than Stripe/PayPal's cryptographic signatures, and
+     * why the amount/status is always re-verified server-side rather than
+     * trusted from the payload directly).
+     *
+     * Always returns 200 regardless of internal outcome — same pattern as
+     * every other provider callback here — Flutterwave retries on non-200.
+     */
+    @PostMapping("/flutterwave/webhook")
+    public ResponseEntity<Void> flutterwaveWebhook(
+            @RequestBody String rawBody,
+            @RequestHeader(value = "verif-hash", required = false) String verifHash) {
+
+        if (!flutterwaveService.verifyWebhookSignature(verifHash)) {
+            log.warn("Flutterwave webhook rejected — verif-hash mismatch or not configured");
+            return ResponseEntity.status(400).build();
+        }
+
+        try {
+            FlutterwaveWebhookRequest payload = objectMapper.readValue(rawBody, FlutterwaveWebhookRequest.class);
+            String event = payload.getEvent();
+            JsonNode data = payload.getEventData();
+
+            log.info("Flutterwave webhook received (verified): event={}", event);
+
+            if ("charge.completed".equals(event) && data != null) {
+                String txRef = data.path("tx_ref").asText(null);
+                String flwRef = data.path("flw_ref").asText(null);
+                String status = data.path("status").asText("");
+
+                if (txRef == null || txRef.isBlank()) {
+                    log.warn("Flutterwave charge.completed webhook missing data.tx_ref — cannot reconcile");
+                } else if ("successful".equalsIgnoreCase(status)) {
+                    // Re-verify server-side before crediting — see
+                    // FlutterwaveService.verifyTransactionByReference's javadoc.
+                    depositService.creditWalletFromFlutterwaveCallback(txRef, flwRef);
+                } else {
+                    depositService.markFlutterwaveTransactionFailed(txRef,
+                            "Flutterwave reported status=" + status);
+                }
+            } else if ("transfer.completed".equals(event) && data != null) {
+                String transferId = data.path("id").asText(null);
+                String status = data.path("status").asText(""); // SUCCESSFUL | FAILED
+                String complete_message = data.path("complete_message").asText(null);
+
+                if (transferId == null || transferId.isBlank()) {
+                    log.warn("Flutterwave transfer.completed webhook missing data.id — cannot reconcile");
+                } else {
+                    boolean success = "SUCCESSFUL".equalsIgnoreCase(status);
+                    disbursementService.completeFlutterwaveDisbursement(transferId, success,
+                            complete_message != null ? complete_message : status);
+                }
+            }
+            // Other event types intentionally ignored.
+        } catch (Exception e) {
+            log.error("Flutterwave webhook processing error: {}", e.getMessage(), e);
         }
         return ResponseEntity.ok().build();
     }
