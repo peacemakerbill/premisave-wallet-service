@@ -240,13 +240,16 @@ paypal:
   cancel-url: ${PAYPAL_CANCEL_URL}
 
 # ─── Flutterwave ──────────────────────────────────────────────────────────────
-# Deposits (Standard/Hosted Checkout: card, mobile money outside Kenya, bank
-# transfer, USSD) and disbursements (Transfers API: bank account or mobile
-# money wallet). Same USD-with-live-FX-to-KES pattern as PayPal — see
-# FxRateService. Kenyan mobile money deliberately stays on the direct M-Pesa
-# Daraja integration above rather than being routed through Flutterwave too.
+# v4 API. Replaces the old v3 secret-key/public-key model with OAuth 2.0
+# client-credentials (client-id/client-secret) — see FlutterwaveService's
+# token-manager (getAccessToken()) and FlutterwaveConfig.oauthTokenUrl().
 #
-# IMPORTANT: the actual webhook URL registered in the Flutterwave Dashboard
+# Base URL is environment-specific in v4 (sandbox and production are
+# different hosts entirely, not the same URL differentiated by key prefix
+# the way v3 worked) — resolved by FlutterwaveConfig.baseUrl() from the
+# `environment` value below.
+#
+# IMPORTANT: the webhook URL registered in the Flutterwave Dashboard
 # (Settings → Webhooks) must be
 #   https://<your-domain>/payments/flutterwave/webhook
 # — i.e. WITH the /payments prefix. Double-check this against
@@ -254,22 +257,24 @@ paypal:
 # @PostMapping("/flutterwave/webhook") method before going live; a mismatch
 # here reproduces exactly the silent-401/no-application-logs failure mode
 # documented in CallbackRequestLoggingFilter and PaymentCallbackController.
+#
+# Webhook signing also changed in v4: signatures are now HMAC-SHA256 of the
+# raw body (keyed by webhook-secret-hash below), sent in the
+# "flutterwave-signature" header — not the old plain "verif-hash" string
+# comparison. Same dashboard field (Settings → Webhooks → Secret Hash)
+# supplies this value either way.
 flutterwave:
-  secret-key: ${FLUTTERWAVE_SECRET_KEY}
-  public-key: ${FLUTTERWAVE_PUBLIC_KEY}
+  client-id: ${FLUTTERWAVE_CLIENT_ID}
+  client-secret: ${FLUTTERWAVE_CLIENT_SECRET}
   encryption-key: ${FLUTTERWAVE_ENCRYPTION_KEY}
-  environment: ${FLUTTERWAVE_ENV:sandbox}   # informational only — see FlutterwaveConfig javadoc
-  # Arbitrary secret string YOU choose and set in the Flutterwave Dashboard
-  # (Settings → Webhooks → Secret Hash) — Flutterwave echoes it back in
-  # every webhook's "verif-hash" header. Must match exactly.
+  environment: ${FLUTTERWAVE_ENV:sandbox}   # "sandbox" or "production" — now DOES determine the base URL, see FlutterwaveConfig
   webhook-secret-hash: ${FLUTTERWAVE_WEBHOOK_SECRET_HASH}
-  # Where Flutterwave's hosted checkout page redirects the customer back to
-  # after payment — the frontend reads tx_ref/transaction_id query params
-  # from here and calls POST /wallet/deposit/flutterwave/confirm.
+  # Where Flutterwave redirects the customer back to after completing a
+  # charge's authorization step (3DS, mobile money approval, etc.).
   redirect-url: ${FLUTTERWAVE_REDIRECT_URL}
   transfer:
     # Optional per-transfer callback — Flutterwave also fires the
-    # account-wide "transfer.completed" webhook above regardless.
+    # account-wide "transfer.disburse" webhook above regardless.
     callback-url: ${FLUTTERWAVE_TRANSFER_CALLBACK_URL:}
     # Confirm actual tier limits with Flutterwave for your account.
     min-amount: 1

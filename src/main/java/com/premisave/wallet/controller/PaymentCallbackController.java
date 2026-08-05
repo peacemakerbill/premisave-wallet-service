@@ -502,15 +502,14 @@ public class PaymentCallbackController {
     // ─── Flutterwave Webhook ─────────────────────────────────────────────────
 
     /**
-     * Flutterwave sends "charge.completed" (deposits) and
-     * "transfer.completed" (disbursements) to the same endpoint.
+     * v4 sends "charge.completed" (deposits) and "transfer.disburse"
+     * (disbursements) to the same endpoint — note "transfer.disburse", NOT
+     * the old v3 "transfer.completed".
      *
-     * Verified via the "verif-hash" header — a plain shared-secret string
-     * comparison against flutterwave.webhook-secret-hash (see
-     * FlutterwaveService.verifyWebhookSignature's javadoc for why this is a
-     * weaker guarantee than Stripe/PayPal's cryptographic signatures, and
-     * why the amount/status is always re-verified server-side rather than
-     * trusted from the payload directly).
+     * Signature verification changed in v4: the raw body is HMAC-SHA256'd
+     * with flutterwave.webhook-secret-hash as the key, base64-encoded, and
+     * sent in the "flutterwave-signature" header — NOT v3's plain-string
+     * "verif-hash" comparison. See FlutterwaveService.verifyWebhookSignature.
      *
      * Always returns 200 regardless of internal outcome — same pattern as
      * every other provider callback here — Flutterwave retries on non-200.
@@ -518,10 +517,10 @@ public class PaymentCallbackController {
     @PostMapping("/flutterwave/webhook")
     public ResponseEntity<Void> flutterwaveWebhook(
             @RequestBody String rawBody,
-            @RequestHeader(value = "verif-hash", required = false) String verifHash) {
+            @RequestHeader(value = "flutterwave-signature", required = false) String signature) {
 
-        if (!flutterwaveService.verifyWebhookSignature(verifHash)) {
-            log.warn("Flutterwave webhook rejected — verif-hash mismatch or not configured");
+        if (!flutterwaveService.verifyWebhookSignature(rawBody, signature)) {
+            log.warn("Flutterwave webhook rejected — flutterwave-signature mismatch or not configured");
             return ResponseEntity.status(400).build();
         }
 
@@ -533,31 +532,33 @@ public class PaymentCallbackController {
             log.info("Flutterwave webhook received (verified): event={}", event);
 
             if ("charge.completed".equals(event) && data != null) {
-                String txRef = data.path("tx_ref").asText(null);
-                String flwRef = data.path("flw_ref").asText(null);
-                String status = data.path("status").asText("");
+                String txRef = data.path("reference").asText(null);
+                String chargeId = data.path("id").asText(null);
+                String status = data.path("status").asText(""); // v4: "succeeded" | "failed" | "pending"
 
                 if (txRef == null || txRef.isBlank()) {
-                    log.warn("Flutterwave charge.completed webhook missing data.tx_ref — cannot reconcile");
-                } else if ("successful".equalsIgnoreCase(status)) {
+                    log.warn("Flutterwave charge.completed webhook missing data.reference — cannot reconcile");
+                } else if ("succeeded".equalsIgnoreCase(status)) {
                     // Re-verify server-side before crediting — see
-                    // FlutterwaveService.verifyTransactionByReference's javadoc.
-                    depositService.creditWalletFromFlutterwaveCallback(txRef, flwRef);
+                    // FlutterwaveService.verifyChargeById's javadoc.
+                    depositService.creditWalletFromFlutterwaveCallback(txRef, chargeId);
                 } else {
                     depositService.markFlutterwaveTransactionFailed(txRef,
                             "Flutterwave reported status=" + status);
                 }
-            } else if ("transfer.completed".equals(event) && data != null) {
+            } else if ("transfer.disburse".equals(event) && data != null) {
                 String transferId = data.path("id").asText(null);
                 String status = data.path("status").asText(""); // SUCCESSFUL | FAILED
-                String complete_message = data.path("complete_message").asText(null);
+                // NOTE: exact failure-reason field name on this payload isn't
+                // confirmed against docs — falls back to raw status if absent.
+                String failureMessage = data.path("failure_reason").asText(null);
 
                 if (transferId == null || transferId.isBlank()) {
-                    log.warn("Flutterwave transfer.completed webhook missing data.id — cannot reconcile");
+                    log.warn("Flutterwave transfer.disburse webhook missing data.id — cannot reconcile");
                 } else {
                     boolean success = "SUCCESSFUL".equalsIgnoreCase(status);
                     disbursementService.completeFlutterwaveDisbursement(transferId, success,
-                            complete_message != null ? complete_message : status);
+                            failureMessage != null ? failureMessage : status);
                 }
             }
             // Other event types intentionally ignored.

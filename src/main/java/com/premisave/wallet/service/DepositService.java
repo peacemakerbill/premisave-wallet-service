@@ -590,18 +590,27 @@ public class DepositService {
     }
 
     // ─── Flutterwave ─────────────────────────────────────────────────────────
+    // v4 API — General Flow (customer → payment_method → charge). See
+    // FlutterwaveService for the OAuth2/token/endpoint details. Kenyan
+    // mobile money (M-Pesa) is NOT routed through here — see
+    // initiateMpesaDeposit above for the direct Daraja integration.
 
     /**
-     * Initiates a Flutterwave Standard/Hosted Checkout deposit (card, mobile
-     * money outside Kenya, bank transfer, or USSD — see
-     * DepositRequest.flutterwavePaymentOptions to restrict which channels
-     * show on the hosted page). Same USD-with-live-FX-to-KES pattern as
-     * PayPal: the wallet always operates in KES, so the USD amount charged
-     * on Flutterwave's side is converted at the live rate for crediting.
+     * Initiates a Flutterwave mobile-money deposit via v4's General Flow.
+     * Same USD-with-live-FX-to-KES pattern as PayPal: the wallet always
+     * operates in KES, so the USD amount charged on Flutterwave's side is
+     * converted at the live rate for crediting.
      *
-     * No saved-instrument/vaulting support (unlike Stripe/PayPal) — every
-     * deposit redirects to a fresh hosted checkout page, matching how
-     * M-Pesa STK Push works (no saved payment method concept there either).
+     * chargeId is stored as Transaction.providerReference immediately —
+     * v4 only supports verifying a charge by ITS OWN id (GET
+     * /charges/{id}), not by our own reference the way v3's
+     * verify_by_reference worked, so confirmFlutterwaveDeposit below needs
+     * it on record.
+     *
+     * REQUIRES two new fields on DepositRequest: flutterwaveCountryCode
+     * (e.g. "233") and flutterwaveMobileNetwork (e.g. "MTN") — see
+     * DepositRequest.java. customerName/customerPhone are expected to
+     * already exist on that DTO from the v3 integration.
      */
     private PaymentResponse initiateFlutterwaveDeposit(String userId, String userEmail, DepositRequest request,
                                                          Wallet wallet, String idempotencyKey) {
@@ -609,23 +618,31 @@ public class DepositService {
         if (!"USD".equals(requestedCurrency)) {
             throw new IllegalArgumentException("Flutterwave deposits must be in USD (got: " + requestedCurrency + ")");
         }
+        if (request.getCustomerPhone() == null || request.getCustomerPhone().isBlank()) {
+            throw new IllegalArgumentException("customerPhone is required for Flutterwave mobile money deposits");
+        }
+        if (request.getFlutterwaveCountryCode() == null || request.getFlutterwaveCountryCode().isBlank()
+                || request.getFlutterwaveMobileNetwork() == null || request.getFlutterwaveMobileNetwork().isBlank()) {
+            throw new IllegalArgumentException(
+                    "flutterwaveCountryCode and flutterwaveMobileNetwork are required for Flutterwave deposits");
+        }
 
         BigDecimal usdAmount = request.getAmount();
         BigDecimal usdToKesRate = fxRateService.getRate("USD", "KES");
         BigDecimal kesEquivalent = usdAmount.multiply(usdToKesRate).setScale(2, RoundingMode.HALF_UP);
 
-        FlutterwaveService.CheckoutResult result = flutterwaveService.initiateCheckout(
-                usdAmount, "USD", idempotencyKey, userEmail,
-                request.getCustomerName(), request.getCustomerPhone(),
-                request.getFlutterwavePaymentOptions());
+        FlutterwaveService.CheckoutResult result = flutterwaveService.initiateMobileMoneyCharge(
+                usdAmount, "USD", idempotencyKey, userEmail, request.getCustomerName(),
+                request.getFlutterwaveCountryCode(), request.getFlutterwaveMobileNetwork(),
+                request.getCustomerPhone());
 
         if (!result.success()) {
-            log.warn("Flutterwave checkout rejected: userId={} reason={}", userId, result.message());
-            return new PaymentResponse(false, null, "Flutterwave checkout failed: " + result.message());
+            log.warn("Flutterwave charge rejected: userId={} reason={}", userId, result.message());
+            return new PaymentResponse(false, null, "Flutterwave charge failed: " + result.message());
         }
 
-        log.info("Flutterwave checkout created: userId={} txRef={} usdAmount={} kesEquivalent={} rate={}",
-                userId, idempotencyKey, usdAmount, kesEquivalent, usdToKesRate);
+        log.info("Flutterwave charge created: userId={} txRef={} chargeId={} usdAmount={} kesEquivalent={} rate={}",
+                userId, idempotencyKey, result.chargeId(), usdAmount, kesEquivalent, usdToKesRate);
 
         Transaction tx = new Transaction();
         tx.setUserId(userId);
@@ -634,23 +651,30 @@ public class DepositService {
         tx.setStatus(TransactionStatus.PENDING);
         tx.setAmount(kesEquivalent);
         tx.setCurrency(Currency.KES);
-        tx.setDescription("Flutterwave deposit (pending checkout) - USD " + usdAmount
-                + " @ live rate " + usdToKesRate);
+        tx.setDescription("Flutterwave deposit (pending) - USD " + usdAmount + " @ live rate " + usdToKesRate);
         tx.setReference(idempotencyKey);
+        tx.setProviderReference(result.chargeId());
         transactionRepository.save(tx);
 
-        return new PaymentResponse(true, result.checkoutLink(),
-                "Redirect the user to the Flutterwave checkout link to complete the deposit. "
-                        + "USD " + usdAmount + " will be credited as approximately KES " + kesEquivalent + ".");
+        if (result.redirectUrl() != null) {
+            return new PaymentResponse(true, result.redirectUrl(),
+                    "Redirect the user to the Flutterwave authorization URL to complete the deposit. "
+                            + "USD " + usdAmount + " will be credited as approximately KES " + kesEquivalent + ".");
+        }
+
+        String note = result.paymentInstructionNote() != null
+                ? result.paymentInstructionNote()
+                : "Approve the payment request on your phone to complete the deposit.";
+        return new PaymentResponse(true, idempotencyKey, note + " USD " + usdAmount
+                + " will be credited as approximately KES " + kesEquivalent + ".");
     }
 
     /**
      * Called by the frontend after the user returns from Flutterwave's
-     * hosted checkout redirect (redirect_url carries tx_ref/transaction_id
-     * as query params). Re-verifies the transaction server-side rather than
-     * trusting the redirect query params directly — Flutterwave's own
-     * guidance is that redirect params can be tampered with client-side,
-     * unlike a signed webhook.
+     * authorization redirect. Verifies via the chargeId stored on the
+     * Transaction at initiation (see above) — v4 has no verify-by-our-own-
+     * reference endpoint, unlike v3 — rather than trusting redirect query
+     * params directly.
      */
     @Transactional
     public PaymentResponse confirmFlutterwaveDeposit(String txRef, String callerUserId) {
@@ -671,14 +695,20 @@ public class DepositService {
                     "This Flutterwave deposit previously failed and cannot be retried with the same reference.");
         }
 
-        FlutterwaveService.VerifyResult verify = flutterwaveService.verifyTransactionByReference(txRef);
+        String chargeId = tx.getProviderReference();
+        if (chargeId == null || chargeId.isBlank()) {
+            return new PaymentResponse(false, tx.getId(),
+                    "This deposit has no Flutterwave charge id on record and cannot be verified.");
+        }
+
+        FlutterwaveService.VerifyResult verify = flutterwaveService.verifyChargeById(chargeId);
 
         if (!verify.success()) {
             return new PaymentResponse(false, tx.getId(),
                     "Payment has not completed yet (status: " + verify.status() + ")");
         }
 
-        creditWalletFromFlutterwaveCallback(txRef, verify.flwRef());
+        creditWalletFromFlutterwaveCallback(txRef, chargeId);
         return new PaymentResponse(true, tx.getId(), "Flutterwave deposit successful");
     }
 
@@ -686,23 +716,18 @@ public class DepositService {
      * Shared credit path for a Flutterwave deposit — called both by
      * confirmFlutterwaveDeposit (frontend redirect confirm) and by the
      * charge.completed webhook handler in PaymentCallbackController.
-     * Always re-verifies against Flutterwave's API before crediting (see
-     * FlutterwaveService.verifyTransactionByReference's javadoc) rather than
-     * trusting whatever amount/status the caller passed in — this is why
-     * the method only takes txRef and flwRef (for the audit trail), not an
-     * amount: the credited amount always comes from the transaction record
-     * created at initiation time, which itself was computed from a live FX
-     * rate at that moment. A drifted amount between initiation and now
-     * would be a Flutterwave-side (or FX) reconciliation problem, not
-     * something this method should paper over by trusting a fresh number.
+     * The credited amount always comes from the transaction record created
+     * at initiation time (computed from a live FX rate at that moment),
+     * same reasoning as before — this method only takes txRef and a
+     * provider reference for the audit trail, not an amount.
      */
     @Transactional
-    public void creditWalletFromFlutterwaveCallback(String txRef, String flwRef) {
+    public void creditWalletFromFlutterwaveCallback(String txRef, String providerReference) {
         Transaction tx = transactionRepository.findByReference(txRef).orElse(null);
 
         if (tx == null) {
-            log.warn("Flutterwave reconciliation: no pending transaction found for txRef={} (flwRef={}) — " +
-                    "cannot credit; needs manual review", txRef, flwRef);
+            log.warn("Flutterwave reconciliation: no pending transaction found for txRef={} (providerReference={}) — " +
+                    "cannot credit; needs manual review", txRef, providerReference);
             return;
         }
 
@@ -723,11 +748,12 @@ public class DepositService {
         walletRepository.save(wallet);
 
         tx.setStatus(TransactionStatus.COMPLETED);
-        tx.setProviderReference(flwRef);
-        tx.setDescription("Flutterwave deposit (flw_ref " + flwRef + ")");
+        tx.setProviderReference(providerReference);
+        tx.setDescription("Flutterwave deposit (charge " + providerReference + ")");
         transactionRepository.save(tx);
 
-        log.info("Wallet credited via Flutterwave: txRef={} amount={} flwRef={}", txRef, tx.getAmount(), flwRef);
+        log.info("Wallet credited via Flutterwave: txRef={} amount={} providerReference={}",
+                txRef, tx.getAmount(), providerReference);
     }
 
     @Transactional

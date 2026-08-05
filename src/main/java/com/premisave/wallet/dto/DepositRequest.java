@@ -62,4 +62,20 @@ public class DepositRequest {
      */
     private String customerName;
     private String customerPhone;
+
+    /**
+     * Required for provider=FLUTTERWAVE — the mobile network's country
+     * dialling code (e.g. "233" for Ghana). Passed to Flutterwave's v4
+     * mobile_money payment method. See
+     * FlutterwaveService.initiateMobileMoneyCharge.
+     */
+    private String flutterwaveCountryCode;
+
+    /**
+     * Required for provider=FLUTTERWAVE — Flutterwave's network code for
+     * the customer's mobile money corridor (e.g. "MTN", "AIRTEL"). Confirm
+     * exact network codes for your target corridors against Flutterwave's
+     * Mobile Money docs before going live with a new country.
+     */
+    private String flutterwaveMobileNetwork;
 }

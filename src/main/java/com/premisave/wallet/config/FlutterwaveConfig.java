@@ -7,59 +7,62 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 
 /**
- * Flutterwave v3 API configuration. Unlike M-Pesa/PayPal, Flutterwave uses a
- * SINGLE base URL for both sandbox and live traffic — which mode you're in
- * is determined entirely by which kind of secret key you configure
- * (FLWSECK_TEST-... for sandbox vs FLWSECK-... for live), not by the host.
- * The "environment" field here is kept only for logging/consistency with
- * the other provider configs, not for URL selection.
+ * Flutterwave v4 API configuration. v4 replaced v3's static Secret Key /
+ * Public Key model entirely with OAuth 2.0 client-credentials — there is no
+ * "public key" in v4. Base URL is now environment-specific (sandbox vs
+ * production are genuinely different hosts, not just different key
+ * prefixes on one URL the way v3 worked) — see baseUrl() below.
  *
- * See https://developer.flutterwave.com/docs
+ * See https://developer.flutterwave.com/docs/environments
+ *     https://developer.flutterwave.com/docs/authentication
  */
 @Data
 @Component
 @ConfigurationProperties(prefix = "flutterwave")
 public class FlutterwaveConfig {
 
-    private String secretKey;
-    private String publicKey;
+    /** OAuth2 client_credentials identity — replaces v3's secretKey/publicKey. */
+    private String clientId;
+    private String clientSecret;
+
     private String encryptionKey;
 
-    /** "sandbox" or "production" — informational only, see class javadoc. */
+    /** "sandbox" or "production" — now DOES determine the base URL (see baseUrl()), unlike v3. */
     private String environment;
 
     /**
      * Arbitrary shared-secret string configured in the Flutterwave Dashboard
-     * (Settings → Webhooks → Secret Hash). Flutterwave echoes this back
-     * verbatim in every webhook request's "verif-hash" header — this is a
-     * simple string-equality check, NOT an HMAC signature. See
-     * FlutterwaveService.verifyWebhookSignature for the caveat this implies.
+     * (Settings → Webhooks → Secret Hash). Used as the HMAC-SHA256 key to
+     * verify the "flutterwave-signature" header — see
+     * FlutterwaveService.verifyWebhookSignature. NOT a plain string
+     * comparison the way v3's "verif-hash" was.
      */
     private String webhookSecretHash;
 
     /**
-     * Where Flutterwave's hosted checkout page redirects the customer back
-     * to after payment (success, failure, or cancellation) — the frontend
-     * then reads the tx_ref/transaction_id query params it appends and
-     * calls POST /wallet/deposit/flutterwave/confirm.
+     * Where Flutterwave redirects the customer back to after completing a
+     * charge's authorization step (3DS, mobile money approval, etc.).
      */
     private String redirectUrl;
 
     private final Transfer transfer = new Transfer();
 
+    private static final String SANDBOX_BASE_URL = "https://developersandbox-api.flutterwave.com";
+    private static final String PRODUCTION_BASE_URL = "https://f4bexperience.flutterwave.com";
+    private static final String OAUTH_TOKEN_URL =
+            "https://idp.flutterwave.com/realms/flutterwave/protocol/openid-connect/token";
+
     public String baseUrl() {
-        return "https://api.flutterwave.com/v3";
+        return "production".equalsIgnoreCase(environment) ? PRODUCTION_BASE_URL : SANDBOX_BASE_URL;
+    }
+
+    /** Same URL for both environments — only the client_id/client_secret you send differs. */
+    public String oauthTokenUrl() {
+        return OAUTH_TOKEN_URL;
     }
 
     @Data
     public static class Transfer {
-        /**
-         * Our own webhook endpoint, passed to Flutterwave as callback_url
-         * on each transfer request. Optional — Flutterwave also fires the
-         * account-wide "transfer.completed" webhook regardless of whether
-         * this is set, so this is a per-transfer convenience, not the only
-         * way completion is reported.
-         */
         private String callbackUrl;
 
         /** Confirm actual tier limits with Flutterwave for your account. */
