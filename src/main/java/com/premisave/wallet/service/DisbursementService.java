@@ -49,27 +49,30 @@ public class DisbursementService {
     private final IdempotencyService idempotencyService;
     private final FxRateService fxRateService;
 
-    /**
-     * Terminal PayPal payout item transaction_status values (or, equivalently,
-     * PAYMENT.PAYOUTS-ITEM.* webhook event suffixes) that will never resolve
-     * on their own — treated the same as a hard failure: refund the wallet
-     * and mark the disbursement FAILED. Deliberately excludes UNCLAIMED and
-     * HELD/ONHOLD, since those can still turn into SUCCESS or FAILED later
-     * (recipient claims it, hold gets released/reviewed) — a disbursement in
-     * one of those states is left PENDING for a subsequent webhook event to
-     * finalize.
-     */
     private static final List<String> PAYPAL_TERMINAL_FAILURE_STATUSES =
             List.of("FAILED", "DENIED", "BLOCKED", "RETURNED", "REFUNDED", "REVERSED", "CANCELED");
 
-    // No static PayPal rate here anymore — see disbursePaypal, which now
-    // fetches a live rate from Frankfurter (FxRateService) on every call.
-
-//    private static final java.util.regex.Pattern EMAIL_PATTERN =
-//            java.util.regex.Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
-
  // ─── User-facing disbursement (phone / PayPal / Stripe) ─────────────────
 
+    /**
+     * NOTE ON BALANCE TIMING: the wallet is NOT debited here anymore. It's
+     * only debited once the disbursement is CONFIRMED — by M-Pesa's
+     * ResultURL callback (see completeMpesaDisbursement) or PayPal's Payouts
+     * webhook (see completePaypalDisbursement) — except for Stripe, which
+     * resolves synchronously below, so it's debited right at that point.
+     * Previously the wallet was debited up front and refunded on failure;
+     * that meant a customer's balance was reduced for money that hadn't
+     * actually left yet, and a PENDING disbursement stuck for hours (e.g.
+     * during the recent callback URL misconfiguration) held their funds
+     * hostage the whole time even though M-Pesa/PayPal had already
+     * processed the payout successfully.
+     *
+     * Trade-off to be aware of: since nothing is held/reserved at
+     * initiation, two disbursement requests submitted in quick succession
+     * could both pass the balance check below and later both succeed,
+     * overdrawing the wallet. There's no reservation/hold mechanism here —
+     * add one if that scenario becomes a real risk for you.
+     */
     @Transactional
     public DisbursementResponse processDisbursement(String userId, DisbursementRequest request) {
         idempotencyService.checkIdempotency(request.getReference());
@@ -88,16 +91,6 @@ public class DisbursementService {
             throw new IllegalArgumentException("M-Pesa disbursements must be in KES");
         }
 
-        // Resolve the actual payout destination — MPESA and PAYPAL both resolve
-        // from the wallet's own verified profile fields, never from the request,
-        // eliminating typo/mistargeted-payout risk for both. STRIPE still
-        // requires an explicit destination (Stripe Connect isn't wired up yet,
-        // so there's no per-user Stripe payout identity to resolve from).
-        //
-        // SECURITY: resolveVerifiedPhoneNumber below is called — and will
-        // throw — BEFORE the wallet is debited a few lines down, so a
-        // wallet with no mpesaPhoneNumber set is rejected outright with no
-        // money ever leaving the balance.
         String destination;
         if ("MPESA".equals(provider)) {
             destination = resolveVerifiedPhoneNumber(wallet);
@@ -114,9 +107,6 @@ public class DisbursementService {
             destination = request.getDestination();
         }
 
-        wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
-        walletRepository.save(wallet);
-
         String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
 
         Disbursement disbursement = new Disbursement();
@@ -127,27 +117,17 @@ public class DisbursementService {
         disbursement.setProvider(provider);
         disbursement.setReference(reference);
         disbursement.setStatus(DisbursementStatus.PENDING);
-
         disbursement.setCurrency(Currency.KES);
 
         if ("MPESA".equals(provider)) {
             disbursement.setChannel("B2C");
 
-            // sendB2C's own Safaricom HTTP call is already wrapped in a
-            // try/catch internally and always returns a result — but
-            // getAccessToken() (OAuth, retried 3x then throws) and the
-            // SecurityCredential RSA encryption both run BEFORE that
-            // try/catch even starts. Either one throwing here would
-            // otherwise propagate straight out of this method, past the
-            // point where the wallet was already debited and saved above,
-            // with no Disbursement record ever created and no refund.
             MpesaB2CResponse result;
             try {
                 result = mpesaService.sendB2C(destination, request.getAmount());
             } catch (Exception e) {
-                log.error("M-Pesa B2C disbursement threw before a result could be returned — refunding: userId={}",
+                log.error("M-Pesa B2C disbursement threw before a result could be returned: userId={}",
                         userId, e);
-                refund(wallet, request.getAmount());
                 disbursement.setStatus(DisbursementStatus.FAILED);
                 disbursement.setFailureReason("M-Pesa B2C initiation failed: " + e.getMessage());
                 disbursementRepository.save(disbursement);
@@ -156,7 +136,6 @@ public class DisbursementService {
             }
 
             if (!result.isSuccess()) {
-                refund(wallet, request.getAmount());
                 disbursement.setStatus(DisbursementStatus.FAILED);
                 disbursement.setFailureReason(result.getMessage());
                 disbursementRepository.save(disbursement);
@@ -166,7 +145,7 @@ public class DisbursementService {
             disbursement.setProviderReference(result.getConversationId());
             disbursementRepository.save(disbursement);
             return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
-                    "Disbursement queued with M-Pesa — awaiting confirmation");
+                    "Disbursement queued with M-Pesa — your wallet will be debited once M-Pesa confirms the payout.");
         }
 
         ProviderResult result = switch (provider) {
@@ -181,26 +160,23 @@ public class DisbursementService {
             disbursement.setProviderReference(result.providerRef());
 
             if ("PAYPAL".equals(provider)) {
-                // The Payouts API is asynchronous — a successful response here
-                // only means PayPal accepted and queued the batch, not that the
-                // recipient was actually paid. Stay PENDING until a
-                // PAYMENT.PAYOUTS-ITEM.* webhook reconciles the real outcome
-                // (see completePaypalDisbursement below) — same PENDING-until-
-                // callback pattern as M-Pesa B2C above. The transaction record
-                // is created there too, only once success is confirmed, not here.
                 disbursement.setStatus(DisbursementStatus.PENDING);
                 disbursementRepository.save(disbursement);
                 return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
-                        "Disbursement queued with PayPal — awaiting confirmation");
+                        "Disbursement queued with PayPal — your wallet will be debited once PayPal confirms the payout.");
             }
+
+            // Stripe resolves synchronously — we already know it succeeded,
+            // so debit right here rather than waiting on a callback.
+            wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
+            walletRepository.save(wallet);
 
             disbursement.setStatus(DisbursementStatus.SUCCESS);
             saveDisbursementTransaction(userId, wallet.getId(), request.getAmount(), disbursement, reference);
         } else {
-            refund(wallet, request.getAmount());
             disbursement.setStatus(DisbursementStatus.FAILED);
             disbursement.setFailureReason(result.message());
-            log.warn("Disbursement failed for userId={}, refunded. Reason: {}", userId, result.message());
+            log.warn("Disbursement failed for userId={}. Reason: {}", userId, result.message());
         }
 
         disbursementRepository.save(disbursement);
@@ -208,6 +184,7 @@ public class DisbursementService {
     }
 
     // ─── B2B (admin/finance-initiated, business-to-business payment) ───────
+    // Unchanged — never touches a customer wallet (no walletId set).
 
     @Transactional
     public DisbursementResponse processB2BPayment(String initiatedByUserId, MpesaB2BRequest request) {
@@ -225,9 +202,6 @@ public class DisbursementService {
             QueryOrgInfoResponse orgInfo = mpesaService.queryOrgInfo(orgInfoRequest);
 
             if (!orgInfo.isSuccess()) {
-                // Hakikisha couldn't confirm the recipient — abort before Safaricom's
-                // B2B endpoint is ever called, rather than sending money to an
-                // unverified shortcode/till.
                 log.warn("B2B Hakikisha check failed for receiverShortcode={} — aborting payment. reason={}",
                         request.getReceiverShortcode(), orgInfo.getResponseMessage());
 
@@ -282,6 +256,7 @@ public class DisbursementService {
     }
 
     // ─── B2C Account Top Up (admin/finance-initiated) ───────────────────────
+    // Unchanged — never touches a customer wallet (no walletId set).
 
     @Transactional
     public DisbursementResponse processB2CTopUp(String initiatedByUserId, B2CTopUpRequest request) {
@@ -319,12 +294,6 @@ public class DisbursementService {
     public DisbursementResponse processB2PochiPayment(String initiatedByUserId, B2PochiRequest request) {
         idempotencyService.checkIdempotency(request.getReference());
 
-        // This withdraws the caller's OWN wallet funds to their OWN Pochi la
-        // Biashara account — same checks as the generic phone-number M-Pesa
-        // withdrawal in processDisbursement above (wallet must exist, not be
-        // frozen, and have sufficient balance). Previously this method never
-        // debited the wallet at all, meaning the payout came free out of
-        // Premisave's own M-Pesa float instead of the user's balance.
         Wallet wallet = walletRepository.findByUserId(initiatedByUserId)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + initiatedByUserId));
 
@@ -332,13 +301,11 @@ public class DisbursementService {
         if (wallet.getBalance().compareTo(request.getAmount()) < 0)
             throw new InsufficientFundsException("Insufficient funds for disbursement");
 
-        // SECURITY: throws (rejecting the request outright, no wallet debit)
-        // if pochiPhoneNumber isn't set on the wallet — see
-        // resolveVerifiedPochiPhoneNumber. No fallback to mpesaPhoneNumber.
         String phoneNumber = resolveVerifiedPochiPhoneNumber(wallet);
 
-        wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
-        walletRepository.save(wallet);
+        // Wallet balance is NOT debited here — see completeMpesaDisbursement,
+        // which debits once M-Pesa's ResultURL callback confirms success
+        // (channel B2C_POCHI).
 
         String reference = request.getReference() != null
                 ? request.getReference()
@@ -366,9 +333,8 @@ public class DisbursementService {
         try {
             result = mpesaService.sendToPochi(resolvedRequest, originatorConversationId);
         } catch (Exception e) {
-            log.error("B2Pochi withdrawal threw before a result could be returned — refunding: userId={}",
+            log.error("B2Pochi withdrawal threw before a result could be returned: userId={}",
                     initiatedByUserId, e);
-            refund(wallet, request.getAmount());
             disbursement.setStatus(DisbursementStatus.FAILED);
             disbursement.setFailureReason("B2Pochi initiation failed: " + e.getMessage());
             disbursementRepository.save(disbursement);
@@ -380,7 +346,6 @@ public class DisbursementService {
             disbursement.setStatus(DisbursementStatus.PENDING);
             disbursement.setProviderReference(result.getConversationId());
         } else {
-            refund(wallet, request.getAmount());
             disbursement.setStatus(DisbursementStatus.FAILED);
             disbursement.setFailureReason(result.getMessage());
         }
@@ -408,23 +373,45 @@ public class DisbursementService {
 
         if (success) {
             d.setStatus(DisbursementStatus.SUCCESS);
-            disbursementRepository.save(d);
 
             if (("B2C".equals(d.getChannel()) || "B2C_POCHI".equals(d.getChannel())) && d.getWalletId() != null) {
+                // Funds have now actually left via M-Pesa — this is the
+                // FIRST time the wallet is touched for this disbursement
+                // (see processDisbursement/processB2PochiPayment, which no
+                // longer debit at initiation). Balance may have moved since
+                // initiation due to other transactions, so this can't be
+                // guarded with a pre-check the way a synchronous debit
+                // could be — if it pushes the wallet negative, that's a
+                // signal for manual reconciliation, not something to
+                // silently block, since the M-Pesa payout already happened
+                // and has to be reflected somewhere.
+                Wallet wallet = walletRepository.findById(d.getWalletId())
+                        .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + d.getWalletId()));
+
+                BigDecimal newBalance = wallet.getBalance().subtract(d.getAmount());
+                if (newBalance.compareTo(BigDecimal.ZERO) < 0) {
+                    log.error("Wallet {} balance went negative ({}) debiting confirmed M-Pesa disbursement id={} — needs manual reconciliation",
+                            wallet.getId(), newBalance, d.getId());
+                }
+                wallet.setBalance(newBalance);
+                walletRepository.save(wallet);
+
+                disbursementRepository.save(d);
                 saveDisbursementTransaction(d.getUserId(), d.getWalletId(), d.getAmount(), d, d.getReference());
+            } else {
+                disbursementRepository.save(d);
             }
+
             log.info("M-Pesa {} disbursement completed: id={} conversationId={} mpesaTxId={}",
                     d.getChannel(), d.getId(), conversationId, mpesaTransactionId);
         } else {
-            if (d.getWalletId() != null) {
-                Wallet wallet = walletRepository.findById(d.getWalletId())
-                        .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + d.getWalletId()));
-                refund(wallet, d.getAmount());
-            }
+            // No refund needed — the wallet was never debited for a
+            // PENDING M-Pesa disbursement (see processDisbursement /
+            // processB2PochiPayment above).
             d.setStatus(DisbursementStatus.FAILED);
             d.setFailureReason(resultDesc);
             disbursementRepository.save(d);
-            log.warn("M-Pesa {} disbursement failed, refunded where applicable: id={} conversationId={} reason={}",
+            log.warn("M-Pesa {} disbursement failed: id={} conversationId={} reason={}",
                     d.getChannel(), d.getId(), conversationId, resultDesc);
         }
     }
@@ -438,23 +425,6 @@ public class DisbursementService {
 
     // ─── Reconciliation from PayPal's Payouts webhook ────────────────────────
 
-    /**
-     * Reconciles a PayPal Payouts item webhook (PAYMENT.PAYOUTS-ITEM.*) back
-     * to the disbursement that started it, looked up by payout_batch_id
-     * (stored as providerReference — see processDisbursement's PAYPAL branch
-     * above). Safe to key off the batch id rather than the item id because
-     * disbursePaypal only ever sends a single item per batch.
-     *
-     * transactionStatus is PayPal's resource.transaction_status value
-     * (SUCCESS/FAILED/DENIED/BLOCKED/RETURNED/REFUNDED/UNCLAIMED/ONHOLD/...).
-     * SUCCESS credits nothing extra (the wallet was already debited
-     * up-front in processDisbursement) — it just flips the disbursement to
-     * SUCCESS and records the completed transaction, same as
-     * completeMpesaDisbursement's B2C branch. A terminal failure status
-     * refunds the wallet and marks FAILED. Anything else (UNCLAIMED, held
-     * for review, etc.) is logged only — the disbursement stays PENDING for
-     * a later webhook event to resolve.
-     */
     @Transactional
     public void completePaypalDisbursement(String payoutBatchId, String transactionStatus,
                                             String paypalTransactionId, String errorMessage) {
@@ -472,23 +442,37 @@ public class DisbursementService {
 
         if ("SUCCESS".equals(transactionStatus)) {
             d.setStatus(DisbursementStatus.SUCCESS);
-            disbursementRepository.save(d);
 
             if (d.getWalletId() != null) {
+                // First touch of the wallet for this disbursement — see
+                // completeMpesaDisbursement above for the same reasoning
+                // on the negative-balance edge case.
+                Wallet wallet = walletRepository.findById(d.getWalletId())
+                        .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + d.getWalletId()));
+
+                BigDecimal newBalance = wallet.getBalance().subtract(d.getAmount());
+                if (newBalance.compareTo(BigDecimal.ZERO) < 0) {
+                    log.error("Wallet {} balance went negative ({}) debiting confirmed PayPal disbursement id={} — needs manual reconciliation",
+                            wallet.getId(), newBalance, d.getId());
+                }
+                wallet.setBalance(newBalance);
+                walletRepository.save(wallet);
+
+                disbursementRepository.save(d);
                 saveDisbursementTransaction(d.getUserId(), d.getWalletId(), d.getAmount(), d, d.getReference());
+            } else {
+                disbursementRepository.save(d);
             }
+
             log.info("PayPal disbursement completed: id={} payoutBatchId={} paypalTransactionId={}",
                     d.getId(), payoutBatchId, paypalTransactionId);
         } else if (PAYPAL_TERMINAL_FAILURE_STATUSES.contains(transactionStatus)) {
-            if (d.getWalletId() != null) {
-                Wallet wallet = walletRepository.findById(d.getWalletId())
-                        .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + d.getWalletId()));
-                refund(wallet, d.getAmount());
-            }
+            // No refund needed — the wallet was never debited for a
+            // PENDING PayPal payout (see processDisbursement above).
             d.setStatus(DisbursementStatus.FAILED);
             d.setFailureReason(errorMessage != null && !errorMessage.isBlank() ? errorMessage : transactionStatus);
             disbursementRepository.save(d);
-            log.warn("PayPal disbursement failed ({}), refunded where applicable: id={} payoutBatchId={} reason={}",
+            log.warn("PayPal disbursement failed ({}): id={} payoutBatchId={} reason={}",
                     transactionStatus, d.getId(), payoutBatchId, errorMessage);
         } else {
             log.info("PayPal disbursement id={} payoutBatchId={} in non-terminal state={} — awaiting further webhook",
@@ -498,7 +482,7 @@ public class DisbursementService {
 
     // ─── Stuck-disbursement sweeper ──────────────────────────────────────────
 
-    @Scheduled(fixedDelay = 15 * 60 * 1000) // every 15 minutes
+    @Scheduled(fixedDelay = 15 * 60 * 1000)
     public void flagStuckDisbursements() {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(30);
         List<Disbursement> stuck = disbursementRepository.findByStatusAndCreatedAtBefore(
@@ -538,20 +522,6 @@ public class DisbursementService {
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    /**
-     * Resolves the phone number a B2Pochi disbursement should be sent to —
-     * the wallet's own pochiPhoneNumber (set via PUT /wallet/pochi-phone).
-     *
-     * SECURITY: strictly requires wallet.pochiPhoneNumber to already be
-     * set. There is NO fallback to mpesaPhoneNumber (or to any external
-     * source) — a user's Pochi la Biashara account can be registered under
-     * a different line than their regular mpesaPhoneNumber, so silently
-     * reusing mpesaPhoneNumber here risks sending the payout to a number
-     * that doesn't actually have a Pochi account (or, worse, one that
-     * belongs to someone else's Pochi account entirely). Callers
-     * (processB2PochiPayment) call this BEFORE the wallet is debited, so a
-     * missing pochiPhoneNumber rejects the request with no funds moved.
-     */
     private String resolveVerifiedPochiPhoneNumber(Wallet wallet) {
         if (wallet != null && wallet.getPochiPhoneNumber() != null && !wallet.getPochiPhoneNumber().isBlank()) {
             return wallet.getPochiPhoneNumber();
@@ -562,23 +532,6 @@ public class DisbursementService {
                         + "Please add one in your wallet settings before requesting a Pochi withdrawal.");
     }
 
-    /**
-     * Resolves the phone number a plain M-Pesa phone withdrawal (the generic
-     * /disbursements endpoint) should be sent to — the wallet's own
-     * mpesaPhoneNumber (set via PUT /wallet/mpesa-phone).
-     *
-     * SECURITY: strictly requires wallet.mpesaPhoneNumber to already be set.
-     * There is intentionally no fallback to the auth-service profile's
-     * phone number here — falling back to an unverified, externally-sourced
-     * value would let a withdrawal succeed against a number the user never
-     * explicitly attached to this wallet, undermining the exact
-     * mistargeted-payout protection the mpesaPhoneNumber/paypalEmail fields
-     * exist for (see their javadoc on Wallet). processDisbursement calls
-     * this BEFORE the wallet is debited, so a missing number rejects the
-     * request with no funds moved. B2Pochi does NOT use this method — see
-     * resolveVerifiedPochiPhoneNumber, which requires pochiPhoneNumber
-     * specifically with no fallback here.
-     */
     private String resolveVerifiedPhoneNumber(Wallet wallet) {
         if (wallet != null && wallet.getMpesaPhoneNumber() != null && !wallet.getMpesaPhoneNumber().isBlank()) {
             return wallet.getMpesaPhoneNumber();
@@ -587,11 +540,6 @@ public class DisbursementService {
         throw new PhoneNumberUnavailableException(
                 "You haven't added an M-Pesa phone number to your wallet yet. "
                         + "Please add one in your wallet settings before requesting a withdrawal.");
-    }
-
-    private void refund(Wallet wallet, BigDecimal amount) {
-        wallet.setBalance(wallet.getBalance().add(amount));
-        walletRepository.save(wallet);
     }
 
     private void saveDisbursementTransaction(String userId, String walletId, BigDecimal amount,

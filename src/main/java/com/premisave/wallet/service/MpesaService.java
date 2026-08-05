@@ -44,12 +44,6 @@ public class MpesaService {
     private final OkHttpClient http = new OkHttpClient();
 
     // ─── OAuth ────────────────────────────────────────────────────────────
-    //
-    // Token generation/caching/proactive background refresh now lives in
-    // MpesaTokenService (warmed up at application startup, refreshed on a
-    // schedule ahead of expiry, all logged there). This method is kept as a
-    // thin delegate so every existing call site below (and any external
-    // caller) doesn't need to change.
 
     public String getAccessToken() {
         return mpesaTokenService.getAccessToken();
@@ -57,19 +51,6 @@ public class MpesaService {
 
     // ─── STK Push (C2B — customer-initiated deposit) ────────────────────────
 
-    /**
-     * Result of an STK Push initiation attempt.
-     *
-     * Safaricom uses TWO DIFFERENT response shapes here, and both are valid
-     * JSON, so parsing alone doesn't tell you which one you got:
-     *   - Rejection:  {"requestId": "...", "errorCode": "400.002.02", "errorMessage": "..."}
-     *   - Acceptance: {"MerchantRequestID": "...", "CheckoutRequestID": "...",
-     *                  "ResponseCode": "0", "ResponseDescription": "...",
-     *                  "CustomerMessage": "..."}
-     * success=false on either an HTTP/network failure OR a well-formed
-     * Safaricom rejection — callers must check this before treating the
-     * push as sent, rather than assuming a well-formed reply means success.
-     */
     public record StkPushResult(
             boolean success,
             String checkoutRequestId,
@@ -104,7 +85,6 @@ public class MpesaService {
             log.info("STK Push response: {}", respBody);
             JsonNode node = objectMapper.readTree(respBody);
 
-            // ── Rejection shape: {requestId, errorCode, errorMessage} ──────
             String errorCode = node.path("errorCode").asText(null);
             if (errorCode != null && !errorCode.isBlank()) {
                 String errorMessage = node.path("errorMessage").asText("Unknown STK Push error");
@@ -113,7 +93,6 @@ public class MpesaService {
                         errorCode + ": " + errorMessage);
             }
 
-            // ── Acceptance shape ─────────────────────────────────────────
             String checkoutId        = node.path("CheckoutRequestID").asText();
             String merchantRequestId = node.path("MerchantRequestID").asText();
             String responseCode      = node.path("ResponseCode").asText();
@@ -138,22 +117,6 @@ public class MpesaService {
 
     // ─── B2C (Business to Customer — disbursement to a phone number) ────────
 
-    /**
-     * Uses the v3 B2C endpoint (/mpesa/b2c/v3/paymentrequest), per Safaricom's
-     * current Daraja documentation (developer.safaricom.co.ke/apis/BusinessToCustomer).
-     *
-     * Unlike v1/B2B/top-up (where Safaricom generates OriginatorConversationID
-     * server-side), v3 REQUIRES the caller to generate and send it — its
-     * documented purpose is specifically to let Safaricom detect and reject a
-     * duplicate/retried disbursement before it double-pays. Omitting it is
-     * what produced errorCode 400.002.02 "Invalid OriginatorConversationID".
-     * Generated fresh per call via generateOriginatorConversationId, same
-     * helper already used for B2Pochi.
-     *
-     * Also note: the optional field is spelled "Occassion" (double-s) in v3's
-     * request body — same non-standard spelling as the B2Pochi API, not
-     * "Occasion".
-     */
     public MpesaB2CResponse sendB2C(String phone, BigDecimal amount) {
         MpesaConfig.B2c b2c = config.getB2c();
 
@@ -179,8 +142,6 @@ public class MpesaService {
         body.put("Remarks",             "Premisave Disbursement");
         body.put("QueueTimeOutURL",     b2c.getQueueTimeoutUrl());
         body.put("ResultURL",           b2c.getResultUrl());
-        // Field name below intentionally matches Safaricom's v3 spec — "Occassion"
-        // (double-s), same non-standard spelling as B2Pochi's "Occassion" field.
         body.put("Occassion",           "Wallet Cashout");
 
         try {
@@ -188,10 +149,6 @@ public class MpesaService {
             log.info("B2C response: {}", respBody);
             JsonNode node = objectMapper.readTree(respBody);
 
-            // ── Rejection shape: {requestId, errorCode, errorMessage} ──────
-            // Same two-shapes issue as STK Push above — a well-formed Safaricom
-            // rejection doesn't include ResponseCode/ResponseDescription at all,
-            // which previously left MpesaB2CResponse.message as "Unknown".
             String errorCode = node.path("errorCode").asText(null);
             if (errorCode != null && !errorCode.isBlank()) {
                 String errorMessage = node.path("errorMessage").asText("Unknown B2C error");
@@ -199,7 +156,6 @@ public class MpesaService {
                 return new MpesaB2CResponse(false, errorCode + ": " + errorMessage, null, null);
             }
 
-            // ── Acceptance shape ─────────────────────────────────────────
             boolean accepted = "0".equals(node.path("ResponseCode").asText("1"));
             String conversationId = node.path("ConversationID").asText("");
             String originatorId   = node.path("OriginatorConversationID").asText("");
@@ -232,7 +188,6 @@ public class MpesaService {
         body.put("SecurityCredential",     securityCredential);
         body.put("CommandID",              req.getCommandId() != null ? req.getCommandId() : b2b.getCommandId());
         body.put("SenderIdentifierType",   b2b.getSenderIdentifierType());
-        // Field name below intentionally matches Safaricom's own (misspelled) API field.
         body.put("RecieverIdentifierType", b2b.getReceiverIdentifierType());
         body.put("Amount",                 req.getAmount().intValue());
         body.put("PartyA",                 b2b.getShortcode());
@@ -246,6 +201,18 @@ public class MpesaService {
             String respBody = post(config.baseUrl() + "/mpesa/b2b/v1/paymentrequest", token, body);
             log.info("B2B response: {}", respBody);
             JsonNode node = objectMapper.readTree(respBody);
+
+            // Same two-shapes issue as STK Push/B2C above — Safaricom's
+            // rejection shape ({errorCode, errorMessage}, e.g. invalid
+            // initiator info, locked/invalid SecurityCredential) has no
+            // ResponseCode/ResponseDescription at all. Checked first so a
+            // rejection isn't misread as an "Unknown" acceptance.
+            String errorCode = node.path("errorCode").asText(null);
+            if (errorCode != null && !errorCode.isBlank()) {
+                String errorMessage = node.path("errorMessage").asText("Unknown B2B error");
+                log.warn("B2B rejected by Safaricom: errorCode={} errorMessage={}", errorCode, errorMessage);
+                return new MpesaB2BResponse(false, errorCode + ": " + errorMessage, null, null);
+            }
 
             boolean accepted = "0".equals(node.path("ResponseCode").asText("1"));
             String conversationId = node.path("ConversationID").asText("");
@@ -308,7 +275,6 @@ public class MpesaService {
         body.put("SecurityCredential", securityCredential);
         body.put("CommandID", "BusinessPayToBulk");
         body.put("SenderIdentifierType", "4");
-        // Field name below intentionally matches Safaricom's own (misspelled) API field.
         body.put("RecieverIdentifierType", "4");
         body.put("Amount", amount.intValue());
         body.put("PartyA", topUp.getPartyA());
@@ -325,6 +291,13 @@ public class MpesaService {
             String respBody = post(config.baseUrl() + "/mpesa/b2b/v1/paymentrequest", token, body);
             log.info("B2C Account Top Up response: {}", respBody);
             JsonNode node = objectMapper.readTree(respBody);
+
+            String errorCode = node.path("errorCode").asText(null);
+            if (errorCode != null && !errorCode.isBlank()) {
+                String errorMessage = node.path("errorMessage").asText("Unknown B2C Account Top Up error");
+                log.warn("B2C Account Top Up rejected by Safaricom: errorCode={} errorMessage={}", errorCode, errorMessage);
+                return new MpesaB2BResponse(false, errorCode + ": " + errorMessage, null, null);
+            }
 
             boolean accepted = "0".equals(node.path("ResponseCode").asText("1"));
             String conversationId = node.path("ConversationID").asText("");
@@ -425,7 +398,6 @@ public class MpesaService {
         body.put("TransactionID", req.getTransactionId());
         body.put("Amount", req.getAmount().intValue());
         body.put("ReceiverParty", cfg.getReceiverParty() != null ? cfg.getReceiverParty() : config.getShortcode());
-        // Field name below intentionally matches Safaricom's own (misspelled) API field.
         body.put("RecieverIdentifierType", cfg.getReceiverIdentifierType());
         body.put("ResultURL", cfg.getResultUrl());
         body.put("QueueTimeOutURL", cfg.getQueueTimeoutUrl());
@@ -468,8 +440,6 @@ public class MpesaService {
         body.put("Remarks", req.getRemarks() != null ? req.getRemarks() : "Premisave Pochi disbursement");
         body.put("QueueTimeOutURL", cfg.getQueueTimeoutUrl());
         body.put("ResultURL", cfg.getResultUrl());
-        // Safaricom's own field is spelled "Occassion" (double-s) for B2Pochi
-        // specifically — differs from every other M-Pesa API. Match exactly.
         body.put("Occassion", req.getOccasion() != null ? req.getOccasion() : "");
 
         try {
@@ -500,7 +470,6 @@ public class MpesaService {
             JsonNode node = objectMapper.readTree(respBody);
 
             String status = node.path("ResponseStatus").asText("");
-            // 1000 = registered now, 1001 = already registered — both are fine to treat as success.
             boolean success = "1000".equals(status) || "1001".equals(status);
             String message = node.path("ResponseDescription").asText("Unknown");
             String refId = node.path("ResponseRefID").asText("");
@@ -548,9 +517,6 @@ public class MpesaService {
         JsonNode txArray = node.has("Transaction") ? node.path("Transaction") : node.path("transactions");
         if (txArray.isArray()) {
             for (JsonNode txNode : txArray) {
-                // Safaricom's sample shows a possible extra nesting level for
-                // empty results ("Transaction": "[[]]") — skip anything that
-                // isn't itself an object.
                 if (txNode.isObject()) {
                     records.add(objectMapper.treeToValue(txNode, PullTransactionRecord.class));
                 }
@@ -576,10 +542,6 @@ public class MpesaService {
             JsonNode node = objectMapper.readTree(respBody);
 
             String organizationName = node.path("OrganizationName").asText("");
-            // Safaricom's own docs are inconsistent about what ResponseCode means for
-            // this API (sample success shows "4000"; the Error Codes table says "0" is
-            // success). Deriving success from OrganizationName being present sidesteps
-            // that ambiguity rather than trusting either convention blindly.
             boolean success = !organizationName.isBlank();
 
             return new QueryOrgInfoResponse(
@@ -601,16 +563,40 @@ public class MpesaService {
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
+    /**
+     * Shared parser for the "fire-and-await-callback" M-Pesa APIs (B2Pochi,
+     * Account Balance, Transaction Status, Reversal). Safaricom uses two
+     * different response shapes for these paymentrequest/query calls — a
+     * well-formed rejection ({requestId, errorCode, errorMessage}, e.g.
+     * "Invalid Initiator Information" or a locked/invalid SecurityCredential)
+     * carries NO ResponseCode/ResponseDescription at all. Previously this
+     * method didn't check for that shape, so a rejection silently fell
+     * through to the acceptance-shape parsing below and got recorded as
+     * "<apiName> request submitted" — a hard failure logged and saved to the
+     * DB as if it succeeded. The errorCode check below must run first.
+     */
     private MpesaAsyncResponse parseAsyncAck(String respBody, String apiName) throws Exception {
         JsonNode node = objectMapper.readTree(respBody);
+
+        String errorCode = node.path("errorCode").asText(null);
+        if (errorCode != null && !errorCode.isBlank()) {
+            String errorMessage = node.path("errorMessage").asText("Unknown " + apiName + " error");
+            log.warn("{} rejected by Safaricom: errorCode={} errorMessage={}", apiName, errorCode, errorMessage);
+            return new MpesaAsyncResponse(false, errorCode + ": " + errorMessage, null, null);
+        }
+
         boolean accepted = "0".equals(node.path("ResponseCode").asText("1"));
         String conversationId = node.path("ConversationID").asText("");
         String originatorId   = node.path("OriginatorConversationID").asText("");
         String message        = node.path("ResponseDescription").asText(apiName + " request submitted");
+
+        if (!accepted) {
+            log.warn("{} not accepted: responseDesc={} raw={}", apiName, message, respBody);
+        }
+
         return new MpesaAsyncResponse(accepted, message, conversationId, originatorId);
     }
 
-    /** Generates a Safaricom-safe OriginatorConversationID for APIs (like B2Pochi) that require one up front. */
     public String generateOriginatorConversationId(String prefix) {
         return prefix + "_" + UUID.randomUUID().toString().replace("-", "").substring(0, 20);
     }
@@ -628,12 +614,6 @@ public class MpesaService {
         }
     }
 
-    /**
-     * Normalizes a Kenyan phone number to Safaricom's 254XXXXXXXXX format.
-     * Public so other services (e.g. WalletService, when saving a user's
-     * M-Pesa number to their wallet) can store numbers in the same
-     * canonical format used for outbound M-Pesa API calls.
-     */
     public String normalizePhone(String phone) {
         if (phone == null) return "";
         phone = phone.replaceAll("\\s+", "").replaceAll("[^0-9+]", "");
