@@ -120,7 +120,8 @@ public class SecurityConfig {
                     "/payments/mpesa/b2pochi/timeout",
                     "/payments/mpesa/pull/callback",
                     "/payments/stripe/webhook",
-                    "/payments/paypal/webhook"
+                    "/payments/paypal/webhook",
+                    "/payments/flutterwave/webhook"
                 ).permitAll()
 
                 // ── 3. Internal, service-to-service calls (API key, not JWT) ──

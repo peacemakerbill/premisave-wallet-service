@@ -263,6 +263,14 @@ paypal:
 # "flutterwave-signature" header — not the old plain "verif-hash" string
 # comparison. Same dashboard field (Settings → Webhooks → Secret Hash)
 # supplies this value either way.
+#
+# PAYLOAD FIELD NAME: Flutterwave's actual v4 payload names the event-type
+# field "type" (e.g. {"type":"charge.completed","data":{...}}), NOT "event"
+# — see https://developer.flutterwave.com/docs/webhooks. FlutterwaveWebhookRequest
+# maps @JsonProperty("type") onto its `event` Java field to account for this;
+# if that mapping ever gets "fixed" back to "event" during a refactor,
+# every branch in PaymentCallbackController.flutterwaveWebhook() silently
+# no-ops again (payload.getEvent() deserializes to null).
 flutterwave:
   client-id: ${FLUTTERWAVE_CLIENT_ID}
   client-secret: ${FLUTTERWAVE_CLIENT_SECRET}
@@ -270,12 +278,17 @@ flutterwave:
   environment: ${FLUTTERWAVE_ENV:sandbox}   # "sandbox" or "production" — now DOES determine the base URL, see FlutterwaveConfig
   webhook-secret-hash: ${FLUTTERWAVE_WEBHOOK_SECRET_HASH}
   # Where Flutterwave redirects the customer back to after completing a
-  # charge's authorization step (3DS, mobile money approval, etc.).
+  # charge's authorization step (3DS, mobile money approval, etc.). This is
+  # a FRONTEND url (browser redirect), not a backend endpoint.
   redirect-url: ${FLUTTERWAVE_REDIRECT_URL}
   transfer:
-    # Optional per-transfer callback — Flutterwave also fires the
-    # account-wide "transfer.disburse" webhook above regardless.
-    callback-url: ${FLUTTERWAVE_TRANSFER_CALLBACK_URL:}
+    # No per-transfer callback-url — disbursements reconcile solely via the
+    # account-wide webhook registered in the Flutterwave Dashboard
+    # ("transfer.disburse" event, see PaymentCallbackController), same
+    # pattern already used for PayPal disbursements. A separate callback_url
+    # per transfer would just be a redundant second notification for the
+    # same event, since both use the identical payload shape.
+    #
     # Confirm actual tier limits with Flutterwave for your account.
     min-amount: 1
     max-amount: 5000

@@ -63,8 +63,6 @@ public class FlutterwaveConfig {
 
     @Data
     public static class Transfer {
-        private String callbackUrl;
-
         /** Confirm actual tier limits with Flutterwave for your account. */
         private BigDecimal minAmount = new BigDecimal("1");
         private BigDecimal maxAmount = new BigDecimal("5000");

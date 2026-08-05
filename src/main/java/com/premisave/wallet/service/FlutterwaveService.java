@@ -287,6 +287,13 @@ public class FlutterwaveService {
      * accountBank/accountNumber keep the same meaning as before: bank code
      * + account number for bank transfers, or mobile network code + phone
      * number for mobile money transfers.
+     *
+     * NOTE: transfers are reconciled solely via the account-wide webhook
+     * registered in the Flutterwave Dashboard ("transfer.disburse" event,
+     * see PaymentCallbackController.flutterwaveWebhook) — same pattern as
+     * PayPal disbursements. There is no per-transfer callback_url field
+     * sent in the request body here; that would just be a redundant
+     * second notification for the same event.
      */
     public TransferResult initiateTransfer(String accountBank, String accountNumber, BigDecimal amount,
                                             String currency, String reference, String narration,
@@ -328,9 +335,6 @@ public class FlutterwaveService {
         body.put("reference", reference);
         body.put("narration", narration != null ? narration : "Premisave wallet disbursement");
         body.put("payment_instruction", paymentInstruction);
-        if (config.getTransfer().getCallbackUrl() != null && !config.getTransfer().getCallbackUrl().isBlank()) {
-            body.put("callback_url", config.getTransfer().getCallbackUrl());
-        }
 
         try {
             String responseBody = post("/transfers", body, true);

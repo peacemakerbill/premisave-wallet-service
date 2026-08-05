@@ -61,7 +61,8 @@ public class CallbackRequestLoggingFilter extends OncePerRequestFilter {
             "/payments/mpesa/b2pochi/timeout",
             "/payments/mpesa/pull/callback",
             "/payments/stripe/webhook",
-            "/payments/paypal/webhook"
+            "/payments/paypal/webhook",
+            "/payments/flutterwave/webhook"
     );
 
     @Override
