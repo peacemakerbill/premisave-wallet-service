@@ -39,6 +39,7 @@ public class DepositService {
     private final PaypalService paypalService;
     private final FlutterwaveService flutterwaveService;
     private final FxRateService fxRateService;
+    private final IdempotencyService idempotencyService;
 
     public PaymentResponse initiateDeposit(String userId, String userEmail, DepositRequest request) {
         Wallet wallet = walletRepository.findByUserId(userId)
@@ -295,21 +296,6 @@ public class DepositService {
 
     // ─── PayPal ──────────────────────────────────────────────────────────────
 
-    /**
-     * Initiates a PayPal deposit. If the wallet already has a saved PayPal
-     * account (walletPaypalVaultId set), reuses it via the vault_id path.
-     *
-     * IMPORTANT: when a saved vault_id is reused and no re-authentication is
-     * required, PayPal captures the order synchronously as part of the
-     * createOrder() response itself (approveUrl == null AND status ==
-     * "COMPLETED") — there is no separate capture step to perform, and
-     * calling captureOrder() on it would fail with ORDER_ALREADY_CAPTURED.
-     * So credit directly from the create-order response in that case. If a
-     * saved vault_id exists but capture didn't complete synchronously for
-     * some reason, fall through to the normal confirm/capture path, which
-     * itself now reconciles an ORDER_ALREADY_CAPTURED race if one occurs
-     * (see confirmPaypalDepositInternal).
-     */
     private PaymentResponse initiatePaypalDeposit(String userId, DepositRequest request,
                                                     Wallet wallet, String idempotencyKey) {
         String requestedCurrency = request.getCurrency() != null ? request.getCurrency().toUpperCase() : "USD";
@@ -347,9 +333,6 @@ public class DepositService {
 
         if (result.approveUrl() == null) {
             if ("COMPLETED".equals(result.status()) && result.captureId() != null) {
-                // Vault reuse auto-captured synchronously at order creation —
-                // credit directly from what createOrder() already returned
-                // instead of calling captureOrder() again.
                 PaypalService.CaptureResult captureResult = new PaypalService.CaptureResult(
                         result.captureId(), result.vaultId(), result.customerId(),
                         result.payerEmail(), result.vaultStatus());
@@ -361,9 +344,6 @@ public class DepositService {
                 return credited;
             }
 
-            // No payer action required but not reported completed above
-            // (shouldn't normally happen) — fall back to the confirm path,
-            // which now reconciles ORDER_ALREADY_CAPTURED races too.
             PaymentResponse captured = confirmPaypalDepositInternal(tx, orderId);
             if (captured.isSuccess()) {
                 return new PaymentResponse(true, orderId,
@@ -377,18 +357,6 @@ public class DepositService {
                         + "USD " + usdAmount + " will be credited as approximately KES " + kesEquivalent + ".");
     }
 
-    /**
-     * Starts a standalone PayPal account link — no payment, mirrors
-     * createStripeSetupIntent. Rejects up front if an account is already
-     * linked, so the frontend can show the message before ever redirecting
-     * the user to PayPal.
-     *
-     * Persists the issued setupTokenId on the wallet as
-     * pendingPaypalSetupTokenId — confirmPaypalLink checks the setupTokenId
-     * submitted at confirm time against this value, since PayPal's
-     * payment-token response does not reliably echo back our merchant
-     * customer.id for PayPal-wallet vaulting (see confirmPaypalLink).
-     */
     @Transactional
     public Map<String, String> createPaypalLinkToken(String userId) {
         Wallet wallet = walletRepository.findByUserId(userId)
@@ -409,20 +377,6 @@ public class DepositService {
         return Map.of("setupTokenId", result.setupTokenId(), "approveUrl", result.approveUrl());
     }
 
-    /**
-     * Called by the frontend after the user approves the PayPal Vault
-     * setup token (returns from PayPal's approval redirect). Exchanges it
-     * for the real vault_id and saves it on the wallet.
-     *
-     * Security: verifies the submitted setupTokenId matches the one this
-     * wallet was issued by createPaypalLinkToken (pendingPaypalSetupTokenId)
-     * — NOT PayPal's returned customer.id. For PayPal-wallet vaulting
-     * (unlike card vaulting), PayPal's payment-token response returns its
-     * own PayPal-generated customer.id, unrelated to whatever merchant
-     * customer.id was supplied at setup-token creation, so that value can't
-     * be used to verify ownership. Checking against the setupTokenId we
-     * persisted ourselves is the reliable binding.
-     */
     @Transactional
     public void confirmPaypalLink(String setupTokenId, String userId) {
         Wallet wallet = walletRepository.findByUserId(userId)
@@ -472,15 +426,6 @@ public class DepositService {
         return confirmPaypalDepositInternal(tx, orderId);
     }
 
-    /**
-     * Captures the order and credits the wallet.
-     *
-     * If PayPal reports ORDER_ALREADY_CAPTURED (a race between this call and
-     * the webhook, or — the common case — a vault-reuse order that was
-     * actually auto-captured at creation time and reached this path anyway),
-     * this no longer gives up: it fetches the order's actual capture details
-     * via getOrder() and credits against that, same as a normal capture.
-     */
     private PaymentResponse confirmPaypalDepositInternal(Transaction tx, String orderId) {
         if (tx.getStatus() == TransactionStatus.COMPLETED) {
             log.info("PayPal deposit already processed for orderId={} — skipping duplicate capture", orderId);
@@ -519,11 +464,6 @@ public class DepositService {
         return creditPaypalTransaction(tx, captureResult);
     }
 
-    /**
-     * Shared credit path for a PayPal deposit, regardless of whether the
-     * capture details came from captureOrder(), a create-order
-     * auto-capture, or a getOrder() reconciliation fetch.
-     */
     private PaymentResponse creditPaypalTransaction(Transaction tx, PaypalService.CaptureResult captureResult) {
         if (tx.getStatus() == TransactionStatus.COMPLETED) {
             log.info("PayPal deposit already processed for orderId={} — skipping duplicate credit", tx.getReference());
@@ -590,16 +530,13 @@ public class DepositService {
     }
 
     // ─── Flutterwave ─────────────────────────────────────────────────────────
-    // v4 API — General Flow (customer → payment_method → charge). See
-    // FlutterwaveService for the OAuth2/token/endpoint details. Kenyan
-    // mobile money (M-Pesa) is NOT routed through here — see
-    // initiateMpesaDeposit above for the direct Daraja integration.
 
     /**
      * Initiates a Flutterwave mobile-money deposit via v4's General Flow.
      * Same USD-with-live-FX-to-KES pattern as PayPal: the wallet always
      * operates in KES, so the USD amount charged on Flutterwave's side is
-     * converted at the live rate for crediting.
+     * converted at the live rate for crediting. The FX rate is logged for
+     * reconciliation against the eventual webhook payout amount.
      *
      * chargeId is stored as Transaction.providerReference immediately —
      * v4 only supports verifying a charge by ITS OWN id (GET
@@ -627,6 +564,9 @@ public class DepositService {
                     "flutterwaveCountryCode and flutterwaveMobileNetwork are required for Flutterwave deposits");
         }
 
+        // Check idempotency after generating/validating the key
+        idempotencyService.checkIdempotency(idempotencyKey);
+
         BigDecimal usdAmount = request.getAmount();
         BigDecimal usdToKesRate = fxRateService.getRate("USD", "KES");
         BigDecimal kesEquivalent = usdAmount.multiply(usdToKesRate).setScale(2, RoundingMode.HALF_UP);
@@ -641,7 +581,7 @@ public class DepositService {
             return new PaymentResponse(false, null, "Flutterwave charge failed: " + result.message());
         }
 
-        log.info("Flutterwave charge created: userId={} txRef={} chargeId={} usdAmount={} kesEquivalent={} rate={}",
+        log.info("Flutterwave charge created: userId={} txRef={} chargeId={} usdAmount={} kesEquivalent={} rate={} (liveRate)",
                 userId, idempotencyKey, result.chargeId(), usdAmount, kesEquivalent, usdToKesRate);
 
         Transaction tx = new Transaction();
@@ -657,9 +597,8 @@ public class DepositService {
         transactionRepository.save(tx);
 
         if (result.redirectUrl() != null) {
-            return new PaymentResponse(true, result.redirectUrl(),
-                    "Redirect the user to the Flutterwave authorization URL to complete the deposit. "
-                            + "USD " + usdAmount + " will be credited as approximately KES " + kesEquivalent + ".");
+            return new PaymentResponse(true, idempotencyKey,
+                    "Redirect to: " + result.redirectUrl() + ". USD " + usdAmount + " will be credited as approximately KES " + kesEquivalent + ".");
         }
 
         String note = result.paymentInstructionNote() != null
@@ -752,7 +691,7 @@ public class DepositService {
         tx.setDescription("Flutterwave deposit (charge " + providerReference + ")");
         transactionRepository.save(tx);
 
-        log.info("Wallet credited via Flutterwave: txRef={} amount={} providerReference={}",
+        log.info("Wallet credited via Flutterwave: txRef={} amount={} providerReference={} (from initiationRate)",
                 txRef, tx.getAmount(), providerReference);
     }
 

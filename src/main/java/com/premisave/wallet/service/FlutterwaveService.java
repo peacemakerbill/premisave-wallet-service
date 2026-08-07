@@ -274,7 +274,6 @@ public class FlutterwaveService {
     }
 
     // ─── Transfers (disbursements) ────────────────────────────────────────────
-
     public record TransferResult(boolean success, String message, String transferId, String reference) {}
 
     /**
@@ -288,6 +287,11 @@ public class FlutterwaveService {
      * + account number for bank transfers, or mobile network code + phone
      * number for mobile money transfers.
      *
+     * Optional recipientId parameter — if provided (cached from a previous
+     * attempt), reuses that recipient instead of creating a duplicate.
+     * This prevents orphaned recipients if transfer initiation fails after
+     * recipient creation succeeds.
+     *
      * NOTE: transfers are reconciled solely via the account-wide webhook
      * registered in the Flutterwave Dashboard ("transfer.disburse" event,
      * see PaymentCallbackController.flutterwaveWebhook) — same pattern as
@@ -298,6 +302,12 @@ public class FlutterwaveService {
     public TransferResult initiateTransfer(String accountBank, String accountNumber, BigDecimal amount,
                                             String currency, String reference, String narration,
                                             String beneficiaryName) {
+        return initiateTransfer(accountBank, accountNumber, amount, currency, reference, narration, beneficiaryName, null);
+    }
+
+    public TransferResult initiateTransfer(String accountBank, String accountNumber, BigDecimal amount,
+                                            String currency, String reference, String narration,
+                                            String beneficiaryName, String cachedRecipientId) {
         if (amount.compareTo(config.getTransfer().getMinAmount()) < 0
                 || amount.compareTo(config.getTransfer().getMaxAmount()) > 0) {
             return new TransferResult(false,
@@ -307,13 +317,22 @@ public class FlutterwaveService {
         }
 
         String recipientId;
-        try {
-            recipientId = createTransferRecipient(accountBank, accountNumber, currency, beneficiaryName);
-        } catch (Exception e) {
-            log.error("Flutterwave recipient creation threw before a response could be parsed: reference={}",
-                    reference, e);
-            throw new FlutterwaveTransferException(reference, "RECIPIENT_CREATION_FAILED",
-                    "Flutterwave recipient creation failed: " + e.getMessage());
+        if (cachedRecipientId != null && !cachedRecipientId.isBlank()) {
+            // Reuse a previously-created recipient (retry case).
+            // This prevents orphaned recipients if transfer initiation failed
+            // on a prior attempt after recipient creation succeeded.
+            recipientId = cachedRecipientId;
+            log.info("Flutterwave transfer initiateTransfer: reusing cached recipientId={} for reference={}", recipientId, reference);
+        } else {
+            // Create a new recipient.
+            try {
+                recipientId = createTransferRecipient(accountBank, accountNumber, currency, beneficiaryName);
+            } catch (Exception e) {
+                log.error("Flutterwave recipient creation threw before a response could be parsed: reference={}",
+                        reference, e);
+                throw new FlutterwaveTransferException(reference, "RECIPIENT_CREATION_FAILED",
+                        "Flutterwave recipient creation failed: " + e.getMessage());
+            }
         }
 
         if (recipientId == null) {
@@ -364,17 +383,33 @@ public class FlutterwaveService {
     }
 
     /**
-     * OPEN QUESTION: v4 recipient "type" values are typically
-     * currency/corridor-specific (Flutterwave's own transfer docs example
-     * uses "bank_ngn" for a Nigerian bank account, not a generic "bank").
-     * "bank_" + currency below is a best-effort guess, NOT confirmed for
-     * KES or any corridor you actually use — check
-     * https://developer.flutterwave.com/docs/bank-transfer and
-     * https://developer.flutterwave.com/docs/mobile-money-1 for the exact
-     * type strings before relying on this for a live disbursement.
+     * Creates a Flutterwave recipient before initiating a transfer.
+     *
+     * RECIPIENT TYPE SELECTION: v4 recipient "type" values are
+     * corridor-specific. The implementation currently derives it as
+     * "bank_" + currency (e.g., "bank_usd", "bank_kes"), which is a
+     * best-effort guess NOT confirmed for all corridors.
+     *
+     * BEFORE PRODUCTION: Confirm the exact recipient "type" values with
+     * Flutterwave's documentation and your account manager for:
+     *  - Bank transfers in KES (if supported)
+     *  - Mobile-money transfers to your target countries
+     *
+     * See https://developer.flutterwave.com/docs/bank-transfer and
+     * https://developer.flutterwave.com/docs/mobile-money-1 for
+     * the authoritative per-corridor type strings. Examples from
+     * Flutterwave's docs: "bank_ngn" (Nigerian banks), "mobile_money_ke"
+     * (Kenyan mobile money), "mobile_money_ug" (Ugandan mobile money).
+     *
+     * Update createTransferRecipient and processFlutterwaveDisbursement
+     * hard-code the correct types once confirmed — do NOT rely on this
+     * currency-based derivation in production without verification.
      */
-    private String createTransferRecipient(String accountBank, String accountNumber, String currency,
+    public String createTransferRecipient(String accountBank, String accountNumber, String currency,
                                             String beneficiaryName) throws Exception {
+        // TODO: CONFIRM recipient type values with Flutterwave for production corridors
+        // Current implementation: "bank_" + currency (e.g., "bank_usd", "bank_kes")
+        // This is NOT confirmed. See javadoc above for action items before going live.
         String recipientType = "bank_" + currency.toLowerCase();
 
         Map<String, Object> bank = new HashMap<>();
@@ -396,7 +431,8 @@ public class FlutterwaveService {
         log.info("Flutterwave recipient response: {}", responseBody);
         JsonNode node = objectMapper.readTree(responseBody);
         if (!"success".equals(node.path("status").asText(""))) {
-            log.warn("Flutterwave recipient creation rejected: message={}", node.path("message").asText(""));
+            log.warn("Flutterwave recipient creation rejected: recipientType={} message={}", 
+                    recipientType, node.path("message").asText(""));
             return null;
         }
         return node.path("data").path("id").asText(null);
