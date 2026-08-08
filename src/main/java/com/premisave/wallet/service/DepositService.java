@@ -523,10 +523,21 @@ public class DepositService {
 
     /**
      * Initiates a Flutterwave mobile-money deposit via v4's General Flow.
-     * Same USD-with-live-FX-to-KES pattern as PayPal: the wallet always
-     * operates in KES, so the USD amount charged on Flutterwave's side is
-     * converted at the live rate for crediting. The FX rate is logged for
-     * reconciliation against the eventual webhook payout amount.
+     *
+     * CURRENCY: per Flutterwave's Mobile Money docs, "the charge currency
+     * must match the currency_code used when creating the payment method."
+     * There is no USD-denominated mobile money charge — a mismatched
+     * currency is rejected outright (REQUEST_NOT_VALID). This path
+     * therefore requires the caller to supply the correct LOCAL currency
+     * for the target network/country (e.g. GHS for Ghana MTN, UGX for
+     * Uganda, etc. — NOT KES, since Kenyan mobile money goes through the
+     * direct M-Pesa STK push path instead, see provider=MPESA).
+     *
+     * The wallet always operates in KES, so — same pattern as the PayPal
+     * branch above, just with the local currency as the base instead of
+     * USD — the live FX rate from the local currency to KES is used to
+     * compute what actually gets credited to the wallet. The FX rate is
+     * logged for reconciliation against the eventual webhook payout amount.
      *
      * chargeId is stored as Transaction.providerReference immediately —
      * v4 only supports verifying a charge by ITS OWN id (GET
@@ -534,16 +545,19 @@ public class DepositService {
      * verify_by_reference worked, so confirmFlutterwaveDeposit below needs
      * it on record.
      *
-     * REQUIRES two new fields on DepositRequest: flutterwaveCountryCode
+     * REQUIRES two fields on DepositRequest: flutterwaveCountryCode
      * (e.g. "233") and flutterwaveMobileNetwork (e.g. "MTN") — see
      * DepositRequest.java. customerName/customerPhone are expected to
-     * already exist on that DTO from the v3 integration.
+     * already exist on that DTO. request.currency is now required and
+     * must be the local currency described above.
      */
     private PaymentResponse initiateFlutterwaveDeposit(String userId, String userEmail, DepositRequest request,
                                                          Wallet wallet, String idempotencyKey) {
-        String requestedCurrency = request.getCurrency() != null ? request.getCurrency().toUpperCase() : "USD";
-        if (!"USD".equals(requestedCurrency)) {
-            throw new IllegalArgumentException("Flutterwave deposits must be in USD (got: " + requestedCurrency + ")");
+        String localCurrency = request.getCurrency() != null ? request.getCurrency().toUpperCase() : null;
+        if (localCurrency == null || localCurrency.isBlank()) {
+            throw new IllegalArgumentException(
+                    "currency is required for Flutterwave mobile-money deposits — must be the local currency "
+                            + "for the target network/country (e.g. GHS for Ghana MTN), not USD.");
         }
         if (request.getCustomerPhone() == null || request.getCustomerPhone().isBlank()) {
             throw new IllegalArgumentException("customerPhone is required for Flutterwave mobile-money deposits");
@@ -555,15 +569,22 @@ public class DepositService {
             throw new IllegalArgumentException("flutterwaveMobileNetwork (e.g., \"MTN\") is required");
         }
 
-        BigDecimal usdAmount = request.getAmount();
-        BigDecimal usdToKesRate = fxRateService.getRate("USD", "KES");
-        BigDecimal kesEquivalent = usdAmount.multiply(usdToKesRate).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal chargeAmount = request.getAmount(); // amount in localCurrency
+        BigDecimal fxRate;
+        BigDecimal kesEquivalent;
+        if ("KES".equals(localCurrency)) {
+            fxRate = BigDecimal.ONE;
+            kesEquivalent = chargeAmount;
+        } else {
+            fxRate = fxRateService.getRate(localCurrency, "KES");
+            kesEquivalent = chargeAmount.multiply(fxRate).setScale(2, RoundingMode.HALF_UP);
+        }
 
         String txRef = idempotencyKey;
         String customerName = request.getCustomerName() != null ? request.getCustomerName() : userEmail;
 
         FlutterwaveService.CheckoutResult result = flutterwaveService.initiateMobileMoneyCharge(
-                usdAmount, "USD", txRef, userEmail, customerName,
+                chargeAmount, localCurrency, txRef, userEmail, customerName,
                 request.getFlutterwaveCountryCode(), request.getFlutterwaveMobileNetwork(),
                 request.getCustomerPhone());
 
@@ -572,8 +593,8 @@ public class DepositService {
             return new PaymentResponse(false, null, "Flutterwave charge initiation failed: " + result.message());
         }
 
-        log.info("Flutterwave charge created: userId={} txRef={} chargeId={} kesEquivalent={} rate={} nextAction={}",
-                userId, txRef, result.chargeId(), kesEquivalent, usdToKesRate, result.nextActionType());
+        log.info("Flutterwave charge created: userId={} txRef={} chargeId={} localAmount={} {} kesEquivalent={} rate={} nextAction={}",
+                userId, txRef, result.chargeId(), chargeAmount, localCurrency, kesEquivalent, fxRate, result.nextActionType());
 
         Transaction tx = new Transaction();
         tx.setUserId(userId);
@@ -584,7 +605,8 @@ public class DepositService {
         tx.setCurrency(Currency.KES);
         tx.setReference(txRef);
         tx.setProviderReference(result.chargeId());
-        tx.setDescription("Flutterwave deposit (pending) - USD " + usdAmount + " @ live rate " + usdToKesRate);
+        tx.setDescription("Flutterwave deposit (pending) - " + localCurrency + " " + chargeAmount
+                + " @ live rate " + fxRate);
         transactionRepository.save(tx);
 
         // Return the redirect URL from Flutterwave's next_action, if present.
@@ -595,7 +617,7 @@ public class DepositService {
                 ? "Redirect to " + redirectUrl + " to authorize the charge."
                 : instructionNote != null
                 ? "Approve the charge on your phone: " + instructionNote
-                : "USD " + usdAmount + " charge initiated (KES " + kesEquivalent + ").";
+                : localCurrency + " " + chargeAmount + " charge initiated (KES " + kesEquivalent + ").";
 
         return new PaymentResponse(true, redirectUrl != null ? redirectUrl : txRef, userFacingMessage);
     }

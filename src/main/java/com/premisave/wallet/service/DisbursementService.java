@@ -1,5 +1,6 @@
 package com.premisave.wallet.service;
 
+import com.premisave.wallet.config.FlutterwaveConfig;
 import com.premisave.wallet.dto.B2CTopUpRequest;
 import com.premisave.wallet.dto.B2PochiRequest;
 import com.premisave.wallet.dto.DisbursementRequest;
@@ -47,6 +48,7 @@ public class DisbursementService {
     private final StripeService stripeService;
     private final PaypalService paypalService;
     private final FlutterwaveService flutterwaveService;
+    private final FlutterwaveConfig flutterwaveConfig;
     private final IdempotencyService idempotencyService;
     private final FxRateService fxRateService;
 
@@ -60,7 +62,7 @@ public class DisbursementService {
      * only debited once the disbursement is CONFIRMED — by M-Pesa's
      * ResultURL callback (see completeMpesaDisbursement), PayPal's Payouts
      * webhook (see completePaypalDisbursement), or Flutterwave's
-     * transfer.completed webhook (see completeFlutterwaveDisbursement) —
+     * transfer.disburse webhook (see completeFlutterwaveDisbursement) —
      * except for Stripe, which resolves synchronously below, so it's
      * debited right at that point. Previously the wallet was debited up
      * front and refunded on failure; that meant a customer's balance was
@@ -195,107 +197,117 @@ public class DisbursementService {
     }
 
  // ─── Flutterwave (bank account or mobile money wallet) ──────────────────
- // Excerpt: Updated processFlutterwaveDisbursement and completeFlutterwaveDisbursement methods
- // Add this to DisbursementService.java replacing the corresponding Flutterwave section
+
+    /**
+     * Same not-debited-until-confirmed pattern as MPESA/PAYPAL above —
+     * Flutterwave transfers resolve asynchronously via the
+     * transfer.disburse webhook (see completeFlutterwaveDisbursement).
+     *
+     * Branches on flutterwaveTransferType (validated below):
+     *  - MOBILE_MONEY → FlutterwaveService.initiateTransfer (msisdn/network body)
+     *  - BANK         → FlutterwaveService.initiateBankTransfer (bank code/account_number body)
+     * These are genuinely different request shapes — routing a bank account
+     * number through the mobile-money body (as msisdn) would either fail
+     * outright or, worse, silently route to a wrong/unintended mobile
+     * wallet if the digits happen to parse as a valid MSISDN.
+     *
+     * destination_currency comes from the request (defaults to KES).
+     * source_currency comes from FlutterwaveConfig.transfer.sourceCurrency
+     * — this is your Flutterwave balance's actual currency, which is NOT
+     * necessarily the same as destinationCurrency (confirm this against
+     * your dashboard balance before relying on it in production).
+     */
+    private DisbursementResponse processFlutterwaveDisbursement(String userId, Wallet wallet,
+                                                                   DisbursementRequest request) {
+        if (request.getFlutterwaveAccountBank() == null || request.getFlutterwaveAccountBank().isBlank()) {
+            throw new IllegalArgumentException("flutterwaveAccountBank is required for FLUTTERWAVE disbursements");
+        }
+        if (request.getFlutterwaveAccountNumber() == null || request.getFlutterwaveAccountNumber().isBlank()) {
+            throw new IllegalArgumentException("flutterwaveAccountNumber is required for FLUTTERWAVE disbursements");
+        }
+        String transferType = request.getFlutterwaveTransferType() != null
+                ? request.getFlutterwaveTransferType().toUpperCase() : null;
+        if (!"BANK".equals(transferType) && !"MOBILE_MONEY".equals(transferType)) {
+            throw new IllegalArgumentException(
+                    "flutterwaveTransferType must be BANK or MOBILE_MONEY for FLUTTERWAVE disbursements");
+        }
+
+        String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
+
+        // For MOBILE_MONEY: flutterwaveAccountBank = network code (e.g. "Mpesa", "MTN"),
+        //                    flutterwaveAccountNumber = msisdn (must include country code).
+        // For BANK:         flutterwaveAccountBank = bank code,
+        //                    flutterwaveAccountNumber = account number.
+        String displayDestination = request.getFlutterwaveAccountBank() + "-" + request.getFlutterwaveAccountNumber();
+
+        // Parse beneficiary name into first/last
+        String beneficiaryName = request.getFlutterwaveBeneficiaryName();
+        String firstName = "";
+        String lastName = "";
+        if (beneficiaryName != null && !beneficiaryName.isBlank()) {
+            String[] parts = beneficiaryName.trim().split("\\s+", 2);
+            firstName = parts[0];
+            lastName = parts.length > 1 ? parts[1] : "";
+        }
+
+        Disbursement disbursement = new Disbursement();
+        disbursement.setUserId(userId);
+        disbursement.setWalletId(wallet.getId());
+        disbursement.setAmount(request.getAmount());
+        disbursement.setDestination(displayDestination);
+        disbursement.setProvider("FLUTTERWAVE");
+        disbursement.setChannel("FLUTTERWAVE_" + transferType);
+        disbursement.setReference(reference);
+        disbursement.setStatus(DisbursementStatus.PENDING);
+        disbursement.setCurrency(Currency.KES);
+
+        // destination_currency = what the recipient actually receives in.
+        String destinationCurrency = request.getCurrency() != null ? request.getCurrency().toUpperCase() : "KES";
+        // source_currency = the currency your Flutterwave balance actually holds
+        // — see FlutterwaveConfig.Transfer.sourceCurrency javadoc.
+        String sourceCurrency = flutterwaveConfig.getTransfer().getSourceCurrency();
+
+        try {
+            FlutterwaveService.TransferResult result;
+            if ("BANK".equals(transferType)) {
+                result = flutterwaveService.initiateBankTransfer(
+                        request.getFlutterwaveAccountNumber(), request.getFlutterwaveAccountBank(),
+                        sourceCurrency, destinationCurrency, request.getAmount(), reference,
+                        request.getRemarks(), firstName, lastName);
+            } else {
+                result = flutterwaveService.initiateTransfer(
+                        request.getFlutterwaveAccountNumber(), request.getFlutterwaveAccountBank(),
+                        sourceCurrency, destinationCurrency, request.getAmount(), reference,
+                        request.getRemarks(), firstName, lastName);
+            }
+
+            log.info("Flutterwave disbursement: userId={} reference={} type={} amount={} destination={}",
+                    userId, reference, transferType, request.getAmount(), displayDestination);
+
+            if (!result.success()) {
+                disbursement.setStatus(DisbursementStatus.FAILED);
+                disbursement.setFailureReason(result.message());
+                disbursementRepository.save(disbursement);
+                return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), result.message());
+            }
+
+            disbursement.setProviderReference(result.transferId());
+            disbursementRepository.save(disbursement);
+            return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
+                    "Disbursement queued with Flutterwave — your wallet will be debited once Flutterwave confirms the payout.");
+
+        } catch (Exception e) {
+            log.error("Flutterwave transfer threw: userId={} reference={}", userId, reference, e);
+            disbursement.setStatus(DisbursementStatus.FAILED);
+            disbursement.setFailureReason("Flutterwave transfer initiation failed: " + e.getMessage());
+            disbursementRepository.save(disbursement);
+            return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
+                    disbursement.getFailureReason());
+        }
+    }
 
  /**
-  * Same not-debited-until-confirmed pattern as MPESA/PAYPAL above —
-  * Flutterwave transfers resolve asynchronously via the
-  * transfer.completed webhook (see completeFlutterwaveDisbursement).
-  * KES→USD conversion mirrors disbursePaypal below; see
-  * FlutterwaveService.initiateTransfer's javadoc for the caveat that
-  * USD payouts may not be supported for every destination corridor —
-  * confirm with Flutterwave for your specific bank/mobile-money rails
-  * before relying on this in production.
-  *
-  * RECIPIENT CACHING: If recipient creation succeeds but transfer
-  * initiation fails (network error), the recipient ID is cached on the
-  * Disbursement record so a retry can reuse it instead of creating
-  * orphaned duplicates. See Disbursement.flutterwaveRecipientId.
-  */
- private DisbursementResponse processFlutterwaveDisbursement(String userId, Wallet wallet,
-                                                                DisbursementRequest request) {
-     if (request.getFlutterwaveAccountBank() == null || request.getFlutterwaveAccountBank().isBlank()) {
-         throw new IllegalArgumentException("flutterwaveAccountBank is required for FLUTTERWAVE disbursements");
-     }
-     if (request.getFlutterwaveAccountNumber() == null || request.getFlutterwaveAccountNumber().isBlank()) {
-         throw new IllegalArgumentException("flutterwaveAccountNumber is required for FLUTTERWAVE disbursements");
-     }
-     String transferType = request.getFlutterwaveTransferType() != null
-             ? request.getFlutterwaveTransferType().toUpperCase() : null;
-     if (!"BANK".equals(transferType) && !"MOBILE_MONEY".equals(transferType)) {
-         throw new IllegalArgumentException(
-                 "flutterwaveTransferType must be BANK or MOBILE_MONEY for FLUTTERWAVE disbursements");
-     }
-
-     String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
-
-     // msisdn must include country code e.g. 2547XXXXXXXX
-     String msisdn = request.getFlutterwaveAccountNumber();
-     String network = request.getFlutterwaveAccountBank(); // network code e.g. "Mpesa", "MTN"
-     String displayDestination = network + "-" + msisdn;
-
-     // Parse beneficiary name into first/last
-     String beneficiaryName = request.getFlutterwaveBeneficiaryName();
-     String firstName = "";
-     String lastName = "";
-     if (beneficiaryName != null && !beneficiaryName.isBlank()) {
-         String[] parts = beneficiaryName.trim().split("\\s+", 2);
-         firstName = parts[0];
-         lastName = parts.length > 1 ? parts[1] : "";
-     }
-
-     Disbursement disbursement = new Disbursement();
-     disbursement.setUserId(userId);
-     disbursement.setWalletId(wallet.getId());
-     disbursement.setAmount(request.getAmount());
-     disbursement.setDestination(displayDestination);
-     disbursement.setProvider("FLUTTERWAVE");
-     disbursement.setChannel("FLUTTERWAVE_" + transferType);
-     disbursement.setReference(reference);
-     disbursement.setStatus(DisbursementStatus.PENDING);
-     disbursement.setCurrency(Currency.KES);
-
-     // Wallet operates in KES. Flutterwave v4 direct-transfer supports KES natively
-     // via destination_currency. Use KES directly, no FX conversion needed.
-     // source_currency = your Flutterwave balance currency (confirm with your account).
-     // destination_currency = recipient's currency e.g. KES for M-Pesa Kenya.
-     String sourceCurrency = "KES";
-     String destinationCurrency = "KES";
-
-     try {
-         FlutterwaveService.TransferResult result = flutterwaveService.initiateTransfer(
-                 msisdn, network, sourceCurrency, destinationCurrency,
-                 request.getAmount(), reference, request.getRemarks(),
-                 firstName, lastName);
-
-         log.info("Flutterwave disbursement: userId={} reference={} amount={} msisdn={} network={}",
-                 userId, reference, request.getAmount(), msisdn, network);
-
-         if (!result.success()) {
-             disbursement.setStatus(DisbursementStatus.FAILED);
-             disbursement.setFailureReason(result.message());
-             disbursementRepository.save(disbursement);
-             return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), result.message());
-         }
-
-         disbursement.setProviderReference(result.transferId());
-         disbursementRepository.save(disbursement);
-         return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
-                 "Disbursement queued with Flutterwave — your wallet will be debited once Flutterwave confirms the payout.");
-
-     } catch (Exception e) {
-         log.error("Flutterwave transfer threw: userId={} reference={}", userId, reference, e);
-         disbursement.setStatus(DisbursementStatus.FAILED);
-         disbursement.setFailureReason("Flutterwave transfer initiation failed: " + e.getMessage());
-         disbursementRepository.save(disbursement);
-         return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
-                 disbursement.getFailureReason());
-     }
- }
-
- /**
-  * Reconciliation from Flutterwave's transfer.completed webhook. Keyed
+  * Reconciliation from Flutterwave's transfer.disburse webhook. Keyed
   * by transferId (Flutterwave's own numeric id, stored as
   * providerReference at initiation) rather than our own reference,
   * since that's what the webhook payload's data.id carries — see

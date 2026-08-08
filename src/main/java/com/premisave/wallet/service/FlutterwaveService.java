@@ -27,13 +27,23 @@ import java.util.concurrent.locks.ReentrantLock;
 /**
  * Flutterwave v4 service.
  *
- * Sandbox base URL : https://developersandbox-api.flutterwave.com
- * Production base URL: https://api.flutterwave.com
+ * Sandbox base URL   : https://developersandbox-api.flutterwave.com
+ * Production base URL: https://f4bexperience.flutterwave.com
  *
  * FlutterwaveConfig.baseUrl() must return the correct URL for the environment.
  *
  * OAuth2 token endpoint (both environments):
  *   https://idp.flutterwave.com/realms/flutterwave/protocol/openid-connect/token
+ *
+ * IDEMPOTENCY: every POST call below takes an explicit idempotencyKey
+ * argument derived from the caller's own reference — NEVER a freshly
+ * randomized UUID per call. Per Flutterwave's idempotency docs: "When a
+ * subsequent request is made with the same idempotency key, we return the
+ * original response associated with the first request that used that key."
+ * A random-per-call key defeats this entirely and risks duplicate charges/
+ * transfers on any client retry, load-balancer replay, or double-click.
+ * X-Trace-Id is unrelated to idempotency (it's a debugging/tracing id) and
+ * is still safely randomized per call.
  */
 @Slf4j
 @Service
@@ -128,13 +138,24 @@ public class FlutterwaveService {
      *
      * countryCode: dialling code e.g. "233" for Ghana
      * network: e.g. "MTN", "airtel", "Mpesa" — case as per Flutterwave docs
+     * currency: MUST be the local currency for the target network/country
+     *   (e.g. "GHS" for Ghana MTN) — per Flutterwave's Mobile Money docs,
+     *   "the charge currency must match the currency_code used when
+     *   creating the payment method." There is no USD-denominated mobile
+     *   money charge; a mismatched currency is rejected outright with
+     *   REQUEST_NOT_VALID.
+     *
+     * Idempotency keys for the three sub-steps are all derived from
+     * `reference` (see class javadoc) so a retried call with the same
+     * reference dedupes correctly instead of creating duplicate
+     * customers/payment-methods/charges.
      */
     public CheckoutResult initiateMobileMoneyCharge(BigDecimal amount, String currency, String reference,
                                                      String customerEmail, String customerName,
                                                      String countryCode, String network,
                                                      String phoneNumber) {
         try {
-            String customerId = createOrGetCustomer(customerEmail, customerName, countryCode, phoneNumber);
+            String customerId = createOrGetCustomer(customerEmail, customerName, countryCode, phoneNumber, reference);
 
             // Step 2: Create mobile_money payment method
             Map<String, Object> mobileMoney = new HashMap<>();
@@ -146,7 +167,7 @@ public class FlutterwaveService {
             pmBody.put("type", "mobile_money");
             pmBody.put("mobile_money", mobileMoney);
 
-            String pmResponse = post("/payment-methods", pmBody);
+            String pmResponse = post("/payment-methods", pmBody, reference + "-paymentmethod");
             JsonNode pmNode = objectMapper.readTree(pmResponse);
 
             if (!"success".equals(pmNode.path("status").asText(""))) {
@@ -168,7 +189,10 @@ public class FlutterwaveService {
                 chargeBody.put("redirect_url", config.getRedirectUrl());
             }
 
-            String chargeResponse = post("/charges", chargeBody);
+            // Charge itself is keyed on the caller's own reference — this is
+            // the true dedup unit: a retried deposit with the same reference
+            // must return the original charge, not create a second one.
+            String chargeResponse = post("/charges", chargeBody, reference);
             log.info("Flutterwave charge response: reference={} body={}", reference, chargeResponse);
             JsonNode chargeNode = objectMapper.readTree(chargeResponse);
 
@@ -214,7 +238,7 @@ public class FlutterwaveService {
      * Only email is required; name and phone improve customer profiling.
      */
     private String createOrGetCustomer(String email, String name, String countryCode,
-                                        String phoneNumber) throws Exception {
+                                        String phoneNumber, String idempotencyKey) throws Exception {
         Map<String, Object> body = new HashMap<>();
         body.put("email", email);
 
@@ -233,7 +257,7 @@ public class FlutterwaveService {
             body.put("phone", phone);
         }
 
-        String responseBody = post("/customers", body);
+        String responseBody = post("/customers", body, idempotencyKey + "-customer");
         JsonNode node = objectMapper.readTree(responseBody);
 
         if (!"success".equals(node.path("status").asText(""))) {
@@ -301,8 +325,8 @@ public class FlutterwaveService {
      *   "reference": "...",
      *   "narration": "...",
      *   "payment_instruction": {
-     *     "source_currency": "KES",
-     *     "destination_currency": "KES",
+     *     "source_currency": "...",       <- your Flutterwave balance currency
+     *     "destination_currency": "KES",  <- recipient's currency
      *     "amount": { "applies_to": "destination_currency", "value": 1000 },
      *     "recipient": {
      *       "name": { "first": "John", "last": "Doe" },
@@ -316,6 +340,8 @@ public class FlutterwaveService {
      *
      * Response status will be "NEW" — final status comes via webhook "transfer.disburse"
      * Webhook data.status: "SUCCESSFUL" | "FAILED"
+     *
+     * Idempotency key = reference (the caller's own reference) — see class javadoc.
      */
     public TransferResult initiateTransfer(String msisdn, String network,
                                             String sourceCurrency, String destinationCurrency,
@@ -362,7 +388,7 @@ public class FlutterwaveService {
             body.put("narration", narration != null ? narration : "Premisave wallet disbursement");
             body.put("payment_instruction", paymentInstruction);
 
-            String responseBody = post("/direct-transfers", body);
+            String responseBody = post("/direct-transfers", body, reference);
             log.info("Flutterwave direct-transfer response: reference={} body={}", reference, responseBody);
             JsonNode node = objectMapper.readTree(responseBody);
 
@@ -383,6 +409,108 @@ public class FlutterwaveService {
             log.error("Flutterwave transfer failed: reference={}", reference, e);
             throw new FlutterwaveTransferException(reference, "INITIATION_FAILED",
                     "Flutterwave transfer initiation failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Initiates a bank transfer using Flutterwave v4 direct transfer.
+     *
+     * Endpoint: POST /direct-transfers, type="bank"
+     *
+     * {
+     *   "action": "instant",
+     *   "type": "bank",
+     *   "reference": "...",
+     *   "narration": "...",
+     *   "payment_instruction": {
+     *     "source_currency": "...",
+     *     "destination_currency": "...",
+     *     "amount": { "applies_to": "destination_currency", "value": 1000 },
+     *     "recipient": {
+     *       "bank": { "code": "...", "account_number": "..." },
+     *       "name": { "first": "...", "last": "..." }
+     *     }
+     *   }
+     * }
+     *
+     * NOTE: some corridors require additional recipient.bank fields beyond
+     * code/account_number — e.g. GHS needs "branch", INR needs "branch",
+     * EGP needs recipient.national_identification, USD/AUD/EUR corridors
+     * need routing_number/swift_code/account_type instead of "code". This
+     * method currently sends only code + account_number, which matches the
+     * simplest documented sample (NGN bank payout). Extend this — and check
+     * GET /banks/{country} plus the docs' per-currency sample for your
+     * target country — before enabling BANK transfers for any corridor
+     * that needs more than code + account_number.
+     *
+     * Response status will be "NEW" on creation — final status comes via
+     * the "transfer.disburse" webhook, same as mobile money transfers.
+     * Idempotency key = reference — see class javadoc.
+     */
+    public TransferResult initiateBankTransfer(String accountNumber, String bankCode,
+                                                String sourceCurrency, String destinationCurrency,
+                                                BigDecimal amount, String reference, String narration,
+                                                String beneficiaryFirstName, String beneficiaryLastName) {
+
+        if (amount.compareTo(config.getTransfer().getMinAmount()) < 0
+                || amount.compareTo(config.getTransfer().getMaxAmount()) > 0) {
+            return new TransferResult(false,
+                    "Amount must be between " + config.getTransfer().getMinAmount()
+                            + " and " + config.getTransfer().getMaxAmount() + " " + destinationCurrency,
+                    null, reference);
+        }
+
+        try {
+            Map<String, Object> amountMap = new HashMap<>();
+            amountMap.put("applies_to", "destination_currency");
+            amountMap.put("value", amount);
+
+            Map<String, Object> bank = new HashMap<>();
+            bank.put("code", bankCode);
+            bank.put("account_number", accountNumber);
+
+            Map<String, Object> nameMap = new HashMap<>();
+            nameMap.put("first", beneficiaryFirstName != null ? beneficiaryFirstName : "");
+            if (beneficiaryLastName != null && !beneficiaryLastName.isBlank()) {
+                nameMap.put("last", beneficiaryLastName);
+            }
+
+            Map<String, Object> recipient = new HashMap<>();
+            recipient.put("name", nameMap);
+            recipient.put("bank", bank);
+
+            Map<String, Object> paymentInstruction = new HashMap<>();
+            paymentInstruction.put("source_currency", sourceCurrency.toUpperCase());
+            paymentInstruction.put("destination_currency", destinationCurrency.toUpperCase());
+            paymentInstruction.put("amount", amountMap);
+            paymentInstruction.put("recipient", recipient);
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("action", "instant");
+            body.put("type", "bank");
+            body.put("reference", reference);
+            body.put("narration", narration != null ? narration : "Premisave wallet disbursement");
+            body.put("payment_instruction", paymentInstruction);
+
+            String responseBody = post("/direct-transfers", body, reference);
+            log.info("Flutterwave bank-transfer response: reference={} body={}", reference, responseBody);
+            JsonNode node = objectMapper.readTree(responseBody);
+
+            String envelopeStatus = node.path("status").asText("");
+            if (!"success".equals(envelopeStatus)) {
+                String msg = node.path("message").asText("Unknown transfer error");
+                log.warn("Flutterwave bank transfer rejected: reference={} message={}", reference, msg);
+                return new TransferResult(false, msg, null, reference);
+            }
+
+            String transferId = node.path("data").path("id").asText(null);
+            log.info("Flutterwave bank transfer initiated: reference={} transferId={}", reference, transferId);
+            return new TransferResult(true, "Transfer initiated", transferId, reference);
+
+        } catch (Exception e) {
+            log.error("Flutterwave bank transfer failed: reference={}", reference, e);
+            throw new FlutterwaveTransferException(reference, "INITIATION_FAILED",
+                    "Flutterwave bank transfer initiation failed: " + e.getMessage());
         }
     }
 
@@ -475,7 +603,13 @@ public class FlutterwaveService {
 
     // ─── HTTP helpers ─────────────────────────────────────────────────────────
 
-    private String post(String path, Map<String, Object> body) throws Exception {
+    /**
+     * @param idempotencyKey MUST be stable across retries of the same
+     *                       logical operation (derived from the caller's
+     *                       own reference) — never a freshly randomized
+     *                       value. See class javadoc.
+     */
+    private String post(String path, Map<String, Object> body, String idempotencyKey) throws Exception {
         String json = objectMapper.writeValueAsString(body);
         RequestBody rb = RequestBody.create(json, MediaType.parse("application/json"));
         Request request = new Request.Builder()
@@ -483,7 +617,7 @@ public class FlutterwaveService {
                 .addHeader("Authorization", "Bearer " + getAccessToken())
                 .addHeader("Content-Type", "application/json")
                 .addHeader("X-Trace-Id", UUID.randomUUID().toString())
-                .addHeader("X-Idempotency-Key", UUID.randomUUID().toString())
+                .addHeader("X-Idempotency-Key", idempotencyKey)
                 .post(rb)
                 .build();
         try (Response response = http.newCall(request).execute()) {

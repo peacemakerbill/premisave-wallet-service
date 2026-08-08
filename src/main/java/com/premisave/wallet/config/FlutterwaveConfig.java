@@ -66,5 +66,22 @@ public class FlutterwaveConfig {
         /** Confirm actual tier limits with Flutterwave for your account. */
         private BigDecimal minAmount = new BigDecimal("1");
         private BigDecimal maxAmount = new BigDecimal("5000");
+
+        /**
+         * The currency your Flutterwave balance actually holds — used as
+         * payment_instruction.source_currency on every payout (bank or
+         * mobile money). This is NOT automatically the same as the
+         * destination currency — Flutterwave's own documented sample for a
+         * KES mobile-money payout uses source_currency=NGN, i.e.
+         * source_currency reflects whatever currency your account balance
+         * is funded in, not the recipient's currency.
+         *
+         * TODO: confirm your actual settlement/balance currency in the
+         * Flutterwave dashboard and set flutterwave.transfer.source-currency
+         * accordingly before relying on this in production. Left at "KES"
+         * as a placeholder matching the wallet's own currency, which may or
+         * may not be correct for your account.
+         */
+        private String sourceCurrency = "KES";
     }
 }
