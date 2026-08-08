@@ -407,7 +407,22 @@
 		{
 			"name": "stripe.webhook-secret",
 			"type": "java.lang.String",
-			"description": "Stripe webhook signing secret (whsec_*) used to verify incoming webhook payloads. Found in Stripe Dashboard → Webhooks → your endpoint → Signing secret."
+			"description": "Stripe platform webhook signing secret (whsec_*) — verifies /payments/stripe/webhook (deposits, saved cards). Found in Stripe Dashboard → Webhooks → your platform endpoint → Signing secret. Distinct from stripe.connect.webhook-secret below, which is a separate destination for events on connected accounts."
+		},
+		{
+			"name": "stripe.connect.refresh-url",
+			"type": "java.lang.String",
+			"description": "Frontend URL Stripe redirects the user to if their Connect onboarding link expired, was already used, or is otherwise invalid. The frontend should request a fresh link (POST /wallet/stripe/connect/link) and redirect again from there."
+		},
+		{
+			"name": "stripe.connect.return-url",
+			"type": "java.lang.String",
+			"description": "Frontend URL Stripe redirects the user to after finishing or exiting Connect onboarding. Reaching this URL does not guarantee onboarding fully succeeded — the frontend should call POST /wallet/stripe/connect/refresh or GET /wallet/stripe/connect/account to confirm actual status."
+		},
+		{
+			"name": "stripe.connect.webhook-secret",
+			"type": "java.lang.String",
+			"description": "Stripe Connect webhook signing secret (whsec_*) — verifies /payments/stripe/connect/webhook (account.updated, payout.paid, payout.failed on connected accounts). Created as a SEPARATE destination from stripe.webhook-secret above via Dashboard → Webhooks → new destination → 'Listen to events on Connected accounts' — Stripe does not deliver connected-account events to the platform webhook's destination."
 		},
 		{
 			"name": "paypal.client-id",
@@ -429,6 +444,70 @@
 			"name": "paypal.webhook-id",
 			"type": "java.lang.String",
 			"description": "PayPal Webhook ID from the Developer Dashboard, used to verify that incoming /payments/paypal/webhook requests genuinely came from PayPal (see PaypalService.verifyWebhookSignature). Register your endpoint (https://<your-domain>/payments/paypal/webhook) under your app's Webhooks section to obtain this. If left blank, webhook verification fails closed and all incoming PayPal webhooks are rejected."
+		},
+		{
+			"name": "paypal.return-url",
+			"type": "java.lang.String",
+			"description": "URL PayPal redirects the customer to after approving an order that requires a separate approval step (no saved/vaulted payment source, or a saved source that needs re-authorization)."
+		},
+		{
+			"name": "paypal.cancel-url",
+			"type": "java.lang.String",
+			"description": "URL PayPal redirects the customer to if they cancel out of order approval instead of completing it."
+		},
+		{
+			"name": "flutterwave.client-id",
+			"type": "java.lang.String",
+			"description": "Flutterwave v4 OAuth2 client_credentials client ID. Replaces v3's static Secret Key/Public Key model entirely — v4 has no 'public key'. Found in the Flutterwave Dashboard under API keys."
+		},
+		{
+			"name": "flutterwave.client-secret",
+			"type": "java.lang.String",
+			"description": "Flutterwave v4 OAuth2 client_credentials client secret, used with flutterwave.client-id to obtain access tokens from the OAuth2 token endpoint (see FlutterwaveService.getAccessToken)."
+		},
+		{
+			"name": "flutterwave.encryption-key",
+			"type": "java.lang.String",
+			"description": "Flutterwave encryption key, found in the Flutterwave Dashboard alongside your API keys."
+		},
+		{
+			"name": "flutterwave.environment",
+			"type": "java.lang.String",
+			"description": "Flutterwave environment to target: 'sandbox' or 'production'. Unlike v3, this DOES determine the base URL (see FlutterwaveConfig.baseUrl()) — sandbox and production are genuinely different hosts, not just different key prefixes on one URL.",
+			"defaultValue": "sandbox"
+		},
+		{
+			"name": "flutterwave.webhook-secret-hash",
+			"type": "java.lang.String",
+			"description": "Arbitrary shared-secret string configured in the Flutterwave Dashboard (Settings → Webhooks → Secret Hash). Used as the HMAC-SHA256 key to verify the 'flutterwave-signature' header on incoming /payments/flutterwave/webhook requests (see FlutterwaveService.verifyWebhookSignature) — NOT a plain string comparison the way v3's 'verif-hash' worked."
+		},
+		{
+			"name": "flutterwave.redirect-url",
+			"type": "java.lang.String",
+			"description": "URL Flutterwave redirects the customer to after completing a charge's authorization step (3DS, mobile money approval, etc.)."
+		},
+		{
+			"name": "flutterwave.sandbox-scenario-key",
+			"type": "java.lang.String",
+			"description": "SANDBOX TESTING ONLY. When set, every write call to Flutterwave carries this value as the 'X-Scenario-Key' header, forcing a deterministic mock outcome (e.g. 'scenario:successful', 'scenario:failed', 'scenario:auth_redirect') instead of default sandbox behavior. Leave unset in production — sending this against the live API is rejected or ignored depending on endpoint, and its presence in production config is a signal something is misconfigured."
+		},
+		{
+			"name": "flutterwave.transfer.min-amount",
+			"type": "java.math.BigDecimal",
+			"description": "Minimum amount accepted for a single Flutterwave transfer (bank or mobile money disbursement). Confirm actual tier limits with Flutterwave for your account.",
+			"defaultValue": 1
+		},
+		{
+			"name": "flutterwave.transfer.max-amount",
+			"type": "java.math.BigDecimal",
+			"description": "Maximum amount accepted for a single Flutterwave transfer (bank or mobile money disbursement). Confirm actual tier limits with Flutterwave for your account.",
+			"defaultValue": 5000
+		},
+		{
+			"name": "flutterwave.transfer.source-currency",
+			"type": "java.lang.String",
+			"description": "The currency your Flutterwave balance actually holds — used as payment_instruction.source_currency on every payout. NOT automatically the same as the destination currency the recipient receives in. Confirm your actual settlement/balance currency in the Flutterwave dashboard before relying on this in production.",
+			"defaultValue": "KES"
 		},
 		{
 			"name": "frontend.url",
@@ -546,6 +625,19 @@
 				{
 					"value": "production",
 					"description": "PayPal live environment."
+				}
+			]
+		},
+		{
+			"name": "flutterwave.environment.values",
+			"values": [
+				{
+					"value": "sandbox",
+					"description": "Flutterwave sandbox environment — hits developersandbox-api.flutterwave.com."
+				},
+				{
+					"value": "production",
+					"description": "Flutterwave live environment — hits f4bexperience.flutterwave.com."
 				}
 			]
 		},

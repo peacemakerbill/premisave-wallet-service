@@ -181,8 +181,10 @@ mpesa:
       max-amount: 250000
 
     # ── B2B Hakikisha (Query Org Info) ──
+    # No dedicated config block — see MpesaConfig.queryOrgInfoUrl(), derived from baseUrl().
 
     # ── Pull Transactions API (C2B reconciliation) ──
+    pull-transactions:
       shortcode: ${MPESA_PULL_SHORTCODE}
       # The Safaricom MSISDN tied to this shortcode's KYC — found on the
       # M-PESA portal, NOT something you choose arbitrarily.
