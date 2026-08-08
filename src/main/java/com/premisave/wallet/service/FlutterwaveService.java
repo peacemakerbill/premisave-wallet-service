@@ -612,14 +612,19 @@ public class FlutterwaveService {
     private String post(String path, Map<String, Object> body, String idempotencyKey) throws Exception {
         String json = objectMapper.writeValueAsString(body);
         RequestBody rb = RequestBody.create(json, MediaType.parse("application/json"));
-        Request request = new Request.Builder()
+        Request.Builder builder = new Request.Builder()
                 .url(config.baseUrl() + path)
                 .addHeader("Authorization", "Bearer " + getAccessToken())
                 .addHeader("Content-Type", "application/json")
                 .addHeader("X-Trace-Id", UUID.randomUUID().toString())
-                .addHeader("X-Idempotency-Key", idempotencyKey)
-                .post(rb)
-                .build();
+                .addHeader("X-Idempotency-Key", idempotencyKey);
+
+        // SANDBOX TESTING ONLY — see FlutterwaveConfig.sandboxScenarioKey javadoc.
+        if (config.getSandboxScenarioKey() != null && !config.getSandboxScenarioKey().isBlank()) {
+            builder.addHeader("X-Scenario-Key", config.getSandboxScenarioKey());
+        }
+
+        Request request = builder.post(rb).build();
         try (Response response = http.newCall(request).execute()) {
             return response.body() != null ? response.body().string() : "";
         }

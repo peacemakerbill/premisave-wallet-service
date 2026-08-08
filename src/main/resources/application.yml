@@ -281,6 +281,9 @@ flutterwave:
   # charge's authorization step (3DS, mobile money approval, etc.). This is
   # a FRONTEND url (browser redirect), not a backend endpoint.
   redirect-url: ${FLUTTERWAVE_REDIRECT_URL}
+  # SANDBOX TESTING ONLY — see FlutterwaveConfig.sandboxScenarioKey javadoc.
+  # Leave unset in production.
+  sandbox-scenario-key: ${FLUTTERWAVE_SANDBOX_SCENARIO_KEY:}
   transfer:
     # No per-transfer callback-url — disbursements reconcile solely via the
     # account-wide webhook registered in the Flutterwave Dashboard

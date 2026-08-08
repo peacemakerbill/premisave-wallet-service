@@ -45,6 +45,25 @@ public class FlutterwaveConfig {
      */
     private String redirectUrl;
 
+    /**
+     * SANDBOX TESTING ONLY. When set, every write call to Flutterwave
+     * (customers, payment-methods, charges, direct-transfers) carries this
+     * value as the "X-Scenario-Key" header, forcing a deterministic mock
+     * outcome instead of the default (often indefinitely-pending, e.g.
+     * mobile money's push-notification flow) sandbox behavior. See
+     * https://developer.flutterwave.com/docs/testing for valid values —
+     * e.g. "scenario:successful" / "scenario:failed" for transfers,
+     * "scenario:auth_redirect" for mobile money charges,
+     * "scenario:auth_pin&issuer:approved" for cards.
+     *
+     * Leave unset (default) for production — this must never be set outside
+     * local/sandbox testing, since sending X-Scenario-Key against the
+     * production API is rejected or ignored depending on endpoint, and its
+     * presence in code/config is a signal something is misconfigured if it
+     * ever reaches production.
+     */
+    private String sandboxScenarioKey;
+
     private final Transfer transfer = new Transfer();
 
     private static final String SANDBOX_BASE_URL = "https://developersandbox-api.flutterwave.com";
