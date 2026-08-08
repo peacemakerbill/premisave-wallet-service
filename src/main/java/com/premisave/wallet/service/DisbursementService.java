@@ -31,7 +31,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -230,7 +229,21 @@ public class DisbursementService {
      }
 
      String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
-     String displayDestination = request.getFlutterwaveAccountBank() + "-" + request.getFlutterwaveAccountNumber();
+
+     // msisdn must include country code e.g. 2547XXXXXXXX
+     String msisdn = request.getFlutterwaveAccountNumber();
+     String network = request.getFlutterwaveAccountBank(); // network code e.g. "Mpesa", "MTN"
+     String displayDestination = network + "-" + msisdn;
+
+     // Parse beneficiary name into first/last
+     String beneficiaryName = request.getFlutterwaveBeneficiaryName();
+     String firstName = "";
+     String lastName = "";
+     if (beneficiaryName != null && !beneficiaryName.isBlank()) {
+         String[] parts = beneficiaryName.trim().split("\\s+", 2);
+         firstName = parts[0];
+         lastName = parts.length > 1 ? parts[1] : "";
+     }
 
      Disbursement disbursement = new Disbursement();
      disbursement.setUserId(userId);
@@ -243,35 +256,21 @@ public class DisbursementService {
      disbursement.setStatus(DisbursementStatus.PENDING);
      disbursement.setCurrency(Currency.KES);
 
-     BigDecimal usdToKesRate = fxRateService.getRate("USD", "KES");
-     BigDecimal usdAmount = request.getAmount()
-             .divide(usdToKesRate, 2, RoundingMode.HALF_UP);
-
-     String recipientId = null;
+     // Wallet operates in KES. Flutterwave v4 direct-transfer supports KES natively
+     // via destination_currency. Use KES directly, no FX conversion needed.
+     // source_currency = your Flutterwave balance currency (confirm with your account).
+     // destination_currency = recipient's currency e.g. KES for M-Pesa Kenya.
+     String sourceCurrency = "KES";
+     String destinationCurrency = "KES";
 
      try {
-         // Create or reuse recipient. If this disbursement is a retry, it may
-         // already have a cached recipient ID — use it instead of creating a
-         // duplicate orphaned recipient.
-         if (disbursement.getFlutterwaveRecipientId() != null && !disbursement.getFlutterwaveRecipientId().isBlank()) {
-             recipientId = disbursement.getFlutterwaveRecipientId();
-             log.info("Flutterwave transfer retry: reusing cached recipientId={} for reference={}", recipientId, reference);
-         } else {
-             recipientId = flutterwaveService.createTransferRecipient(
-                     request.getFlutterwaveAccountBank(), request.getFlutterwaveAccountNumber(),
-                     "USD", request.getFlutterwaveBeneficiaryName());
-             disbursement.setFlutterwaveRecipientId(recipientId);
-         }
-
-         // Initiate the transfer — if this succeeds, we proceed. If it fails,
-         // the recipientId is already cached on the Disbursement record for retry.
          FlutterwaveService.TransferResult result = flutterwaveService.initiateTransfer(
-                 request.getFlutterwaveAccountBank(), request.getFlutterwaveAccountNumber(),
-                 usdAmount, "USD", reference, request.getRemarks(),
-                 request.getFlutterwaveBeneficiaryName(), recipientId);
+                 msisdn, network, sourceCurrency, destinationCurrency,
+                 request.getAmount(), reference, request.getRemarks(),
+                 firstName, lastName);
 
-         log.info("Flutterwave disbursement: userId={} reference={} kesAmount={} usdAmount={} rate={} recipientId={}",
-                 userId, reference, request.getAmount(), usdAmount, usdToKesRate, recipientId);
+         log.info("Flutterwave disbursement: userId={} reference={} amount={} msisdn={} network={}",
+                 userId, reference, request.getAmount(), msisdn, network);
 
          if (!result.success()) {
              disbursement.setStatus(DisbursementStatus.FAILED);
@@ -283,14 +282,12 @@ public class DisbursementService {
          disbursement.setProviderReference(result.transferId());
          disbursementRepository.save(disbursement);
          return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
-                 "Disbursement queued with Flutterwave (USD " + usdAmount + ") — your wallet will be debited "
-                         + "once Flutterwave confirms the payout.");
+                 "Disbursement queued with Flutterwave — your wallet will be debited once Flutterwave confirms the payout.");
+
      } catch (Exception e) {
-         log.error("Flutterwave transfer threw before a result could be returned: userId={} reference={} recipientId={}",
-                 userId, reference, recipientId, e);
+         log.error("Flutterwave transfer threw: userId={} reference={}", userId, reference, e);
          disbursement.setStatus(DisbursementStatus.FAILED);
          disbursement.setFailureReason("Flutterwave transfer initiation failed: " + e.getMessage());
-         // Recipient ID is already cached if it was created — don't lose it
          disbursementRepository.save(disbursement);
          return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
                  disbursement.getFailureReason());
