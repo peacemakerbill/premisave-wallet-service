@@ -39,7 +39,6 @@ public class DepositService {
     private final PaypalService paypalService;
     private final FlutterwaveService flutterwaveService;
     private final FxRateService fxRateService;
-    private final IdempotencyService idempotencyService;
 
     public PaymentResponse initiateDeposit(String userId, String userEmail, DepositRequest request) {
         Wallet wallet = walletRepository.findByUserId(userId)
@@ -168,65 +167,35 @@ public class DepositService {
             walletRepository.save(wallet);
         }
 
-        SetupIntent setupIntent = stripeService.createSetupIntent(customerId);
-        return Map.of("clientSecret", setupIntent.getClientSecret(), "setupIntentId", setupIntent.getId());
+        SetupIntent si = stripeService.createSetupIntent(customerId);
+        return Map.of("clientSecret", si.getClientSecret(), "setupIntentId", si.getId());
     }
 
     @Transactional
     public void confirmStripeSetupIntent(String setupIntentId, String userId) {
-        SetupIntent setupIntent = stripeService.retrieveSetupIntent(setupIntentId);
-
-        if (!"succeeded".equals(setupIntent.getStatus())) {
-            throw new IllegalStateException("Card setup has not completed yet (status: " + setupIntent.getStatus() + ")");
-        }
-
         Wallet wallet = walletRepository.findByUserId(userId)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
 
-        if (!setupIntent.getCustomer().equals(wallet.getStripeCustomerId())) {
-            throw new IllegalArgumentException("This setup intent does not belong to the authenticated user");
+        SetupIntent si = stripeService.retrieveSetupIntent(setupIntentId);
+        if (!si.getCustomer().equals(wallet.getStripeCustomerId())) {
+            throw new IllegalArgumentException("This SetupIntent does not belong to the authenticated user");
         }
 
-        attachSavedCard(wallet, setupIntent.getPaymentMethod());
-    }
-
-    @Transactional
-    public void attachSavedCardByCustomerId(String customerId, String paymentMethodId) {
-        walletRepository.findByStripeCustomerId(customerId).ifPresentOrElse(
-                wallet -> attachSavedCard(wallet, paymentMethodId),
-                () -> log.warn("setup_intent.succeeded webhook: no wallet found for Stripe customerId={}", customerId));
-    }
-
-    private void attachSavedCard(Wallet wallet, String paymentMethodId) {
-        if (paymentMethodId == null) return;
-
-        wallet.setStripeDefaultPaymentMethodId(paymentMethodId);
-        try {
-            PaymentMethod pm = stripeService.retrievePaymentMethod(paymentMethodId);
-            if (pm.getCard() != null) {
-                wallet.setStripeCardBrand(pm.getCard().getBrand());
-                wallet.setStripeCardLast4(pm.getCard().getLast4());
-            }
-        } catch (Exception e) {
-            log.warn("Saved card attached but failed to fetch display details: {}", e.getMessage());
+        if (si.getPaymentMethod() != null) {
+            wallet.setStripeDefaultPaymentMethodId((String) si.getPaymentMethod());
+            walletRepository.save(wallet);
+            log.info("Stripe setup intent confirmed and card saved: userId={} setupIntentId={}", userId, setupIntentId);
         }
-        walletRepository.save(wallet);
-        log.info("Stripe saved card attached: walletId={} paymentMethodId={}", wallet.getId(), paymentMethodId);
     }
 
     @Transactional
     public void creditWalletFromStripeCallback(String reference, BigDecimal amount, String paymentIntentId,
                                                 String currency, String customerId, String paymentMethodId) {
-        Transaction tx = transactionRepository.findByReference(reference).orElse(null);
-
-        if (tx == null) {
-            log.warn("Stripe reconciliation: no pending transaction found for reference={} (paymentIntentId={}) — " +
-                    "cannot credit; needs manual review", reference, paymentIntentId);
-            return;
-        }
+        Transaction tx = transactionRepository.findByReference(reference)
+                .orElseThrow(() -> new IllegalStateException("No pending transaction found for reference=" + reference));
 
         if (tx.getStatus() == TransactionStatus.COMPLETED) {
-            log.info("Stripe deposit already processed for reference={} — skipping duplicate delivery", reference);
+            log.info("Stripe deposit already processed for reference={} — skipping duplicate credit", reference);
             return;
         }
 
@@ -235,7 +204,10 @@ public class DepositService {
 
         wallet.setBalance(wallet.getBalance().add(amount));
 
-        if (paymentMethodId != null && !paymentMethodId.equals(wallet.getStripeDefaultPaymentMethodId())) {
+        if (customerId != null && !customerId.equals(wallet.getStripeCustomerId())) {
+            wallet.setStripeCustomerId(customerId);
+        }
+        if (paymentMethodId != null) {
             wallet.setStripeDefaultPaymentMethodId(paymentMethodId);
             if (customerId != null) wallet.setStripeCustomerId(customerId);
             try {
@@ -529,6 +501,24 @@ public class DepositService {
         }, () -> log.warn("VAULT.PAYMENT-TOKEN.CREATED webhook: no wallet found for customerId={}", customerId));
     }
 
+    @Transactional
+    public void attachSavedCardByCustomerId(String stripeCustomerId, String paymentMethodId) {
+        walletRepository.findByStripeCustomerId(stripeCustomerId).ifPresentOrElse(wallet -> {
+            wallet.setStripeDefaultPaymentMethodId(paymentMethodId);
+            try {
+                PaymentMethod pm = stripeService.retrievePaymentMethod(paymentMethodId);
+                if (pm.getCard() != null) {
+                    wallet.setStripeCardBrand(pm.getCard().getBrand());
+                    wallet.setStripeCardLast4(pm.getCard().getLast4());
+                }
+            } catch (Exception e) {
+                log.warn("SetupIntent succeeded but failed to fetch card display details: {}", e.getMessage());
+            }
+            walletRepository.save(wallet);
+            log.info("Stripe card saved via webhook: customerId={} paymentMethodId={}", stripeCustomerId, paymentMethodId);
+        }, () -> log.warn("setup_intent.succeeded webhook: no wallet found for customerId={}", stripeCustomerId));
+    }
+
     // ─── Flutterwave ─────────────────────────────────────────────────────────
 
     /**
@@ -556,33 +546,34 @@ public class DepositService {
             throw new IllegalArgumentException("Flutterwave deposits must be in USD (got: " + requestedCurrency + ")");
         }
         if (request.getCustomerPhone() == null || request.getCustomerPhone().isBlank()) {
-            throw new IllegalArgumentException("customerPhone is required for Flutterwave mobile money deposits");
+            throw new IllegalArgumentException("customerPhone is required for Flutterwave mobile-money deposits");
         }
-        if (request.getFlutterwaveCountryCode() == null || request.getFlutterwaveCountryCode().isBlank()
-                || request.getFlutterwaveMobileNetwork() == null || request.getFlutterwaveMobileNetwork().isBlank()) {
-            throw new IllegalArgumentException(
-                    "flutterwaveCountryCode and flutterwaveMobileNetwork are required for Flutterwave deposits");
+        if (request.getFlutterwaveCountryCode() == null || request.getFlutterwaveCountryCode().isBlank()) {
+            throw new IllegalArgumentException("flutterwaveCountryCode (e.g., \"233\" for Ghana) is required");
         }
-
-        // Check idempotency after generating/validating the key
-        idempotencyService.checkIdempotency(idempotencyKey);
+        if (request.getFlutterwaveMobileNetwork() == null || request.getFlutterwaveMobileNetwork().isBlank()) {
+            throw new IllegalArgumentException("flutterwaveMobileNetwork (e.g., \"MTN\") is required");
+        }
 
         BigDecimal usdAmount = request.getAmount();
         BigDecimal usdToKesRate = fxRateService.getRate("USD", "KES");
         BigDecimal kesEquivalent = usdAmount.multiply(usdToKesRate).setScale(2, RoundingMode.HALF_UP);
 
+        String txRef = idempotencyKey;
+        String customerName = request.getCustomerName() != null ? request.getCustomerName() : userEmail;
+
         FlutterwaveService.CheckoutResult result = flutterwaveService.initiateMobileMoneyCharge(
-                usdAmount, "USD", idempotencyKey, userEmail, request.getCustomerName(),
+                usdAmount, "USD", txRef, userEmail, customerName,
                 request.getFlutterwaveCountryCode(), request.getFlutterwaveMobileNetwork(),
                 request.getCustomerPhone());
 
         if (!result.success()) {
-            log.warn("Flutterwave charge rejected: userId={} reason={}", userId, result.message());
-            return new PaymentResponse(false, null, "Flutterwave charge failed: " + result.message());
+            log.warn("Flutterwave charge initiation rejected: userId={} reason={}", userId, result.message());
+            return new PaymentResponse(false, null, "Flutterwave charge initiation failed: " + result.message());
         }
 
-        log.info("Flutterwave charge created: userId={} txRef={} chargeId={} usdAmount={} kesEquivalent={} rate={} (liveRate)",
-                userId, idempotencyKey, result.chargeId(), usdAmount, kesEquivalent, usdToKesRate);
+        log.info("Flutterwave charge created: userId={} txRef={} chargeId={} kesEquivalent={} rate={} nextAction={}",
+                userId, txRef, result.chargeId(), kesEquivalent, usdToKesRate, result.nextActionType());
 
         Transaction tx = new Transaction();
         tx.setUserId(userId);
@@ -591,30 +582,24 @@ public class DepositService {
         tx.setStatus(TransactionStatus.PENDING);
         tx.setAmount(kesEquivalent);
         tx.setCurrency(Currency.KES);
-        tx.setDescription("Flutterwave deposit (pending) - USD " + usdAmount + " @ live rate " + usdToKesRate);
-        tx.setReference(idempotencyKey);
+        tx.setReference(txRef);
         tx.setProviderReference(result.chargeId());
+        tx.setDescription("Flutterwave deposit (pending) - USD " + usdAmount + " @ live rate " + usdToKesRate);
         transactionRepository.save(tx);
 
-        if (result.redirectUrl() != null) {
-            return new PaymentResponse(true, idempotencyKey,
-                    "Redirect to: " + result.redirectUrl() + ". USD " + usdAmount + " will be credited as approximately KES " + kesEquivalent + ".");
-        }
+        // Return the redirect URL from Flutterwave's next_action, if present.
+        // Otherwise, return payment_instruction if it's a prompt-on-phone scenario.
+        String redirectUrl = result.redirectUrl();
+        String instructionNote = result.paymentInstructionNote();
+        String userFacingMessage = redirectUrl != null
+                ? "Redirect to " + redirectUrl + " to authorize the charge."
+                : instructionNote != null
+                ? "Approve the charge on your phone: " + instructionNote
+                : "USD " + usdAmount + " charge initiated (KES " + kesEquivalent + ").";
 
-        String note = result.paymentInstructionNote() != null
-                ? result.paymentInstructionNote()
-                : "Approve the payment request on your phone to complete the deposit.";
-        return new PaymentResponse(true, idempotencyKey, note + " USD " + usdAmount
-                + " will be credited as approximately KES " + kesEquivalent + ".");
+        return new PaymentResponse(true, redirectUrl != null ? redirectUrl : txRef, userFacingMessage);
     }
 
-    /**
-     * Called by the frontend after the user returns from Flutterwave's
-     * authorization redirect. Verifies via the chargeId stored on the
-     * Transaction at initiation (see above) — v4 has no verify-by-our-own-
-     * reference endpoint, unlike v3 — rather than trusting redirect query
-     * params directly.
-     */
     @Transactional
     public PaymentResponse confirmFlutterwaveDeposit(String txRef, String callerUserId) {
         Transaction tx = transactionRepository.findByReference(txRef)
@@ -622,7 +607,7 @@ public class DepositService {
                         "No pending transaction found for Flutterwave txRef=" + txRef));
 
         if (!tx.getUserId().equals(callerUserId)) {
-            throw new IllegalArgumentException("This Flutterwave deposit does not belong to the authenticated user");
+            throw new IllegalArgumentException("This Flutterwave charge does not belong to the authenticated user");
         }
 
         if (tx.getStatus() == TransactionStatus.COMPLETED) {
@@ -631,20 +616,21 @@ public class DepositService {
 
         if (tx.getStatus() == TransactionStatus.FAILED) {
             return new PaymentResponse(false, tx.getId(),
-                    "This Flutterwave deposit previously failed and cannot be retried with the same reference.");
+                    "This Flutterwave charge previously failed and cannot be retried with the same reference.");
         }
 
         String chargeId = tx.getProviderReference();
-        if (chargeId == null || chargeId.isBlank()) {
+        if (chargeId == null) {
+            log.error("Flutterwave confirm: pending transaction txRef={} has no chargeId recorded", txRef);
             return new PaymentResponse(false, tx.getId(),
-                    "This deposit has no Flutterwave charge id on record and cannot be verified.");
+                    "This charge is in an inconsistent state and needs manual review. Please contact support.");
         }
 
-        FlutterwaveService.VerifyResult verify = flutterwaveService.verifyChargeById(chargeId);
-
-        if (!verify.success()) {
+        FlutterwaveService.VerifyResult verifyResult = flutterwaveService.verifyChargeById(chargeId);
+        if (!verifyResult.success()) {
+            markFlutterwaveTransactionFailed(txRef, "Charge verification failed: " + verifyResult.message());
             return new PaymentResponse(false, tx.getId(),
-                    "Payment has not completed yet (status: " + verify.status() + ")");
+                    "Flutterwave charge verification failed: " + verifyResult.message());
         }
 
         creditWalletFromFlutterwaveCallback(txRef, chargeId);
@@ -652,7 +638,15 @@ public class DepositService {
     }
 
     /**
-     * Shared credit path for a Flutterwave deposit — called both by
+     * CRITICAL: Called from two paths:
+     *  1. confirmFlutterwaveDeposit (frontend redirect confirm) — after
+     *     server-side charge verification (see above).
+     *  2. Webhook handler in PaymentCallbackController (charge.completed
+     *     event) — after server-side verification by the webhook handler.
+     *
+     * Both ensure verifyChargeById has been called first, preventing
+     * spoofed/rejected charges from crediting the wallet. Safe idempotency:
+     * if a charge is already COMPLETED, this method no-ops — same pattern as
      * confirmFlutterwaveDeposit (frontend redirect confirm) and by the
      * charge.completed webhook handler in PaymentCallbackController.
      * The credited amount always comes from the transaction record created

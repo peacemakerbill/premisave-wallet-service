@@ -496,6 +496,37 @@ public class FlutterwaveService {
         }
     }
 
+    // ─── Account Linking (Wallet Management) ──────────────────────────────────
+
+    /**
+     * Links a Flutterwave account to the wallet by storing the customer credentials.
+     * Called after the user approves linking on Flutterwave's side.
+     */
+    public void linkFlutterwaveAccount(com.premisave.wallet.entity.Wallet wallet, String customerId,
+                                        String paymentMethodId, String network, String phone) {
+        wallet.setFlutterwaveCustomerId(customerId);
+        wallet.setFlutterwavePaymentMethodId(paymentMethodId);
+        wallet.setFlutterwavePaymentMethodNetwork(network);
+        wallet.setFlutterwavePaymentMethodPhone(phone);
+        wallet.setPendingFlutterwaveSetupTokenId(null);
+        // Note: caller (WalletController) is responsible for saving via walletRepository
+        log.info("Flutterwave account linked in memory: customerId={}", customerId);
+    }
+
+    /**
+     * Unlinks a Flutterwave account from the wallet.
+     * Called when user explicitly disconnects their account.
+     */
+    public void unlinkAccount(com.premisave.wallet.entity.Wallet wallet) {
+        wallet.setFlutterwaveCustomerId(null);
+        wallet.setFlutterwavePaymentMethodId(null);
+        wallet.setFlutterwavePaymentMethodNetwork(null);
+        wallet.setFlutterwavePaymentMethodPhone(null);
+        wallet.setPendingFlutterwaveSetupTokenId(null);
+        // Note: caller (WalletController) is responsible for saving via walletRepository
+        log.info("Flutterwave account unlinked from wallet");
+    }
+
     // ─── HTTP helpers ─────────────────────────────────────────────────────────
 
     private String post(String path, Map<String, Object> body, boolean authenticated) throws Exception {
