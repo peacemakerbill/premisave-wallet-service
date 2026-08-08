@@ -115,9 +115,6 @@ mpesa:
       confirmation-url: ${MPESA_C2B_CONFIRMATION_URL}
 
     # ── B2B Express Checkout (USSD Push to Till) ──
-    # Prompts a merchant to pay one of our shortcodes directly from their own
-    # till, via a USSD PIN prompt (as opposed to STK Push to a personal line).
-    # No initiator/security credential needed — auth is via the normal OAuth
     # bearer token. See https://developer.safaricom.co.ke/apis/B2BExpressCheckout
     express-checkout:
       receiver-shortcode: ${MPESA_EXPRESS_CHECKOUT_RECEIVER_SHORTCODE}
@@ -125,10 +122,6 @@ mpesa:
       callback-url: ${MPESA_EXPRESS_CHECKOUT_CALLBACK_URL}
 
     # ── B2C Account Top Up (CommandID BusinessPayToBulk) ──
-    # Loads funds from our working/MMF account into a B2C shortcode's utility
-    # account so disbursements don't run dry. Hits the same /mpesa/b2b/v1/paymentrequest
-    # endpoint as the generic B2B calls above, but is a distinct Safaricom
-    # product with its own initiator credentials.
     # See https://developer.safaricom.co.ke/apis/B2CAccountTopUp
     account-top-up:
       initiator-name: ${MPESA_TOPUP_INITIATOR_NAME}
@@ -188,23 +181,8 @@ mpesa:
       max-amount: 250000
 
     # ── B2B Hakikisha (Query Org Info) ──
-    # Confirms an organization's registered name and tariff/charge profile
-    # for a shortcode/till before a B2B payment — synchronous, no
-    # initiator/SecurityCredential needed, just the OAuth bearer token.
-    # Endpoint is derived from baseUrl() (see MpesaConfig.queryOrgInfoUrl()),
-    # same as every other Safaricom-side operation — sandbox resolves to
-    # https://sandbox.safaricom.co.ke/sfcverify/v1/query/info, production to
-    # https://api.safaricom.co.ke/sfcverify/v1/query/info. No property needed here.
-    # https://developer.safaricom.co.ke/apis/QueryOrgInfo
 
     # ── Pull Transactions API (C2B reconciliation) ──
-    # Lets us query all C2B transactions on our shortcode from the last 48
-    # hours, to recover any that missed our confirmation callback. Unlike
-    # every other "operational" API above, this needs NO initiator
-    # name/password/SecurityCredential — just the OAuth bearer token, same
-    # as STK Push and C2B Register URL.
-    # https://developer.safaricom.co.ke/apis/PullTransaction
-    pull-transactions:
       shortcode: ${MPESA_PULL_SHORTCODE}
       # The Safaricom MSISDN tied to this shortcode's KYC — found on the
       # M-PESA portal, NOT something you choose arbitrarily.
@@ -225,74 +203,22 @@ paypal:
   client-id: ${PAYPAL_CLIENT_ID}
   client-secret: ${PAYPAL_CLIENT_SECRET}
   environment: ${PAYPAL_ENV}   # "sandbox" or "production"
-  # From Developer Dashboard → your app → Webhooks → your registered
-  # webhook endpoint (https://<your-domain>/payments/paypal/webhook).
-  # Required for PaymentCallbackController.paypalWebhook to verify incoming
-  # events actually came from PayPal rather than trusting the request body
-  # outright — see PaypalService.verifyWebhookSignature. Left blank by
-  # default; verifyWebhookSignature fails closed (rejects the webhook) if
-  # this isn't set.
   webhook-id: ${PAYPAL_WEBHOOK_ID}
-  # USD<->KES conversion is now fetched live from Frankfurter (see
-  # FxRateService) on every deposit/payout — no static rate is configured
-  # or cached here anymore.
   return-url: ${PAYPAL_RETURN_URL}
   cancel-url: ${PAYPAL_CANCEL_URL}
 
 # ─── Flutterwave ──────────────────────────────────────────────────────────────
-# v4 API. Replaces the old v3 secret-key/public-key model with OAuth 2.0
-# client-credentials (client-id/client-secret) — see FlutterwaveService's
-# token-manager (getAccessToken()) and FlutterwaveConfig.oauthTokenUrl().
-#
-# Base URL is environment-specific in v4 (sandbox and production are
-# different hosts entirely, not the same URL differentiated by key prefix
-# the way v3 worked) — resolved by FlutterwaveConfig.baseUrl() from the
-# `environment` value below.
-#
-# IMPORTANT: the webhook URL registered in the Flutterwave Dashboard
-# (Settings → Webhooks) must be
-#   https://<your-domain>/payments/flutterwave/webhook
-# — i.e. WITH the /payments prefix. Double-check this against
-# PaymentCallbackController's @RequestMapping("/payments") + the
-# @PostMapping("/flutterwave/webhook") method before going live; a mismatch
-# here reproduces exactly the silent-401/no-application-logs failure mode
-# documented in CallbackRequestLoggingFilter and PaymentCallbackController.
-#
-# Webhook signing also changed in v4: signatures are now HMAC-SHA256 of the
-# raw body (keyed by webhook-secret-hash below), sent in the
-# "flutterwave-signature" header — not the old plain "verif-hash" string
-# comparison. Same dashboard field (Settings → Webhooks → Secret Hash)
-# supplies this value either way.
-#
-# PAYLOAD FIELD NAME: Flutterwave's actual v4 payload names the event-type
-# field "type" (e.g. {"type":"charge.completed","data":{...}}), NOT "event"
-# — see https://developer.flutterwave.com/docs/webhooks. FlutterwaveWebhookRequest
-# maps @JsonProperty("type") onto its `event` Java field to account for this;
-# if that mapping ever gets "fixed" back to "event" during a refactor,
-# every branch in PaymentCallbackController.flutterwaveWebhook() silently
-# no-ops again (payload.getEvent() deserializes to null).
 flutterwave:
   client-id: ${FLUTTERWAVE_CLIENT_ID}
   client-secret: ${FLUTTERWAVE_CLIENT_SECRET}
   encryption-key: ${FLUTTERWAVE_ENCRYPTION_KEY}
   environment: ${FLUTTERWAVE_ENV:sandbox}   # "sandbox" or "production" — now DOES determine the base URL, see FlutterwaveConfig
   webhook-secret-hash: ${FLUTTERWAVE_WEBHOOK_SECRET_HASH}
-  # Where Flutterwave redirects the customer back to after completing a
-  # charge's authorization step (3DS, mobile money approval, etc.). This is
-  # a FRONTEND url (browser redirect), not a backend endpoint.
   redirect-url: ${FLUTTERWAVE_REDIRECT_URL}
   # SANDBOX TESTING ONLY — see FlutterwaveConfig.sandboxScenarioKey javadoc.
   # Leave unset in production.
   sandbox-scenario-key: ${FLUTTERWAVE_SANDBOX_SCENARIO_KEY:}
   transfer:
-    # No per-transfer callback-url — disbursements reconcile solely via the
-    # account-wide webhook registered in the Flutterwave Dashboard
-    # ("transfer.disburse" event, see PaymentCallbackController), same
-    # pattern already used for PayPal disbursements. A separate callback_url
-    # per transfer would just be a redundant second notification for the
-    # same event, since both use the identical payload shape.
-    #
-    # Confirm actual tier limits with Flutterwave for your account.
     min-amount: 1
     max-amount: 5000
 
