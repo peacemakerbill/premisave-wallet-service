@@ -25,15 +25,15 @@ public class Disbursement {
     private Currency currency;
 
     private String destination; // phone number, paypal email, receiver shortcode, etc.
-    private String provider;    // MPESA, PAYPAL, STRIPE
-    private String channel;     // B2C, B2B, PAYPAL_PAYOUT, STRIPE_PAYOUT — null for legacy rows
+    private String provider;    // MPESA, PAYPAL, STRIPE, FLUTTERWAVE
+    private String channel;     // B2C, B2B, PAYPAL_PAYOUT, STRIPE_PAYOUT, FLUTTERWAVE_BANK, FLUTTERWAVE_MOBILE_MONEY
 
     private DisbursementStatus status = DisbursementStatus.PENDING;
 
     private String reference;
 
     @Indexed
-    private String providerReference; // ConversationID (M-Pesa) — used to reconcile async result callbacks
+    private String providerReference; // ConversationID (M-Pesa), Payout Batch ID (PayPal), Transfer ID (Flutterwave) — used to reconcile async result callbacks
 
     private String failureReason;
 
@@ -47,6 +47,17 @@ public class Disbursement {
 
     /** Charge/tariff profile ID returned by the same Hakikisha check, if any. */
     private String verifiedChargeProfileId;
+
+    /**
+     * Flutterwave transfers require a recipient object created first, then a
+     * transfer referencing that recipient. If recipient creation succeeds but
+     * transfer initiation fails, this caches the recipient ID so a retry can
+     * reuse it and avoid creating orphaned duplicates. Populated only for
+     * FLUTTERWAVE disbursements; null for all other providers.
+     * See FlutterwaveService.createTransferRecipient and
+     * DisbursementService.processFlutterwaveDisbursement.
+     */
+    private String flutterwaveRecipientId;
 
     @CreatedDate
     private LocalDateTime createdAt;

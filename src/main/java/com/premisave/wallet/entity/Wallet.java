@@ -157,6 +157,50 @@ public class Wallet {
      */
     private String pendingPaypalSetupTokenId;
 
+    /**
+     * Flutterwave customer id (cus_xxx) for this wallet's owner. Created
+     * lazily on first Flutterwave deposit if account-linking is implemented.
+     * Sandbox and production customer ids are entirely separate — this id is
+     * only valid for whichever environment it was created under.
+     * Currently not persisted (account linking not yet implemented), but
+     * field reserved for future use — see DepositService.initiateMobileMoneyCharge.
+     */
+    @Indexed(unique = true, sparse = true)
+    private String flutterwaveCustomerId;
+
+    /**
+     * Flutterwave payment method id (pm_xxx) currently saved for this wallet's
+     * owner — lets returning depositors reuse their mobile-money account
+     * without re-entering phone/network every time. Set after a successful
+     * deposit if account linking is implemented (currently not wired up).
+     * Sandbox and production payment method ids are entirely separate.
+     */
+    private String flutterwavePaymentMethodId;
+
+    /**
+     * Display-only — the mobile network code (e.g., "MTN", "AIRTEL") for
+     * the saved Flutterwave payment method, shown to the frontend as
+     * "Connected: MTN (+233)". Null if no Flutterwave account is linked.
+     */
+    private String flutterwavePaymentMethodNetwork;
+
+    /**
+     * Display-only — the phone number for the saved Flutterwave payment
+     * method, shown to the frontend as "Connected: MTN (+233 505-xxx-xxxx)".
+     * Null if no Flutterwave account is linked.
+     */
+    private String flutterwavePaymentMethodPhone;
+
+    /**
+     * The Flutterwave setup token id issued by a potential future
+     * DepositService.createFlutterwaveLinkToken (not yet implemented),
+     * held here until confirmFlutterwaveLink completes. Same pattern as
+     * pendingPaypalSetupTokenId above — used to verify ownership of
+     * link-confirmation requests. Cleared back to null once linking succeeds.
+     * Currently not used; field reserved for future account-linking feature.
+     */
+    private String pendingFlutterwaveSetupTokenId;
+
     @CreatedDate
     private LocalDateTime createdAt;
 
