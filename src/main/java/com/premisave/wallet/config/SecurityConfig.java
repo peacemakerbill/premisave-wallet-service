@@ -120,6 +120,7 @@ public class SecurityConfig {
                     "/payments/mpesa/b2pochi/timeout",
                     "/payments/mpesa/pull/callback",
                     "/payments/stripe/webhook",
+                    "/payments/stripe/connect/webhook",
                     "/payments/paypal/webhook",
                     "/payments/flutterwave/webhook"
                 ).permitAll()

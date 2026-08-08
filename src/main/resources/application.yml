@@ -195,8 +195,25 @@ mpesa:
 # ─── Stripe ───────────────────────────────────────────────────────────────────
 stripe:
   secret-key: ${STRIPE_SECRET_KEY}
-  # Get this from Stripe Dashboard → Webhooks → your endpoint → Signing secret
+  # Platform webhook — Dashboard → Webhooks → your endpoint → Signing secret.
+  # Covers deposits (payment_intent.succeeded) and saved cards (setup_intent.succeeded).
   webhook-secret: ${STRIPE_WEBHOOK_SECRET}
+
+  # ── Stripe Connect (bank withdrawal linking — international users only) ──
+  # One-time manual setup required in the Dashboard before this works:
+  # Settings → Connect → Onboarding options → configure which countries
+  # Express accounts can onboard from (defaults to a narrow list otherwise).
+  connect:
+    # Where Stripe redirects the user if their onboarding link expired/was
+    # already used — your frontend should re-request a fresh link
+    # (POST /wallet/stripe/connect/link) and redirect again from there.
+    refresh-url: ${STRIPE_CONNECT_REFRESH_URL}
+    # Where Stripe redirects the user after finishing/exiting onboarding.
+    return-url: ${STRIPE_CONNECT_RETURN_URL}
+    # SEPARATE webhook endpoint from webhook-secret above — Dashboard →
+    # Webhooks → new destination → "Listen to events on Connected accounts".
+    # Covers account.updated, payout.paid, payout.failed.
+    webhook-secret: ${STRIPE_CONNECT_WEBHOOK_SECRET}
 
 # ─── PayPal ───────────────────────────────────────────────────────────────────
 paypal:

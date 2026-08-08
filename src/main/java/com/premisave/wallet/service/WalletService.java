@@ -13,6 +13,7 @@ import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.exception.WalletNotFrozenException;
 import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
+import com.stripe.model.BankAccount;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -20,7 +21,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -32,6 +35,7 @@ public class WalletService {
     private final WalletRepository walletRepository;
     private final TransactionRepository transactionRepository;
     private final MpesaService mpesaService;
+    private final StripeService stripeService;
 
     /**
      * Get wallet by account number (email)
@@ -345,7 +349,7 @@ public class WalletService {
 
         return mapToResponse(wallet);
     }
-    
+
     /**
      * Read-only lookup of the wallet's linked PayPal account, for the
      * frontend to render (e.g. a "Connected: user@example.com" / "Not
@@ -357,6 +361,113 @@ public class WalletService {
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
 
         return new PaypalAccountResponse(wallet.getPaypalVaultId() != null, wallet.getPaypalConnectedEmail());
+    }
+
+    // ─── Stripe Connect (bank withdrawal linking) ───────────────────────────
+
+    /**
+     * Unlinks the wallet's Stripe Connect account. Unlike
+     * disconnectPaypalAccount above, this doesn't (and can't) revoke
+     * anything on Stripe's side either — Express connected accounts don't
+     * support an OAuth-style deauthorize the way Standard accounts do,
+     * since Premisave created and operationally controls this account, not
+     * the user. This only stops Premisave from sending future transfers/
+     * payouts to it; the underlying Stripe Account object is left
+     * untouched, and a future re-link creates a brand-new connected
+     * account rather than reusing the forgotten one.
+     *
+     * NOT blocked while frozen — same reasoning as disconnectPaypalAccount:
+     * this doesn't move money, only changes a payout destination reference.
+     */
+    @Transactional
+    public WalletResponse disconnectStripeConnectAccount(String userId) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
+
+        if (wallet.getStripeConnectedAccountId() == null) {
+            log.warn("Stripe Connect disconnect rejected — no account linked for userId: {}", userId);
+            throw new IllegalStateException("No Stripe bank account is linked to this wallet.");
+        }
+
+        wallet.setStripeConnectedAccountId(null);
+        wallet.setStripeConnectedAccountCountry(null);
+        wallet.setStripePayoutsEnabled(false);
+        wallet.setStripeExternalBankName(null);
+        wallet.setStripeExternalBankLast4(null);
+        wallet = walletRepository.save(wallet);
+        log.info("Stripe Connect account disconnected for userId={}", userId);
+
+        return mapToResponse(wallet);
+    }
+
+    /**
+     * Syncs a wallet's cached Stripe Connect status from an "account.updated"
+     * Connect webhook — payouts_enabled and the linked bank's display
+     * name/last4 (for "Chase •••• 4242" style UI without an extra Stripe
+     * call per page load). See PaymentCallbackController.stripeConnectWebhook.
+     */
+    @Transactional
+    public void updateStripeConnectAccountStatus(com.stripe.model.Account account) {
+        walletRepository.findByStripeConnectedAccountId(account.getId()).ifPresentOrElse(wallet -> {
+            applyStripeAccountStatus(wallet, account);
+            walletRepository.save(wallet);
+            log.info("Stripe Connect account status synced via webhook: walletId={} accountId={} payoutsEnabled={}",
+                    wallet.getId(), account.getId(), wallet.isStripePayoutsEnabled());
+        }, () -> log.warn("account.updated webhook: no wallet found for Stripe Connect accountId={}", account.getId()));
+    }
+
+    /**
+     * On-demand equivalent of updateStripeConnectAccountStatus above — used
+     * right after the user returns from Stripe's hosted onboarding
+     * (return_url), so the frontend can show accurate status immediately
+     * rather than waiting on the account.updated webhook to arrive (which
+     * can lag, or be missed entirely if the Connect webhook endpoint isn't
+     * set up yet in an early testing environment).
+     */
+    @Transactional
+    public Map<String, Object> refreshStripeConnectStatus(String userId) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
+
+        if (wallet.getStripeConnectedAccountId() == null) {
+            throw new IllegalStateException("No Stripe bank account is linked to this wallet.");
+        }
+
+        com.stripe.model.Account account = stripeService.retrieveConnectedAccount(wallet.getStripeConnectedAccountId());
+        applyStripeAccountStatus(wallet, account);
+        walletRepository.save(wallet);
+
+        log.info("Stripe Connect account status refreshed manually: walletId={} accountId={} payoutsEnabled={}",
+                wallet.getId(), account.getId(), wallet.isStripePayoutsEnabled());
+
+        return stripeConnectStatusMap(wallet);
+    }
+
+    private void applyStripeAccountStatus(Wallet wallet, com.stripe.model.Account account) {
+        wallet.setStripePayoutsEnabled(Boolean.TRUE.equals(account.getPayoutsEnabled()));
+        wallet.setStripeConnectedAccountCountry(account.getCountry());
+
+        if (account.getExternalAccounts() != null && account.getExternalAccounts().getData() != null) {
+            account.getExternalAccounts().getData().stream()
+                    .filter(ea -> ea instanceof BankAccount)
+                    .map(ea -> (BankAccount) ea)
+                    .findFirst()
+                    .ifPresent(bank -> {
+                        wallet.setStripeExternalBankName(bank.getBankName());
+                        wallet.setStripeExternalBankLast4(bank.getLast4());
+                    });
+        }
+    }
+
+    private Map<String, Object> stripeConnectStatusMap(Wallet wallet) {
+        Map<String, Object> info = new HashMap<>();
+        info.put("linked", wallet.getStripeConnectedAccountId() != null);
+        info.put("accountId", wallet.getStripeConnectedAccountId());
+        info.put("payoutsEnabled", wallet.isStripePayoutsEnabled());
+        info.put("country", wallet.getStripeConnectedAccountCountry());
+        info.put("bankName", wallet.getStripeExternalBankName());
+        info.put("bankLast4", wallet.getStripeExternalBankLast4());
+        return info;
     }
 
     private WalletResponse mapToResponse(Wallet wallet) {

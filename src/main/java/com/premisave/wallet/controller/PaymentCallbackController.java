@@ -14,8 +14,11 @@ import com.premisave.wallet.service.FlutterwaveService;
 import com.premisave.wallet.service.MpesaOperationsService;
 import com.premisave.wallet.service.PaypalService;
 import com.premisave.wallet.service.PullTransactionService;
+import com.premisave.wallet.service.WalletService;
+import com.stripe.model.Account;
 import com.stripe.model.Event;
 import com.stripe.model.PaymentIntent;
+import com.stripe.model.Payout;
 import com.stripe.model.SetupIntent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,9 +35,9 @@ import java.util.Map;
 /**
  * Handles incoming webhooks/callbacks from all payment providers: M-Pesa (STK
  * Push, B2C, B2B, B2B Express Checkout, Account Balance, Transaction Status,
- * Reversal, B2Pochi), Stripe, PayPal, and Flutterwave. All endpoints are PUBLIC
- * (no JWT) — secured by signature verification or IP allowlist at the
- * gateway/firewall level.
+ * Reversal, B2Pochi), Stripe (platform + Connect), PayPal, and Flutterwave.
+ * All endpoints are PUBLIC (no JWT) — secured by signature verification or
+ * IP allowlist at the gateway/firewall level.
  *
  * NOTE: the STK callback path below deliberately does NOT contain the substring
  * "mpesa" — Safaricom's sandbox rejects CallBackURLs containing that word with
@@ -63,10 +66,14 @@ public class PaymentCallbackController {
 	private final StripeService stripeService;
 	private final PaypalService paypalService;
 	private final FlutterwaveService flutterwaveService;
+	private final WalletService walletService;
 	private final ObjectMapper objectMapper = new ObjectMapper();
 
 	@Value("${stripe.webhook-secret:}")
 	private String stripeWebhookSecret;
+
+	@Value("${stripe.connect.webhook-secret:}")
+	private String stripeConnectWebhookSecret;
 
 	// ─── M-Pesa STK Push Callback ────────────────────────────────────────────
 
@@ -334,7 +341,7 @@ public class PaymentCallbackController {
 		return ResponseEntity.ok().build();
 	}
 
-	// ─── Stripe Webhook ──────────────────────────────────────────────────────
+	// ─── Stripe Webhook (platform — deposits, saved cards) ────────────────────
 
 	@PostMapping("/stripe/webhook")
 	public ResponseEntity<ApiResponse<Void>> stripeWebhook(@RequestBody String payload,
@@ -372,6 +379,52 @@ public class PaymentCallbackController {
 			return ResponseEntity.ok(ApiResponse.success("Webhook processed"));
 		} catch (Exception e) {
 			log.error("Stripe webhook processing failed", e);
+			return ResponseEntity.badRequest().body(ApiResponse.error("Webhook error: " + e.getMessage()));
+		}
+	}
+
+	// ─── Stripe Connect Webhook (payouts, connected account status) ───────────
+
+	/**
+	 * SEPARATE endpoint from /payments/stripe/webhook above — Stripe requires
+	 * a distinct webhook destination configured to "Listen to events on
+	 * Connected accounts" for account.updated / payout.paid / payout.failed
+	 * events on connected accounts; they can't be folded into the platform
+	 * webhook's own destination/secret. See StripeConfig.Connect.webhookSecret.
+	 *
+	 * Each Connect event carries a top-level "account" field identifying
+	 * which connected account it's about — logged for traceability, though
+	 * reconciliation itself is keyed by payoutId (providerReference on the
+	 * Disbursement record), not by account id.
+	 */
+	@PostMapping("/stripe/connect/webhook")
+	public ResponseEntity<ApiResponse<Void>> stripeConnectWebhook(@RequestBody String payload,
+			@RequestHeader("Stripe-Signature") String sigHeader) {
+
+		try {
+			Event event = stripeService.constructWebhookEvent(payload, sigHeader, stripeConnectWebhookSecret);
+			log.info("Stripe Connect webhook received: type={} id={} account={}",
+					event.getType(), event.getId(), event.getAccount());
+
+			if ("payout.paid".equals(event.getType())) {
+				Payout payout = (Payout) event.getDataObjectDeserializer().deserializeUnsafe();
+				disbursementService.completeStripeConnectDisbursement(payout.getId(), true, null);
+			} else if ("payout.failed".equals(event.getType())) {
+				Payout payout = (Payout) event.getDataObjectDeserializer().deserializeUnsafe();
+				String reason = payout.getFailureMessage() != null ? payout.getFailureMessage() : payout.getFailureCode();
+				disbursementService.completeStripeConnectDisbursement(payout.getId(), false, reason);
+			} else if ("account.updated".equals(event.getType())) {
+				Account account = (Account) event.getDataObjectDeserializer().deserializeUnsafe();
+				walletService.updateStripeConnectAccountStatus(account);
+			}
+			// Other event types (e.g. capability.updated, person.updated)
+			// intentionally ignored — payoutsEnabled is re-derived in full
+			// from account.updated, which Stripe also sends whenever a
+			// relevant capability/requirement changes.
+
+			return ResponseEntity.ok(ApiResponse.success("Webhook processed"));
+		} catch (Exception e) {
+			log.error("Stripe Connect webhook processing failed", e);
 			return ResponseEntity.badRequest().body(ApiResponse.error("Webhook error: " + e.getMessage()));
 		}
 	}

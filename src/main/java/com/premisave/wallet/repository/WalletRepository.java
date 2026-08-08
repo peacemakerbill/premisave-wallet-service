@@ -11,6 +11,13 @@ public interface WalletRepository extends MongoRepository<Wallet, String> {
     Optional<Wallet> findByStripeCustomerId(String stripeCustomerId);
 
     /**
+     * Resolves which wallet an "account.updated" Stripe Connect webhook
+     * belongs to, so payouts_enabled / linked bank display fields can be
+     * kept in sync — see WalletService.updateStripeConnectAccountStatus.
+     */
+    Optional<Wallet> findByStripeConnectedAccountId(String stripeConnectedAccountId);
+
+    /**
      * Resolves which wallet a VAULT.PAYMENT-TOKEN.CREATED webhook belongs
      * to, when PayPal finalizes vaulting asynchronously after a capture
      * that returned vault.status="APPROVED" rather than "VAULTED" — see

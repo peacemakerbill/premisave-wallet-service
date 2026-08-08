@@ -212,6 +212,88 @@ public class WalletController {
         return ResponseEntity.ok(ApiResponse.success("Card saved"));
     }
 
+    // ─── Stripe Connect (bank withdrawal linking) ───────────────────────────
+    // Distinct from /wallet/stripe/setup-intent above, which saves a CARD
+    // for deposits. This links an external bank account (via Stripe Connect
+    // Express onboarding) for withdrawals — see DisbursementService's
+    // STRIPE branch. International users only (US/UK/EU banks); Kenya stays
+    // on M-Pesa/Flutterwave.
+
+    /**
+     * Starts (or resumes) Stripe Connect onboarding. Returns a single-use
+     * onboardingUrl — redirect the user to it immediately.
+     * POST /wallet/stripe/connect/link
+     */
+    @PostMapping("/stripe/connect/link")
+    public ResponseEntity<ApiResponse<Map<String, String>>> linkStripeConnectAccount(
+            Authentication auth, HttpServletRequest request) {
+        String userId = resolveUserId(request);
+        String email = auth.getName();
+        Map<String, String> result = depositService.createStripeConnectLink(userId, email);
+        return ResponseEntity.ok(ApiResponse.success("Stripe Connect onboarding started", result));
+    }
+
+    /**
+     * Unlinks the wallet's Stripe Connect account. See WalletService.
+     * disconnectStripeConnectAccount for why this doesn't (and can't)
+     * revoke anything on Stripe's own side.
+     * DELETE /wallet/stripe/connect/link
+     */
+    @DeleteMapping("/stripe/connect/link")
+    public ResponseEntity<ApiResponse<WalletResponse>> unlinkStripeConnectAccount(
+            Authentication auth, HttpServletRequest request) {
+        String userId = resolveUserId(request);
+        WalletResponse response = walletService.disconnectStripeConnectAccount(userId);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Stripe bank account unlinked. Future withdrawal requests will need a new link.", response));
+    }
+
+    /**
+     * Read-only cached status (linked/payoutsEnabled/bank display info),
+     * kept in sync by the account.updated Connect webhook — same
+     * "cached, webhook-synced" pattern as getPaypalAccount/getFlutterwaveAccount.
+     * GET /wallet/stripe/connect/account
+     */
+    @GetMapping("/stripe/connect/account")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getStripeConnectAccount(
+            Authentication auth, HttpServletRequest request) {
+        String userId = resolveUserId(request);
+
+        var walletOpt = walletRepository.findByUserId(userId);
+        Map<String, Object> info = new HashMap<>();
+
+        if (walletOpt.isPresent()) {
+            Wallet wallet = walletOpt.get();
+            info.put("linked", wallet.getStripeConnectedAccountId() != null);
+            info.put("accountId", wallet.getStripeConnectedAccountId());
+            info.put("payoutsEnabled", wallet.isStripePayoutsEnabled());
+            info.put("country", wallet.getStripeConnectedAccountCountry());
+            info.put("bankName", wallet.getStripeExternalBankName());
+            info.put("bankLast4", wallet.getStripeExternalBankLast4());
+        } else {
+            info.put("linked", false);
+        }
+
+        return ResponseEntity.ok(ApiResponse.success("Stripe Connect account status retrieved", info));
+    }
+
+    /**
+     * Actively queries Stripe for this account's current status rather than
+     * waiting on the webhook — call right after the user returns from
+     * onboarding (Stripe's return_url) so the UI reflects reality
+     * immediately instead of showing stale "not enabled" until the webhook
+     * arrives (which can lag, or be missed if the Connect webhook endpoint
+     * isn't fully set up yet).
+     * POST /wallet/stripe/connect/refresh
+     */
+    @PostMapping("/stripe/connect/refresh")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> refreshStripeConnectStatus(
+            Authentication auth, HttpServletRequest request) {
+        String userId = resolveUserId(request);
+        Map<String, Object> info = walletService.refreshStripeConnectStatus(userId);
+        return ResponseEntity.ok(ApiResponse.success("Stripe Connect status refreshed", info));
+    }
+
     @PostMapping("/deposit/paypal/confirm")
     public ResponseEntity<ApiResponse<PaymentResponse>> confirmPaypalDeposit(
             @RequestBody Map<String, String> body,

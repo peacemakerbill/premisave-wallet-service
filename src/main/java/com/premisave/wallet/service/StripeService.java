@@ -1,36 +1,46 @@
 package com.premisave.wallet.service;
 
-import com.stripe.Stripe;
+import com.premisave.wallet.config.StripeConfig;
+import com.stripe.StripeClient;
 import com.stripe.exception.CardException;
 import com.stripe.exception.StripeException;
+import com.stripe.model.Account;
+import com.stripe.model.AccountLink;
 import com.stripe.model.Customer;
 import com.stripe.model.PaymentIntent;
 import com.stripe.model.PaymentMethod;
 import com.stripe.model.Payout;
 import com.stripe.model.SetupIntent;
+import com.stripe.model.Transfer;
 import com.stripe.net.RequestOptions;
+import com.stripe.param.AccountCreateParams;
+import com.stripe.param.AccountLinkCreateParams;
 import com.stripe.param.CustomerCreateParams;
 import com.stripe.param.PaymentIntentCreateParams;
 import com.stripe.param.PayoutCreateParams;
 import com.stripe.param.SetupIntentCreateParams;
-import jakarta.annotation.PostConstruct;
+import com.stripe.param.TransferCreateParams;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 
+/**
+ * Uses the injected StripeClient (StripeConfig.stripeClient()) rather than
+ * the legacy static Stripe.apiKey / Customer.create(...) pattern — the
+ * static pattern mutates global state at startup, which the Connect code
+ * below would otherwise need to keep working around (e.g. per-connected-
+ * account requests need their own RequestOptions regardless). Migrating
+ * the whole file keeps one consistent calling convention throughout.
+ */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class StripeService {
 
-    @Value("${stripe.secret-key}")
-    private String secretKey;
-
-    @PostConstruct
-    public void init() {
-        Stripe.apiKey = secretKey;
-    }
+    private final StripeClient stripeClient;
+    private final StripeConfig stripeConfig;
 
     // ─── Customer ──────────────────────────────────────────────────────────
 
@@ -47,7 +57,7 @@ public class StripeService {
                     .setEmail(email)
                     .putMetadata("user_id", userId)
                     .build();
-            Customer customer = Customer.create(params);
+            Customer customer = stripeClient.v1().customers().create(params);
             log.info("Stripe Customer created: id={} userId={}", customer.getId(), userId);
             return customer.getId();
         } catch (StripeException e) {
@@ -70,7 +80,7 @@ public class StripeService {
                     .addPaymentMethodType("card")
                     .setUsage(SetupIntentCreateParams.Usage.OFF_SESSION)
                     .build();
-            SetupIntent intent = SetupIntent.create(params);
+            SetupIntent intent = stripeClient.v1().setupIntents().create(params);
             log.info("Stripe SetupIntent created: id={} customerId={}", intent.getId(), customerId);
             return intent;
         } catch (StripeException e) {
@@ -80,7 +90,7 @@ public class StripeService {
 
     public SetupIntent retrieveSetupIntent(String setupIntentId) {
         try {
-            return SetupIntent.retrieve(setupIntentId);
+            return stripeClient.v1().setupIntents().retrieve(setupIntentId);
         } catch (StripeException e) {
             throw new RuntimeException("Failed to retrieve Stripe SetupIntent " + setupIntentId + ": " + e.getMessage(), e);
         }
@@ -88,7 +98,7 @@ public class StripeService {
 
     public PaymentMethod retrievePaymentMethod(String paymentMethodId) {
         try {
-            return PaymentMethod.retrieve(paymentMethodId);
+            return stripeClient.v1().paymentMethods().retrieve(paymentMethodId);
         } catch (StripeException e) {
             throw new RuntimeException("Failed to retrieve Stripe PaymentMethod " + paymentMethodId + ": " + e.getMessage(), e);
         }
@@ -141,13 +151,13 @@ public class StripeService {
                 builder.setPaymentMethod(existingPaymentMethodId)
                         .setOffSession(true)
                         .setConfirm(true);
-                PaymentIntent intent = PaymentIntent.create(builder.build(), options);
+                PaymentIntent intent = stripeClient.v1().paymentIntents().create(builder.build(), options);
                 log.info("Stripe off-session charge succeeded: id={} status={}", intent.getId(), intent.getStatus());
                 return new StripePaymentIntentResult(intent.getId(), intent.getClientSecret(), intent.getStatus(),
                         intent.getCustomer(), intent.getPaymentMethod(), false);
             } else {
                 builder.setSetupFutureUsage(PaymentIntentCreateParams.SetupFutureUsage.OFF_SESSION);
-                PaymentIntent intent = PaymentIntent.create(builder.build(), options);
+                PaymentIntent intent = stripeClient.v1().paymentIntents().create(builder.build(), options);
                 log.info("Stripe PaymentIntent created (new card): id={} status={}", intent.getId(), intent.getStatus());
                 return new StripePaymentIntentResult(intent.getId(), intent.getClientSecret(), intent.getStatus(),
                         intent.getCustomer(), intent.getPaymentMethod(), false);
@@ -167,7 +177,7 @@ public class StripeService {
                             .build();
                     RequestOptions retryOptions = RequestOptions.builder()
                             .setIdempotencyKey(idempotencyKey + "-3ds").build();
-                    PaymentIntent retryIntent = PaymentIntent.create(retryParams, retryOptions);
+                    PaymentIntent retryIntent = stripeClient.v1().paymentIntents().create(retryParams, retryOptions);
                     return new StripePaymentIntentResult(retryIntent.getId(), retryIntent.getClientSecret(),
                             retryIntent.getStatus(), retryIntent.getCustomer(), retryIntent.getPaymentMethod(), true);
                 } catch (StripeException retryEx) {
@@ -182,13 +192,17 @@ public class StripeService {
 
     public PaymentIntent retrievePaymentIntent(String paymentIntentId) {
         try {
-            return PaymentIntent.retrieve(paymentIntentId);
+            return stripeClient.v1().paymentIntents().retrieve(paymentIntentId);
         } catch (StripeException e) {
             throw new RuntimeException("Failed to retrieve Stripe PaymentIntent " + paymentIntentId + ": " + e.getMessage(), e);
         }
     }
 
-    // ─── Payout (Premisave's own bank account — NOT per-user; see chat note) ─
+    // ─── Payout (Premisave's own bank account — platform-level, NOT per-user) ─
+    // Kept for operational use (e.g. sweeping Premisave's own Stripe balance
+    // to Premisave's own bank). NOT used for user withdrawals — see the
+    // Stripe Connect section below for that; a plain Payout has no way to
+    // target an arbitrary user's own bank account.
 
     public String processPayout(BigDecimal amountKes, String currency) {
         long amountCents = amountKes.multiply(BigDecimal.valueOf(100)).longValue();
@@ -196,16 +210,185 @@ public class StripeService {
             PayoutCreateParams params = PayoutCreateParams.builder()
                     .setAmount(amountCents)
                     .setCurrency(currency.toLowerCase())
-                    .setDescription("Premisave wallet disbursement")
+                    .setDescription("Premisave platform payout")
                     .build();
-            Payout payout = Payout.create(params);
-            log.info("Stripe Payout created: id={} status={}", payout.getId(), payout.getStatus());
+            Payout payout = stripeClient.v1().payouts().create(params);
+            log.info("Stripe platform Payout created: id={} status={}", payout.getId(), payout.getStatus());
             return payout.getId();
         } catch (StripeException e) {
-            log.error("Stripe Payout failed", e);
+            log.error("Stripe platform Payout failed", e);
             throw new RuntimeException("Stripe payout failed: " + e.getMessage(), e);
         }
     }
+
+    // ─── Stripe Connect — linking a bank account for withdrawals ─────────────
+    //
+    // Scoped to international users (US/UK/EU bank accounts) — Kenya stays
+    // on M-Pesa/Flutterwave, since Stripe doesn't support Kenya as either a
+    // platform or (self-serve) recipient country.
+    //
+    // Uses Express connected accounts on the stable v1 Accounts API with
+    // controller properties (fees/losses collected by the platform, Express
+    // dashboard) — NOT the new Accounts v2 API, which as of writing requires
+    // an explicit sandbox-only preview enablement and isn't yet suitable for
+    // production. Re-evaluate once v2 is generally available.
+    //
+    // One-time manual setup required in the Stripe Dashboard before this
+    // works: Settings -> Connect -> Onboarding options -> configure which
+    // countries Express accounts can onboard from (defaults to a very
+    // narrow list otherwise).
+
+    public record ConnectAccountLinkResult(String accountId, String onboardingUrl) {}
+
+    /**
+     * Creates an Express connected account (if the wallet doesn't already
+     * have one — pass the existing id to reuse it, e.g. to resume/redo
+     * onboarding) and a single-use Account Link the frontend redirects the
+     * user to. Requesting the "transfers" capability is what lets Premisave
+     * later Transfer funds into this account's balance; Stripe's hosted
+     * onboarding form collects everything required for it (KYC + external
+     * bank account) directly — raw bank details never touch our servers.
+     */
+    public ConnectAccountLinkResult createConnectedAccountAndOnboardingLink(
+            String existingAccountId, String email, String userId) {
+        try {
+            String accountId = existingAccountId;
+
+            if (accountId == null) {
+                AccountCreateParams params = AccountCreateParams.builder()
+                        .setEmail(email)
+                        .setBusinessType(AccountCreateParams.BusinessType.INDIVIDUAL)
+                        .setCapabilities(AccountCreateParams.Capabilities.builder()
+                                .setTransfers(AccountCreateParams.Capabilities.Transfers.builder()
+                                        .setRequested(true)
+                                        .build())
+                                .build())
+                        .setController(AccountCreateParams.Controller.builder()
+                                .setFees(AccountCreateParams.Controller.Fees.builder()
+                                        .setPayer(AccountCreateParams.Controller.Fees.Payer.APPLICATION)
+                                        .build())
+                                .setLosses(AccountCreateParams.Controller.Losses.builder()
+                                        .setPayments(AccountCreateParams.Controller.Losses.Payments.APPLICATION)
+                                        .build())
+                                .setStripeDashboard(AccountCreateParams.Controller.StripeDashboard.builder()
+                                        .setType(AccountCreateParams.Controller.StripeDashboard.Type.EXPRESS)
+                                        .build())
+                                .build())
+                        .putMetadata("user_id", userId)
+                        .build();
+
+                Account account = stripeClient.v1().accounts().create(params);
+                accountId = account.getId();
+                log.info("Stripe Connect account created: id={} userId={}", accountId, userId);
+            }
+
+            AccountLinkCreateParams linkParams = AccountLinkCreateParams.builder()
+                    .setAccount(accountId)
+                    .setRefreshUrl(stripeConfig.getConnect().getRefreshUrl())
+                    .setReturnUrl(stripeConfig.getConnect().getReturnUrl())
+                    .setType(AccountLinkCreateParams.Type.ACCOUNT_ONBOARDING)
+                    .build();
+
+            AccountLink link = stripeClient.v1().accountLinks().create(linkParams);
+            log.info("Stripe Connect onboarding link created: accountId={} userId={}", accountId, userId);
+
+            return new ConnectAccountLinkResult(accountId, link.getUrl());
+        } catch (StripeException e) {
+            throw new RuntimeException("Failed to start Stripe Connect onboarding: " + e.getMessage(), e);
+        }
+    }
+
+    /** Used by WalletService.refreshStripeConnectStatus for an on-demand status check, independent of the account.updated webhook. */
+    public Account retrieveConnectedAccount(String accountId) {
+        try {
+            return stripeClient.v1().accounts().retrieve(accountId);
+        } catch (StripeException e) {
+            throw new RuntimeException("Failed to retrieve Stripe Connect account " + accountId + ": " + e.getMessage(), e);
+        }
+    }
+
+    // ─── Stripe Connect — withdrawals (Transfer + Payout) ────────────────────
+
+    public record ConnectPayoutResult(boolean success, String message, String transferId, String payoutId) {}
+
+    /**
+     * Two-step withdrawal: Transfer funds from Premisave's own Stripe
+     * balance into the user's connected account, then immediately trigger a
+     * Payout FROM that connected account to their external bank, acting on
+     * their behalf via the Stripe-Account header (RequestOptions.
+     * setStripeAccount) — the connected account never has to log in or
+     * trigger anything themselves.
+     *
+     * These are two separate API calls with two separate failure points:
+     *  - Transfer fails: no money has moved at all. Safe to just report
+     *    failure — same as every other PENDING-never-happened provider path.
+     *  - Payout fails AFTER a successful Transfer: money HAS already left
+     *    Premisave's platform balance and is sitting in the connected
+     *    account's own Stripe balance. This is NOT the same "nothing moved,
+     *    nothing to refund" situation as the other providers' failure
+     *    paths — see DisbursementService.completeStripeConnectDisbursement
+     *    for how this is surfaced for manual reconciliation.
+     *
+     * amount/currency here are whatever's actually being sent to Stripe
+     * (already FX-converted from the wallet's KES amount by the caller) —
+     * this method doesn't do currency conversion itself.
+     */
+    public ConnectPayoutResult transferAndPayout(String connectedAccountId, BigDecimal amount,
+                                                  String currency, String idempotencyKey) {
+        long amountCents = amount.multiply(BigDecimal.valueOf(100)).longValue();
+
+        Transfer transfer;
+        try {
+            TransferCreateParams transferParams = TransferCreateParams.builder()
+                    .setAmount(amountCents)
+                    .setCurrency(currency.toLowerCase())
+                    .setDestination(connectedAccountId)
+                    .setDescription("Premisave wallet withdrawal")
+                    .build();
+            RequestOptions transferOptions = RequestOptions.builder()
+                    .setIdempotencyKey(idempotencyKey + "-transfer")
+                    .build();
+
+            transfer = stripeClient.v1().transfers().create(transferParams, transferOptions);
+            log.info("Stripe Connect transfer created: id={} accountId={} amount={} {}",
+                    transfer.getId(), connectedAccountId, amount, currency);
+        } catch (StripeException e) {
+            log.warn("Stripe Connect transfer failed (no funds moved): accountId={}", connectedAccountId, e);
+            return new ConnectPayoutResult(false, "Transfer to connected account failed: " + e.getMessage(), null, null);
+        }
+
+        try {
+            PayoutCreateParams payoutParams = PayoutCreateParams.builder()
+                    .setAmount(amountCents)
+                    .setCurrency(currency.toLowerCase())
+                    .setDescription("Premisave wallet withdrawal")
+                    .build();
+            RequestOptions payoutOptions = RequestOptions.builder()
+                    .setStripeAccount(connectedAccountId)
+                    .setIdempotencyKey(idempotencyKey + "-payout")
+                    .build();
+
+            Payout payout = stripeClient.v1().payouts().create(payoutParams, payoutOptions);
+            log.info("Stripe Connect payout created: id={} accountId={} status={} transferId={}",
+                    payout.getId(), connectedAccountId, payout.getStatus(), transfer.getId());
+
+            return new ConnectPayoutResult(true, "Payout initiated", transfer.getId(), payout.getId());
+        } catch (StripeException e) {
+            log.error("Stripe Connect payout FAILED after a successful transfer — funds are sitting in the " +
+                    "connected account's own Stripe balance (transferId={}, accountId={}); needs manual " +
+                    "reconciliation (retry a payout on that account, or treat as an operational loss)",
+                    transfer.getId(), connectedAccountId, e);
+            return new ConnectPayoutResult(false,
+                    "Transfer succeeded but payout to bank failed: " + e.getMessage(),
+                    transfer.getId(), null);
+        }
+    }
+
+    // ─── Webhook signature verification ──────────────────────────────────────
+    // Used for BOTH the platform webhook (/payments/stripe/webhook) and the
+    // Connect webhook (/payments/stripe/connect/webhook) — verification
+    // itself doesn't depend on the API key/client, only on which secret is
+    // passed in, so one method covers both call sites.
 
     public com.stripe.model.Event constructWebhookEvent(String payload, String sigHeader, String webhookSecret) {
         try {

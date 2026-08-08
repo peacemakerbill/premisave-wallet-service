@@ -114,6 +114,47 @@ public class Wallet {
     private String stripeCardLast4;
 
     /**
+     * Stripe Connect Express account id (acct_xxx) linked for international
+     * bank withdrawals — distinct from stripeCustomerId above, which is for
+     * charging the user (deposits). This account is created and
+     * operationally controlled by Premisave (see StripeService.
+     * createConnectedAccountAndOnboardingLink) — Stripe collects the user's
+     * KYC/bank details directly via hosted onboarding, never touching our
+     * servers, same principle as card data via Stripe.js.
+     *
+     * Scoped to international users (US/UK/EU bank accounts) — Kenyan
+     * payouts go through M-Pesa/Flutterwave instead, since Stripe doesn't
+     * support Kenya as either a platform or (self-serve) recipient country.
+     *
+     * Sandbox and production connected accounts are entirely separate — same
+     * caveat as stripeCustomerId. Set via POST /wallet/stripe/connect/link,
+     * cleared via DELETE /wallet/stripe/connect/link — see
+     * WalletService.disconnectStripeConnectAccount for why "unlink" here
+     * doesn't (and can't) revoke anything on Stripe's side the way PayPal's
+     * disconnectPaypalAccount comment describes for OAuth-style accounts.
+     */
+    @Indexed(unique = true, sparse = true)
+    private String stripeConnectedAccountId;
+
+    /** Display-only — ISO country code the connected account was onboarded with (e.g. "US", "GB"). */
+    private String stripeConnectedAccountCountry;
+
+    /**
+     * Whether Stripe has confirmed this connected account can currently
+     * receive payouts (onboarding + verification complete). Kept in sync via
+     * the "account.updated" Connect webhook (see WalletService.
+     * updateStripeConnectAccountStatus) and by the manual
+     * POST /wallet/stripe/connect/refresh endpoint. DisbursementService
+     * rejects STRIPE withdrawal requests outright while this is false,
+     * rather than letting the Transfer+Payout attempt fail at Stripe.
+     */
+    private boolean stripePayoutsEnabled = false;
+
+    /** Display-only — the linked external bank account's name/last4, so the frontend can show "Chase •••• 4242" without an extra Stripe call. */
+    private String stripeExternalBankName;
+    private String stripeExternalBankLast4;
+
+    /**
      * PayPal Vault payment token id (see PaypalService Vault methods) for
      * this wallet's saved PayPal account — lets returning depositors pay
      * without a full re-approval flow. Set after a successful vaulted

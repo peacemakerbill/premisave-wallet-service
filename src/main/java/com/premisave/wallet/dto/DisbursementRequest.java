@@ -20,13 +20,17 @@ public class DisbursementRequest {
      *                  DisbursementService.resolveVerifiedPhoneNumber) — never
      *                  taken from this field. Omit it entirely for MPESA requests.
      *  - PAYPAL      → PayPal email address (required)
-     *  - STRIPE      → Stripe external account ID (ba_xxxx) (required)
+     *  - STRIPE      → IGNORED. The destination is the wallet's linked Stripe
+     *                  Connect account (see POST /wallet/stripe/connect/link)
+     *                  — resolved from the caller's own wallet, never taken
+     *                  from this field, same reasoning as MPESA above. Omit
+     *                  it entirely for STRIPE requests.
      *  - FLUTTERWAVE → IGNORED. Use flutterwaveAccountBank/flutterwaveAccountNumber
      *                  instead — a bank/mobile-money transfer needs a
      *                  two-part destination, not a single string.
      *
      * Not annotated @NotBlank here since it's genuinely optional for MPESA/
-     * FLUTTERWAVE; DisbursementService enforces it manually per provider.
+     * STRIPE/FLUTTERWAVE; DisbursementService enforces it manually per provider.
      */
     private String destination;
 
@@ -36,7 +40,14 @@ public class DisbursementRequest {
      */
     private String provider;
 
-    /** ISO 4217 currency code. Defaults to KES for M-Pesa, USD for PayPal/Stripe/Flutterwave. */
+    /**
+     * ISO 4217 currency code. Defaults to KES for M-Pesa, USD for
+     * PayPal/Flutterwave. For STRIPE, defaults to USD — the wallet's KES
+     * balance is FX-converted to this currency at request time (see
+     * DisbursementService.disburseStripe), same pattern as PayPal. Set to
+     * whatever currency the linked connected account's bank actually
+     * settles in (e.g. GBP for a UK account) if it isn't USD.
+     */
     private String currency;
 
     /** Optional idempotency key — generated if not provided. */

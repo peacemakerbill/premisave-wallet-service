@@ -188,6 +188,37 @@ public class DepositService {
         }
     }
 
+    // ─── Stripe Connect (linking a bank account for withdrawals) ───────────
+
+    /**
+     * Starts (or resumes) Stripe Connect onboarding for this wallet, so the
+     * user can later withdraw to their own international bank account — see
+     * DisbursementService's STRIPE branch. Reuses the wallet's existing
+     * connected account id if one's already on file (e.g. the user exited
+     * onboarding partway through and is picking it back up), rather than
+     * creating a duplicate Stripe Account every time this is called.
+     *
+     * The returned onboardingUrl is single-use — the caller must redirect
+     * the user to it immediately, not cache/re-show it.
+     */
+    @Transactional
+    public Map<String, String> createStripeConnectLink(String userId, String email) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found. Please create a wallet first."));
+
+        StripeService.ConnectAccountLinkResult result = stripeService.createConnectedAccountAndOnboardingLink(
+                wallet.getStripeConnectedAccountId(), email, userId);
+
+        if (!result.accountId().equals(wallet.getStripeConnectedAccountId())) {
+            wallet.setStripeConnectedAccountId(result.accountId());
+            wallet.setStripePayoutsEnabled(false);
+            walletRepository.save(wallet);
+            log.info("Stripe Connect account linked to wallet: userId={} accountId={}", userId, result.accountId());
+        }
+
+        return Map.of("accountId", result.accountId(), "onboardingUrl", result.onboardingUrl());
+    }
+
     @Transactional
     public void creditWalletFromStripeCallback(String reference, BigDecimal amount, String paymentIntentId,
                                                 String currency, String customerId, String paymentMethodId) {

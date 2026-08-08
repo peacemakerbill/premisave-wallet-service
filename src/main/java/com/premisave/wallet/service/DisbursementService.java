@@ -61,15 +61,16 @@ public class DisbursementService {
      * NOTE ON BALANCE TIMING: the wallet is NOT debited here anymore. It's
      * only debited once the disbursement is CONFIRMED — by M-Pesa's
      * ResultURL callback (see completeMpesaDisbursement), PayPal's Payouts
-     * webhook (see completePaypalDisbursement), or Flutterwave's
-     * transfer.disburse webhook (see completeFlutterwaveDisbursement) —
-     * except for Stripe, which resolves synchronously below, so it's
-     * debited right at that point. Previously the wallet was debited up
-     * front and refunded on failure; that meant a customer's balance was
-     * reduced for money that hadn't actually left yet, and a PENDING
-     * disbursement stuck for hours (e.g. during the recent callback URL
-     * misconfiguration) held their funds hostage the whole time even though
-     * M-Pesa/PayPal had already processed the payout successfully.
+     * webhook (see completePaypalDisbursement), Flutterwave's
+     * transfer.disburse webhook (see completeFlutterwaveDisbursement), or
+     * Stripe's payout.paid Connect webhook (see
+     * completeStripeConnectDisbursement) — all four providers now resolve
+     * asynchronously. Previously the wallet was debited up front and
+     * refunded on failure; that meant a customer's balance was reduced for
+     * money that hadn't actually left yet, and a PENDING disbursement stuck
+     * for hours (e.g. during the recent callback URL misconfiguration) held
+     * their funds hostage the whole time even though M-Pesa/PayPal had
+     * already processed the payout successfully.
      *
      * Trade-off to be aware of: since nothing is held/reserved at
      * initiation, two disbursement requests submitted in quick succession
@@ -113,6 +114,21 @@ public class DisbursementService {
                         "No PayPal email is set on your wallet — add one before requesting a PayPal disbursement.");
             }
             destination = wallet.getPaypalEmail();
+        } else if ("STRIPE".equals(provider)) {
+            // Resolved authoritatively from the wallet's linked Connect
+            // account — never taken from request.getDestination() — same
+            // reasoning as M-Pesa/PayPal above: eliminates typo/mistargeted
+            // payout risk, and the user only ever gets money sent to a bank
+            // account Stripe itself verified during onboarding.
+            if (wallet.getStripeConnectedAccountId() == null || wallet.getStripeConnectedAccountId().isBlank()) {
+                throw new IllegalArgumentException(
+                        "No Stripe bank account is linked to your wallet — link one before requesting a Stripe withdrawal.");
+            }
+            if (!wallet.isStripePayoutsEnabled()) {
+                throw new IllegalArgumentException(
+                        "Your linked Stripe account hasn't finished verification yet — payouts aren't enabled on it.");
+            }
+            destination = wallet.getStripeConnectedAccountId();
         } else {
             if (request.getDestination() == null || request.getDestination().isBlank()) {
                 throw new IllegalArgumentException("destination is required for " + provider + " disbursements");
@@ -162,7 +178,7 @@ public class DisbursementService {
         }
 
         ProviderResult result = switch (provider) {
-            case "STRIPE" -> disburseStripe(request);
+            case "STRIPE" -> disburseStripe(request, destination, reference);
             case "PAYPAL" -> disbursePaypal(request, destination);
             default -> new ProviderResult(false, "Unsupported provider: " + provider, null);
         };
@@ -172,15 +188,24 @@ public class DisbursementService {
         if (result.success()) {
             disbursement.setProviderReference(result.providerRef());
 
-            if ("PAYPAL".equals(provider)) {
+            // Both PayPal and Stripe now resolve asynchronously — Stripe's
+            // Payout can fail after the money's already left our platform
+            // balance (see StripeService.transferAndPayout javadoc), so it
+            // gets the same PENDING-until-webhook treatment as every other
+            // provider rather than being debited synchronously.
+            if ("PAYPAL".equals(provider) || "STRIPE".equals(provider)) {
                 disbursement.setStatus(DisbursementStatus.PENDING);
                 disbursementRepository.save(disbursement);
+                String providerLabel = "STRIPE".equals(provider) ? "Stripe" : "PayPal";
                 return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
-                        "Disbursement queued with PayPal — your wallet will be debited once PayPal confirms the payout.");
+                        "Disbursement queued with " + providerLabel + " — your wallet will be debited once "
+                                + providerLabel + " confirms the payout.");
             }
 
-            // Stripe resolves synchronously — we already know it succeeded,
-            // so debit right here rather than waiting on a callback.
+            // No synchronous-success provider remains in this switch — kept
+            // as a safety net in case a future provider is added here that
+            // DOES resolve synchronously (MPESA/FLUTTERWAVE are handled in
+            // their own early-return branches above).
             wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
             walletRepository.save(wallet);
 
@@ -199,7 +224,7 @@ public class DisbursementService {
  // ─── Flutterwave (bank account or mobile money wallet) ──────────────────
 
     /**
-     * Same not-debited-until-confirmed pattern as MPESA/PAYPAL above —
+     * Same not-debited-until-confirmed pattern as MPESA/PAYPAL/STRIPE above —
      * Flutterwave transfers resolve asynchronously via the
      * transfer.disburse webhook (see completeFlutterwaveDisbursement).
      *
@@ -356,14 +381,78 @@ public class DisbursementService {
          log.info("Flutterwave disbursement completed: id={} transferId={}", d.getId(), transferId);
      } else {
          // No refund needed — the wallet was never debited for a
-         // PENDING Flutterwave disbursement (see
-         // processFlutterwaveDisbursement above).
+         // PENDING Flutterwave disbursement (see processFlutterwaveDisbursement above).
          d.setStatus(DisbursementStatus.FAILED);
          d.setFailureReason(statusDesc);
          disbursementRepository.save(d);
          log.warn("Flutterwave disbursement failed: id={} transferId={} reason={}", d.getId(), transferId, statusDesc);
      }
  }
+
+    // ─── Reconciliation from Stripe Connect's payout.paid/payout.failed webhook ─
+
+    /**
+     * Keyed by the Stripe Payout id (po_xxx), stored as providerReference
+     * at initiation — see StripeService.transferAndPayout, which returns
+     * that as the primary reference (not the Transfer id) since that's
+     * what payout.paid/payout.failed events carry.
+     *
+     * IMPORTANT DIFFERENCE from every other provider's failure path here:
+     * a failed Stripe Connect payout means money has ALREADY left
+     * Premisave's own platform balance via the earlier Transfer step and
+     * is sitting in the connected account's own Stripe balance — it is
+     * NOT the "nothing moved, nothing to refund" situation that MPESA/
+     * PAYPAL/FLUTTERWAVE failures are. This is logged at ERROR (not WARN)
+     * specifically so it doesn't blend into routine failure noise; someone
+     * needs to either retry a Payout on that connected account (the funds
+     * are already there) or treat it as an operational loss.
+     */
+    @Transactional
+    public void completeStripeConnectDisbursement(String payoutId, boolean success, String failureReason) {
+        Disbursement d = disbursementRepository.findByProviderReference(payoutId).orElse(null);
+        if (d == null) {
+            log.warn("Stripe Connect payout webhook for unknown payoutId={} — ignoring", payoutId);
+            return;
+        }
+
+        if (d.getStatus() != DisbursementStatus.PENDING) {
+            log.warn("Stripe Connect payout webhook for already-finalized disbursement id={} status={} — ignoring duplicate",
+                    d.getId(), d.getStatus());
+            return;
+        }
+
+        if (success) {
+            d.setStatus(DisbursementStatus.SUCCESS);
+
+            if (d.getWalletId() != null) {
+                Wallet wallet = walletRepository.findById(d.getWalletId())
+                        .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + d.getWalletId()));
+
+                BigDecimal newBalance = wallet.getBalance().subtract(d.getAmount());
+                if (newBalance.compareTo(BigDecimal.ZERO) < 0) {
+                    log.error("Wallet {} balance went negative ({}) debiting confirmed Stripe Connect disbursement id={} — needs manual reconciliation",
+                            wallet.getId(), newBalance, d.getId());
+                }
+                wallet.setBalance(newBalance);
+                walletRepository.save(wallet);
+
+                disbursementRepository.save(d);
+                saveDisbursementTransaction(d.getUserId(), d.getWalletId(), d.getAmount(), d, d.getReference());
+            } else {
+                disbursementRepository.save(d);
+            }
+
+            log.info("Stripe Connect disbursement completed: id={} payoutId={}", d.getId(), payoutId);
+        } else {
+            d.setStatus(DisbursementStatus.FAILED);
+            d.setFailureReason(failureReason);
+            disbursementRepository.save(d);
+            log.error("Stripe Connect payout FAILED: id={} payoutId={} reason={} destinationAccount={} — " +
+                    "funds already left the platform balance via the earlier Transfer and are stranded in " +
+                    "that connected account; needs manual reconciliation, NOT a routine no-op failure",
+                    d.getId(), payoutId, failureReason, d.getDestination());
+        }
+    }
 
     // ─── B2B (admin/finance-initiated, business-to-business payment) ───────
     // Unchanged — never touches a customer wallet (no walletId set).
@@ -678,11 +767,36 @@ public class DisbursementService {
 
  // ─── Provider dispatch (Stripe/PayPal) ───────────────────────────────────
 
-    private ProviderResult disburseStripe(DisbursementRequest request) {
+    /**
+     * Converts the wallet's KES amount to whatever currency the withdrawal
+     * is actually denominated in (defaults to USD — see DisbursementRequest.
+     * currency javadoc), then kicks off the Connect Transfer+Payout. Mirrors
+     * disbursePaypal's FX pattern below — the old version of this method
+     * skipped FX conversion entirely and passed the raw KES amount straight
+     * through as if it were already USD, which would have sent the wrong
+     * amount of money to a real bank account.
+     */
+    private ProviderResult disburseStripe(DisbursementRequest request, String connectedAccountId, String idempotencyKey) {
         try {
-            String currency = request.getCurrency() != null ? request.getCurrency() : "kes";
-            String payoutId = stripeService.processPayout(request.getAmount(), currency);
-            return new ProviderResult(true, "Stripe payout initiated", payoutId);
+            String currency = request.getCurrency() != null ? request.getCurrency().toUpperCase() : "USD";
+
+            BigDecimal payoutAmount = request.getAmount();
+            if (!"KES".equals(currency)) {
+                BigDecimal kesToTargetRate = fxRateService.getRate("KES", currency);
+                payoutAmount = request.getAmount().multiply(kesToTargetRate).setScale(2, java.math.RoundingMode.HALF_UP);
+            }
+
+            StripeService.ConnectPayoutResult result = stripeService.transferAndPayout(
+                    connectedAccountId, payoutAmount, currency, idempotencyKey);
+
+            if (!result.success()) {
+                return new ProviderResult(false, result.message(), null);
+            }
+
+            log.info("Stripe Connect payout: accountId={} kesAmount={} {}Amount={} payoutId={}",
+                    connectedAccountId, request.getAmount(), currency, payoutAmount, result.payoutId());
+            return new ProviderResult(true, "Stripe payout initiated (" + currency + " " + payoutAmount + ")",
+                    result.payoutId());
         } catch (Exception e) {
             return new ProviderResult(false, e.getMessage(), null);
         }
