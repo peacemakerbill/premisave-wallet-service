@@ -401,10 +401,19 @@ public class WalletService {
     }
 
     /**
-     * Syncs a wallet's cached Stripe Connect status from an "account.updated"
-     * Connect webhook — payouts_enabled and the linked bank's display
-     * name/last4 (for "Chase •••• 4242" style UI without an extra Stripe
-     * call per page load). See PaymentCallbackController.stripeConnectWebhook.
+     * Syncs a wallet's cached Stripe Connect status from a Stripe Account
+     * object — payouts_enabled and the linked bank's display name/last4
+     * (for "Chase •••• 4242" style UI without an extra Stripe call per page
+     * load).
+     *
+     * NOT CURRENTLY CALLED FROM ANYWHERE — account status is handled via
+     * on-demand polling instead (refreshStripeConnectStatus below, called
+     * from POST /wallet/stripe/connect/refresh), not a webhook push, since
+     * account status has no urgency the way a payout result does. Kept here
+     * in case you want push-based sync later: add an "account.updated"
+     * branch back into PaymentCallbackController.stripeConnectWebhook and
+     * call this with the deserialized Account, same shape as the
+     * payout.paid/payout.failed branches already there.
      */
     @Transactional
     public void updateStripeConnectAccountStatus(com.stripe.model.Account account) {
