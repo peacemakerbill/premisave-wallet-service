@@ -17,6 +17,7 @@ import com.stripe.param.AccountCreateParams;
 import com.stripe.param.AccountLinkCreateParams;
 import com.stripe.param.CustomerCreateParams;
 import com.stripe.param.PaymentIntentCreateParams;
+import com.stripe.param.PaymentMethodDetachParams;
 import com.stripe.param.PayoutCreateParams;
 import com.stripe.param.SetupIntentCreateParams;
 import com.stripe.param.TransferCreateParams;
@@ -101,6 +102,24 @@ public class StripeService {
             return stripeClient.v1().paymentMethods().retrieve(paymentMethodId);
         } catch (StripeException e) {
             throw new RuntimeException("Failed to retrieve Stripe PaymentMethod " + paymentMethodId + ": " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Detaches a saved card from its Stripe Customer — the counterpart to
+     * the attach that happens implicitly via SetupIntent/PaymentIntent
+     * setup_future_usage in createOrChargePaymentIntent above. After this,
+     * the PaymentMethod can no longer be charged or re-attached to any
+     * Customer (Stripe's own restriction, not something enforced here).
+     * See DepositService.removeSavedCard, which clears the wallet's cached
+     * stripeDefaultPaymentMethodId/CardBrand/CardLast4 after this succeeds.
+     */
+    public void detachPaymentMethod(String paymentMethodId) {
+        try {
+            stripeClient.v1().paymentMethods().detach(paymentMethodId, PaymentMethodDetachParams.builder().build());
+            log.info("Stripe PaymentMethod detached: id={}", paymentMethodId);
+        } catch (StripeException e) {
+            throw new RuntimeException("Failed to detach Stripe PaymentMethod " + paymentMethodId + ": " + e.getMessage(), e);
         }
     }
 

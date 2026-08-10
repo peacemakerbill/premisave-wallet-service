@@ -14,8 +14,6 @@ import com.premisave.wallet.service.FlutterwaveService;
 import com.premisave.wallet.service.MpesaOperationsService;
 import com.premisave.wallet.service.PaypalService;
 import com.premisave.wallet.service.PullTransactionService;
-import com.premisave.wallet.service.WalletService;
-import com.stripe.model.Account;
 import com.stripe.model.Event;
 import com.stripe.model.PaymentIntent;
 import com.stripe.model.Payout;
@@ -66,7 +64,6 @@ public class PaymentCallbackController {
 	private final StripeService stripeService;
 	private final PaypalService paypalService;
 	private final FlutterwaveService flutterwaveService;
-	private final WalletService walletService;
 	private final ObjectMapper objectMapper = new ObjectMapper();
 
 	@Value("${stripe.webhook-secret:}")
@@ -388,14 +385,27 @@ public class PaymentCallbackController {
 	/**
 	 * SEPARATE endpoint from /payments/stripe/webhook above — Stripe requires
 	 * a distinct webhook destination configured to "Listen to events on
-	 * Connected accounts" for account.updated / payout.paid / payout.failed
-	 * events on connected accounts; they can't be folded into the platform
-	 * webhook's own destination/secret. See StripeConfig.Connect.webhookSecret.
+	 * Connected accounts" for payout.paid / payout.failed events on
+	 * connected accounts; they can't be folded into the platform webhook's
+	 * own destination/secret. See StripeConfig.Connect.webhookSecret.
 	 *
-	 * Each Connect event carries a top-level "account" field identifying
-	 * which connected account it's about — logged for traceability, though
-	 * reconciliation itself is keyed by payoutId (providerReference on the
-	 * Disbursement record), not by account id.
+	 * Handles payout confirmation ONLY — this is the sole mechanism that
+	 * reconciles a STRIPE disbursement's PENDING status (see
+	 * DisbursementService.completeStripeConnectDisbursement); without it, a
+	 * Stripe withdrawal never resolves and the wallet is never debited.
+	 * There's no polling alternative for this the way there is for account
+	 * status below, so this endpoint IS required once you have users
+	 * requesting Stripe withdrawals — it's not optional infrastructure.
+	 *
+	 * Does NOT handle account.updated (connected-account onboarding/
+	 * verification status) — that's deliberately left to
+	 * POST /wallet/stripe/connect/refresh instead, an on-demand pull rather
+	 * than a webhook push, since account status has no urgency the way a
+	 * payout result does and refresh covers it identically (see
+	 * WalletService.updateStripeConnectAccountStatus, currently unused but
+	 * kept in case you want push-based account status later — wire an
+	 * "account.updated".equals(event.getType()) branch back in here and
+	 * call it, same shape as the payout branches below).
 	 */
 	@PostMapping("/stripe/connect/webhook")
 	public ResponseEntity<ApiResponse<Void>> stripeConnectWebhook(@RequestBody String payload,
@@ -413,14 +423,9 @@ public class PaymentCallbackController {
 				Payout payout = (Payout) event.getDataObjectDeserializer().deserializeUnsafe();
 				String reason = payout.getFailureMessage() != null ? payout.getFailureMessage() : payout.getFailureCode();
 				disbursementService.completeStripeConnectDisbursement(payout.getId(), false, reason);
-			} else if ("account.updated".equals(event.getType())) {
-				Account account = (Account) event.getDataObjectDeserializer().deserializeUnsafe();
-				walletService.updateStripeConnectAccountStatus(account);
 			}
-			// Other event types (e.g. capability.updated, person.updated)
-			// intentionally ignored — payoutsEnabled is re-derived in full
-			// from account.updated, which Stripe also sends whenever a
-			// relevant capability/requirement changes.
+			// account.updated and every other Connect event type
+			// intentionally ignored here — see javadoc above.
 
 			return ResponseEntity.ok(ApiResponse.success("Webhook processed"));
 		} catch (Exception e) {

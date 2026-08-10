@@ -188,6 +188,35 @@ public class DepositService {
         }
     }
 
+    /**
+     * Removes the wallet's saved card — the counterpart to
+     * createStripeSetupIntent/confirmStripeSetupIntent above. Detaches the
+     * PaymentMethod on Stripe's side first (so it can no longer be charged
+     * at all, not just "no longer the wallet's default"), then clears the
+     * cached display fields. NOT blocked while frozen — same reasoning as
+     * createStripeSetupIntent: doesn't move money, only changes what a
+     * future deposit would use.
+     */
+    @Transactional
+    public void removeSavedCard(String userId) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
+
+        String paymentMethodId = wallet.getStripeDefaultPaymentMethodId();
+        if (paymentMethodId == null) {
+            throw new IllegalStateException("No saved card is linked to this wallet.");
+        }
+
+        stripeService.detachPaymentMethod(paymentMethodId);
+
+        wallet.setStripeDefaultPaymentMethodId(null);
+        wallet.setStripeCardBrand(null);
+        wallet.setStripeCardLast4(null);
+        walletRepository.save(wallet);
+
+        log.info("Stripe saved card removed: userId={} paymentMethodId={}", userId, paymentMethodId);
+    }
+
     // ─── Stripe Connect (linking a bank account for withdrawals) ───────────
 
     /**

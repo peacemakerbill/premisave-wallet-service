@@ -212,6 +212,19 @@ public class WalletController {
         return ResponseEntity.ok(ApiResponse.success("Card saved"));
     }
 
+    /**
+     * Removes the wallet's saved card. Distinct from /wallet/stripe/connect/link
+     * above — this is about the card used to DEPOSIT (charge the user), not
+     * the bank account used to WITHDRAW (pay the user).
+     * DELETE /wallet/stripe/card
+     */
+    @DeleteMapping("/stripe/card")
+    public ResponseEntity<ApiResponse<Void>> removeStripeSavedCard(Authentication auth, HttpServletRequest request) {
+        String userId = resolveUserId(request);
+        depositService.removeSavedCard(userId);
+        return ResponseEntity.ok(ApiResponse.success("Saved card removed"));
+    }
+
     // ─── Stripe Connect (bank withdrawal linking) ───────────────────────────
     // Distinct from /wallet/stripe/setup-intent above, which saves a CARD
     // for deposits. This links an external bank account (via Stripe Connect
