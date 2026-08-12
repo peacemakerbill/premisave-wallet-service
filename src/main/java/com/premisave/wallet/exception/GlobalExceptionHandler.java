@@ -126,6 +126,29 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ex.getMessage()));
     }
 
+    /**
+     * Thrown by service methods rejecting an action because the wallet isn't
+     * in a state that supports it right now — e.g. DELETE /wallet/stripe/card
+     * or DELETE /wallet/paypal/disconnect when nothing is actually linked
+     * (DepositService.removeSavedCard, WalletService.disconnectPaypalAccount,
+     * WalletService.disconnectStripeConnectAccount), or re-linking a PayPal
+     * account when one is already attached (DepositService.createPaypalLinkToken).
+     *
+     * 409 Conflict — same "request conflicts with current resource state"
+     * category as WalletAlreadyExistsException / WalletAlreadyFrozenException /
+     * WalletNotFrozenException above; not worth a dedicated exception type
+     * per case the way those have. Without this handler, IllegalStateException
+     * fell through to handleGeneric below and returned a useless "An
+     * unexpected error occurred" with a 500, discarding the specific,
+     * actionable message the service layer had already worked out (e.g.
+     * "No saved card is linked to this wallet.").
+     */
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ApiResponse<Void>> handleIllegalState(IllegalStateException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleGeneric(Exception ex, HttpServletRequest request) {
         log.error("Unhandled exception at {}: {}", request.getRequestURI(), ex.getMessage(), ex);
