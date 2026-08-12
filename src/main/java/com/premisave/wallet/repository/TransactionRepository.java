@@ -1,9 +1,12 @@
 package com.premisave.wallet.repository;
 
 import com.premisave.wallet.entity.Transaction;
+import com.premisave.wallet.enums.TransactionStatus;
+import com.premisave.wallet.enums.TransactionType;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -36,4 +39,14 @@ public interface TransactionRepository extends MongoRepository<Transaction, Stri
      * be auto-debited once the reversal succeeds.
      */
     Optional<Transaction> findByProviderReference(String providerReference);
+
+    /**
+     * Used by DepositService.autoFailStuckStripeDeposits to find deposits
+     * that never resolved. No field on Transaction currently distinguishes
+     * which provider a deposit used (unlike Disbursement, which has both
+     * provider and channel) — the sweeper filters this broad type/status/
+     * age result in-memory on description text instead.
+     */
+    List<Transaction> findByTypeAndStatusAndCreatedAtBefore(
+            TransactionType type, TransactionStatus status, LocalDateTime cutoff);
 }

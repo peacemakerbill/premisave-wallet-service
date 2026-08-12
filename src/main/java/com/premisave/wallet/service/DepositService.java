@@ -21,11 +21,13 @@ import com.stripe.model.PaymentMethod;
 import com.stripe.model.SetupIntent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -445,6 +447,77 @@ public class DepositService {
                 pi.getCustomer(), pi.getPaymentMethod());
 
         return new PaymentResponse(true, tx.getId(), "Stripe deposit successful");
+    }
+
+    /**
+     * Marks a Stripe deposit as failed — the counterpart to
+     * markStkTransactionFailed / markPaypalTransactionFailed /
+     * markFlutterwaveTransactionFailed above, which Stripe was missing
+     * until now. Triggered by the payment_intent.payment_failed webhook
+     * (see PaymentCallbackController.stripeWebhook) — a declined card, an
+     * abandoned 3DS challenge that Stripe itself gives up on, etc. No
+     * refund logic needed: the wallet is never credited for a PENDING
+     * Stripe deposit (see initiateStripeDeposit), same reasoning as every
+     * other provider's failure path.
+     */
+    @Transactional
+    public void markStripeTransactionFailed(String reference, String reason) {
+        transactionRepository.findByReference(reference).ifPresentOrElse(tx -> {
+            if (tx.getStatus() == TransactionStatus.COMPLETED) {
+                log.warn("Ignoring failure callback for already-completed Stripe reference={}", reference);
+                return;
+            }
+            tx.setStatus(TransactionStatus.FAILED);
+            tx.setDescription("Stripe deposit failed: " + reason);
+            transactionRepository.save(tx);
+            log.warn("Stripe deposit failed: reference={} reason={}", reference, reason);
+        }, () -> log.warn("Failure callback for unknown Stripe reference={}: {}", reference, reason));
+    }
+
+    // ─── Stuck-deposit sweeper (Stripe only — abandoned card collection) ────
+
+    /**
+     * Auto-fails Stripe deposits that have sat PENDING beyond the cutoff.
+     * markStripeTransactionFailed above only fires on an EXPLICIT decline
+     * (payment_intent.payment_failed) — a user who opens the card widget
+     * and simply closes the app never triggers that webhook at all, since
+     * nothing was actually attempted on Stripe's side. Without this, that
+     * transaction would sit PENDING forever with no terminal state.
+     *
+     * Safe to auto-fail here — unlike DisbursementService.
+     * flagStuckDisbursements, which only logs and never auto-resolves
+     * (because money may already have moved for a disbursement) — since
+     * the wallet is never credited for a PENDING deposit in the first
+     * place (see initiateStripeDeposit). If a payment genuinely succeeded
+     * but the webhook was somehow missed, confirmStripeDeposit can still
+     * reconcile it manually after the fact; auto-failing here doesn't
+     * foreclose that.
+     *
+     * Identifies Stripe deposits by description prefix (set in
+     * initiateStripeDeposit's savePendingTransaction call) rather than a
+     * dedicated provider field — Transaction doesn't currently store which
+     * provider a deposit used, unlike Disbursement, which has both
+     * provider and channel.
+     */
+    @Scheduled(fixedDelay = 15 * 60 * 1000)
+    public void autoFailStuckStripeDeposits() {
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(30);
+        List<Transaction> stuck = transactionRepository
+                .findByTypeAndStatusAndCreatedAtBefore(TransactionType.DEPOSIT, TransactionStatus.PENDING, cutoff)
+                .stream()
+                .filter(tx -> tx.getDescription() != null && tx.getDescription().startsWith("Stripe deposit"))
+                .toList();
+
+        for (Transaction tx : stuck) {
+            tx.setStatus(TransactionStatus.FAILED);
+            tx.setDescription("Stripe deposit failed: abandoned — no confirmation within 30 minutes");
+            transactionRepository.save(tx);
+        }
+
+        if (!stuck.isEmpty()) {
+            log.warn("{} Stripe deposit(s) auto-failed after sitting PENDING beyond 30 minutes: {}",
+                    stuck.size(), stuck.stream().map(Transaction::getId).toList());
+        }
     }
 
     // ─── PayPal ──────────────────────────────────────────────────────────────

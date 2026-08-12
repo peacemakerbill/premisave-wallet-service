@@ -366,6 +366,25 @@ public class PaymentCallbackController {
 				} else {
 					log.warn("Stripe PaymentIntent {} has no idempotency_key metadata — cannot reconcile", pi.getId());
 				}
+			} else if ("payment_intent.payment_failed".equals(event.getType())) {
+				// Counterpart to payment_intent.succeeded above — was
+				// missing entirely, meaning a declined card or an abandoned
+				// 3DS challenge left the transaction PENDING forever with
+				// no reconciliation path (unlike M-Pesa/PayPal/Flutterwave,
+				// which all have this).
+				PaymentIntent pi = (PaymentIntent) event.getDataObjectDeserializer().deserializeUnsafe();
+
+				String reference = pi.getMetadata() != null ? pi.getMetadata().get("idempotency_key") : null;
+				String reason = pi.getLastPaymentError() != null && pi.getLastPaymentError().getMessage() != null
+						? pi.getLastPaymentError().getMessage()
+						: "Payment failed";
+
+				if (reference != null) {
+					depositService.markStripeTransactionFailed(reference, reason);
+					log.info("Stripe deposit failed: reference={} reason={}", reference, reason);
+				} else {
+					log.warn("Stripe PaymentIntent {} failed but has no idempotency_key metadata — cannot reconcile", pi.getId());
+				}
 			} else if ("setup_intent.succeeded".equals(event.getType())) {
 				SetupIntent si = (SetupIntent) event.getDataObjectDeserializer().deserializeUnsafe();
 
