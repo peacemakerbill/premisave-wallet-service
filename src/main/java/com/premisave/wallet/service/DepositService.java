@@ -4,6 +4,7 @@ import com.premisave.wallet.dto.B2BExpressCheckoutResponse;
 import com.premisave.wallet.dto.DepositRequest;
 import com.premisave.wallet.dto.MpesaStkPushRequest;
 import com.premisave.wallet.dto.PaymentResponse;
+import com.premisave.wallet.entity.SavedCard;
 import com.premisave.wallet.entity.Transaction;
 import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.enums.Currency;
@@ -12,6 +13,7 @@ import com.premisave.wallet.enums.TransactionType;
 import com.premisave.wallet.exception.PaypalCaptureException;
 import com.premisave.wallet.exception.WalletFrozenException;
 import com.premisave.wallet.exception.WalletNotFoundException;
+import com.premisave.wallet.repository.SavedCardRepository;
 import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import com.stripe.model.PaymentIntent;
@@ -24,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -34,6 +37,7 @@ public class DepositService {
 
     private final WalletRepository walletRepository;
     private final TransactionRepository transactionRepository;
+    private final SavedCardRepository savedCardRepository;
     private final MpesaService mpesaService;
     private final StripeService stripeService;
     private final PaypalService paypalService;
@@ -182,39 +186,155 @@ public class DepositService {
         }
 
         if (si.getPaymentMethod() != null) {
-            wallet.setStripeDefaultPaymentMethodId((String) si.getPaymentMethod());
+            String paymentMethodId = (String) si.getPaymentMethod();
+            String brand = null;
+            String last4 = null;
+            try {
+                PaymentMethod pm = stripeService.retrievePaymentMethod(paymentMethodId);
+                if (pm.getCard() != null) {
+                    brand = pm.getCard().getBrand();
+                    last4 = pm.getCard().getLast4();
+                }
+            } catch (Exception e) {
+                log.warn("Setup intent confirmed but failed to fetch card display details: {}", e.getMessage());
+            }
+
+            upsertSavedCardAsDefault(wallet, paymentMethodId, brand, last4);
             walletRepository.save(wallet);
             log.info("Stripe setup intent confirmed and card saved: userId={} setupIntentId={}", userId, setupIntentId);
         }
     }
 
+    // ─── Saved cards (multiple per wallet) ──────────────────────────────────
+
     /**
-     * Removes the wallet's saved card — the counterpart to
-     * createStripeSetupIntent/confirmStripeSetupIntent above. Detaches the
-     * PaymentMethod on Stripe's side first (so it can no longer be charged
-     * at all, not just "no longer the wallet's default"), then clears the
-     * cached display fields. NOT blocked while frozen — same reasoning as
-     * createStripeSetupIntent: doesn't move money, only changes what a
-     * future deposit would use.
+     * Creates or updates the SavedCard row for this PaymentMethod, and makes
+     * it the active default — matching common app UX where "add a card"
+     * means "use this one now." Demotes every other SavedCard for the
+     * wallet, and refreshes Wallet's denormalized cache fields
+     * (stripeDefaultPaymentMethodId/CardBrand/CardLast4) to match.
+     *
+     * Idempotent, and shared across the three places a PaymentMethod can
+     * independently be "first seen": confirmStripeSetupIntent above, the
+     * setup_intent.succeeded webhook (attachSavedCardByCustomerId below),
+     * and a first-time deposit that saves a new card as a side effect
+     * (creditWalletFromStripeCallback below) — all three converge on the
+     * same SavedCard row rather than creating duplicates, since
+     * stripePaymentMethodId is uniquely indexed.
+     *
+     * Caller is still responsible for walletRepository.save(wallet)
+     * afterward — kept consistent with every other method in this class
+     * doing its own save at the end, rather than this helper reaching
+     * outside its own concern.
+     */
+    private void upsertSavedCardAsDefault(Wallet wallet, String paymentMethodId, String brand, String last4) {
+        SavedCard card = savedCardRepository.findByStripePaymentMethodId(paymentMethodId)
+                .orElseGet(SavedCard::new);
+        card.setWalletId(wallet.getId());
+        card.setUserId(wallet.getUserId());
+        card.setStripePaymentMethodId(paymentMethodId);
+        if (brand != null) card.setBrand(brand);
+        if (last4 != null) card.setLast4(last4);
+        card.setDefault(true);
+        card = savedCardRepository.save(card);
+
+        String newDefaultId = card.getId();
+        for (SavedCard other : savedCardRepository.findByWalletIdOrderByCreatedAtDesc(wallet.getId())) {
+            if (!other.getId().equals(newDefaultId) && other.isDefault()) {
+                other.setDefault(false);
+                savedCardRepository.save(other);
+            }
+        }
+
+        wallet.setStripeDefaultPaymentMethodId(paymentMethodId);
+        wallet.setStripeCardBrand(card.getBrand());
+        wallet.setStripeCardLast4(card.getLast4());
+    }
+
+    /** GET /wallet/stripe/cards — every saved card for this wallet, newest first. */
+    public List<SavedCard> listSavedCards(String userId) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
+        return savedCardRepository.findByWalletIdOrderByCreatedAtDesc(wallet.getId());
+    }
+
+    /**
+     * Removes one specific saved card — DELETE /wallet/stripe/cards/{paymentMethodId}.
+     * Detaches it on Stripe's side first (StripeService.detachPaymentMethod),
+     * then deletes the SavedCard row. If the removed card was the default,
+     * promotes the next-most-recent remaining card automatically rather
+     * than leaving the wallet with no default and silently breaking the
+     * next off-session deposit attempt.
+     *
+     * SECURITY: paymentMethodId is looked up scoped to the caller's own
+     * wallet, not fetched globally — a caller can't detach another user's
+     * card by guessing or reusing a pm_xxx id.
      */
     @Transactional
-    public void removeSavedCard(String userId) {
+    public void removeSavedCard(String userId, String paymentMethodId) {
         Wallet wallet = walletRepository.findByUserId(userId)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
 
-        String paymentMethodId = wallet.getStripeDefaultPaymentMethodId();
-        if (paymentMethodId == null) {
-            throw new IllegalStateException("No saved card is linked to this wallet.");
-        }
+        SavedCard card = savedCardRepository.findByStripePaymentMethodId(paymentMethodId)
+                .filter(c -> c.getWalletId().equals(wallet.getId()))
+                .orElseThrow(() -> new IllegalStateException("This card is not linked to your wallet."));
 
         stripeService.detachPaymentMethod(paymentMethodId);
+        savedCardRepository.delete(card);
 
-        wallet.setStripeDefaultPaymentMethodId(null);
-        wallet.setStripeCardBrand(null);
-        wallet.setStripeCardLast4(null);
-        walletRepository.save(wallet);
+        if (card.isDefault()) {
+            List<SavedCard> remaining = savedCardRepository.findByWalletIdOrderByCreatedAtDesc(wallet.getId());
+            if (!remaining.isEmpty()) {
+                SavedCard newDefault = remaining.get(0);
+                newDefault.setDefault(true);
+                savedCardRepository.save(newDefault);
+                wallet.setStripeDefaultPaymentMethodId(newDefault.getStripePaymentMethodId());
+                wallet.setStripeCardBrand(newDefault.getBrand());
+                wallet.setStripeCardLast4(newDefault.getLast4());
+            } else {
+                wallet.setStripeDefaultPaymentMethodId(null);
+                wallet.setStripeCardBrand(null);
+                wallet.setStripeCardLast4(null);
+            }
+            walletRepository.save(wallet);
+        }
 
         log.info("Stripe saved card removed: userId={} paymentMethodId={}", userId, paymentMethodId);
+    }
+
+    /**
+     * Sets a specific already-saved card as the one
+     * DepositService.initiateStripeDeposit will charge —
+     * PUT /wallet/stripe/cards/{paymentMethodId}/default. Doesn't call
+     * Stripe at all — this is purely an app-level concept; Stripe's own
+     * "default payment method" is for invoicing, not what this off-session
+     * deposit flow reads from.
+     */
+    @Transactional
+    public void setDefaultSavedCard(String userId, String paymentMethodId) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
+
+        SavedCard card = savedCardRepository.findByStripePaymentMethodId(paymentMethodId)
+                .filter(c -> c.getWalletId().equals(wallet.getId()))
+                .orElseThrow(() -> new IllegalStateException("This card is not linked to your wallet."));
+
+        for (SavedCard other : savedCardRepository.findByWalletIdOrderByCreatedAtDesc(wallet.getId())) {
+            if (other.isDefault() && !other.getId().equals(card.getId())) {
+                other.setDefault(false);
+                savedCardRepository.save(other);
+            }
+        }
+
+        card.setDefault(true);
+        savedCardRepository.save(card);
+
+        wallet.setStripeDefaultPaymentMethodId(card.getStripePaymentMethodId());
+        wallet.setStripeCardBrand(card.getBrand());
+        wallet.setStripeCardLast4(card.getLast4());
+        walletRepository.save(wallet);
+
+        log.info("Stripe default card changed: userId={} paymentMethodId={}", userId, paymentMethodId);
     }
 
     // ─── Stripe Connect (linking a bank account for withdrawals) ───────────
@@ -268,17 +388,18 @@ public class DepositService {
             wallet.setStripeCustomerId(customerId);
         }
         if (paymentMethodId != null) {
-            wallet.setStripeDefaultPaymentMethodId(paymentMethodId);
-            if (customerId != null) wallet.setStripeCustomerId(customerId);
+            String brand = null;
+            String last4 = null;
             try {
                 PaymentMethod pm = stripeService.retrievePaymentMethod(paymentMethodId);
                 if (pm.getCard() != null) {
-                    wallet.setStripeCardBrand(pm.getCard().getBrand());
-                    wallet.setStripeCardLast4(pm.getCard().getLast4());
+                    brand = pm.getCard().getBrand();
+                    last4 = pm.getCard().getLast4();
                 }
             } catch (Exception e) {
                 log.warn("Deposit succeeded but failed to fetch card display details: {}", e.getMessage());
             }
+            upsertSavedCardAsDefault(wallet, paymentMethodId, brand, last4);
         }
 
         walletRepository.save(wallet);
@@ -564,16 +685,18 @@ public class DepositService {
     @Transactional
     public void attachSavedCardByCustomerId(String stripeCustomerId, String paymentMethodId) {
         walletRepository.findByStripeCustomerId(stripeCustomerId).ifPresentOrElse(wallet -> {
-            wallet.setStripeDefaultPaymentMethodId(paymentMethodId);
+            String brand = null;
+            String last4 = null;
             try {
                 PaymentMethod pm = stripeService.retrievePaymentMethod(paymentMethodId);
                 if (pm.getCard() != null) {
-                    wallet.setStripeCardBrand(pm.getCard().getBrand());
-                    wallet.setStripeCardLast4(pm.getCard().getLast4());
+                    brand = pm.getCard().getBrand();
+                    last4 = pm.getCard().getLast4();
                 }
             } catch (Exception e) {
                 log.warn("SetupIntent succeeded but failed to fetch card display details: {}", e.getMessage());
             }
+            upsertSavedCardAsDefault(wallet, paymentMethodId, brand, last4);
             walletRepository.save(wallet);
             log.info("Stripe card saved via webhook: customerId={} paymentMethodId={}", stripeCustomerId, paymentMethodId);
         }, () -> log.warn("setup_intent.succeeded webhook: no wallet found for customerId={}", stripeCustomerId));

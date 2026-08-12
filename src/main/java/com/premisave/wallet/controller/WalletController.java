@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.http.ResponseEntity;
@@ -213,16 +214,46 @@ public class WalletController {
     }
 
     /**
-     * Removes the wallet's saved card. Distinct from /wallet/stripe/connect/link
-     * above — this is about the card used to DEPOSIT (charge the user), not
-     * the bank account used to WITHDRAW (pay the user).
-     * DELETE /wallet/stripe/card
+     * Lists every saved card for this wallet, newest first. Distinct from
+     * hasSavedCard/cardBrand/cardLast4 on the main GET /wallet response,
+     * which only reflects whichever card is currently the default — this
+     * is the full set, for a "manage payment methods" screen.
+     * GET /wallet/stripe/cards
      */
-    @DeleteMapping("/stripe/card")
-    public ResponseEntity<ApiResponse<Void>> removeStripeSavedCard(Authentication auth, HttpServletRequest request) {
+    @GetMapping("/stripe/cards")
+    public ResponseEntity<ApiResponse<List<SavedCardResponse>>> listStripeSavedCards(
+            Authentication auth, HttpServletRequest request) {
         String userId = resolveUserId(request);
-        depositService.removeSavedCard(userId);
+        List<SavedCardResponse> response = depositService.listSavedCards(userId).stream()
+                .map(c -> new SavedCardResponse(c.getStripePaymentMethodId(), c.getBrand(), c.getLast4(), c.isDefault()))
+                .toList();
+        return ResponseEntity.ok(ApiResponse.success("Saved cards retrieved", response));
+    }
+
+    /**
+     * Removes one specific saved card. If it was the default, the
+     * next-most-recent remaining card is promoted automatically.
+     * DELETE /wallet/stripe/cards/{paymentMethodId}
+     */
+    @DeleteMapping("/stripe/cards/{paymentMethodId}")
+    public ResponseEntity<ApiResponse<Void>> removeStripeSavedCard(
+            @PathVariable String paymentMethodId, Authentication auth, HttpServletRequest request) {
+        String userId = resolveUserId(request);
+        depositService.removeSavedCard(userId, paymentMethodId);
         return ResponseEntity.ok(ApiResponse.success("Saved card removed"));
+    }
+
+    /**
+     * Switches which saved card future deposits charge. App-level concept
+     * only — no Stripe call involved.
+     * PUT /wallet/stripe/cards/{paymentMethodId}/default
+     */
+    @PutMapping("/stripe/cards/{paymentMethodId}/default")
+    public ResponseEntity<ApiResponse<Void>> setDefaultStripeSavedCard(
+            @PathVariable String paymentMethodId, Authentication auth, HttpServletRequest request) {
+        String userId = resolveUserId(request);
+        depositService.setDefaultSavedCard(userId, paymentMethodId);
+        return ResponseEntity.ok(ApiResponse.success("Default card updated"));
     }
 
     // ─── Stripe Connect (bank withdrawal linking) ───────────────────────────
