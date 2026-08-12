@@ -344,6 +344,11 @@ public class PaymentCallbackController {
 	public ResponseEntity<ApiResponse<Void>> stripeWebhook(@RequestBody String payload,
 			@RequestHeader("Stripe-Signature") String sigHeader) {
 
+		if (stripeService.isV2Event(payload)) {
+			log.info("Ignoring Stripe v2 Core Event on platform webhook — this integration only handles v1 events");
+			return ResponseEntity.ok(ApiResponse.success("Webhook ignored (v2 event)"));
+		}
+
 		try {
 			Event event = stripeService.constructWebhookEvent(payload, sigHeader, stripeWebhookSecret);
 			log.info("Stripe webhook received: type={} id={}", event.getType(), event.getId());
@@ -410,6 +415,11 @@ public class PaymentCallbackController {
 	@PostMapping("/stripe/connect/webhook")
 	public ResponseEntity<ApiResponse<Void>> stripeConnectWebhook(@RequestBody String payload,
 			@RequestHeader("Stripe-Signature") String sigHeader) {
+
+		if (stripeService.isV2Event(payload)) {
+			log.info("Ignoring Stripe v2 Core Event on Connect webhook — this integration only handles v1 events");
+			return ResponseEntity.ok(ApiResponse.success("Webhook ignored (v2 event)"));
+		}
 
 		try {
 			Event event = stripeService.constructWebhookEvent(payload, sigHeader, stripeConnectWebhookSecret);

@@ -409,11 +409,32 @@ public class StripeService {
     // itself doesn't depend on the API key/client, only on which secret is
     // passed in, so one method covers both call sites.
 
+    /**
+     * Lightweight check for Stripe's newer "Accounts v2" event format
+     * (object: "v2.core.event") — a structurally different, incompatible
+     * payload shape from the v1 Event this service's constructWebhookEvent
+     * expects (created as an ISO-8601 string instead of a Unix timestamp,
+     * related_object instead of data.object, etc.). Connect account
+     * lifecycle changes (account created, capability status updated,
+     * recipient configuration updated) can emit these automatically even
+     * though this integration only creates accounts via the stable v1
+     * API — see createConnectedAccountAndOnboardingLink's javadoc on why
+     * v2 isn't used here. Attempting v1 deserialization on one of these
+     * throws a confusing Gson NumberFormatException, not a clean error —
+     * callers should check this FIRST and skip before ever reaching
+     * constructWebhookEvent.
+     */
+    public boolean isV2Event(String payload) {
+        return payload != null && payload.contains("\"object\":\"v2.core.event\"");
+    }
+
     public com.stripe.model.Event constructWebhookEvent(String payload, String sigHeader, String webhookSecret) {
         try {
             return com.stripe.net.Webhook.constructEvent(payload, sigHeader, webhookSecret);
-        } catch (Exception e) {
+        } catch (com.stripe.exception.SignatureVerificationException e) {
             throw new RuntimeException("Invalid Stripe webhook signature", e);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse Stripe webhook payload: " + e.getMessage(), e);
         }
     }
 }
