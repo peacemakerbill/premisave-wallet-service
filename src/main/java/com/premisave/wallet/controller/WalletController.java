@@ -244,6 +244,21 @@ public class WalletController {
     }
 
     /**
+     * Catches DELETE /wallet/stripe/cards or /wallet/stripe/cards/ — i.e.
+     * paymentMethodId was omitted or resolved to an empty string (e.g. an
+     * unset Postman variable). Spring can't route a request like this to
+     * removeStripeSavedCard above, since that mapping's {paymentMethodId}
+     * segment requires a non-empty value — without this companion mapping,
+     * the request falls through to Spring's static-resource handler and
+     * surfaces as a generic 500 instead of a clear validation error.
+     */
+    @DeleteMapping({"/stripe/cards", "/stripe/cards/"})
+    public ResponseEntity<ApiResponse<Void>> removeStripeSavedCardMissingId() {
+        throw new IllegalArgumentException(
+                "paymentMethodId is required — DELETE /wallet/stripe/cards/{paymentMethodId}");
+    }
+
+    /**
      * Switches which saved card future deposits charge. App-level concept
      * only — no Stripe call involved.
      * PUT /wallet/stripe/cards/{paymentMethodId}/default
@@ -254,6 +269,17 @@ public class WalletController {
         String userId = resolveUserId(request);
         depositService.setDefaultSavedCard(userId, paymentMethodId);
         return ResponseEntity.ok(ApiResponse.success("Default card updated"));
+    }
+
+    /**
+     * Same reasoning as removeStripeSavedCardMissingId above — catches
+     * PUT /wallet/stripe/cards/default (paymentMethodId segment collapsed
+     * away entirely) with a clear validation error instead of a 500.
+     */
+    @PutMapping("/stripe/cards/default")
+    public ResponseEntity<ApiResponse<Void>> setDefaultStripeSavedCardMissingId() {
+        throw new IllegalArgumentException(
+                "paymentMethodId is required — PUT /wallet/stripe/cards/{paymentMethodId}/default");
     }
 
     // ─── Stripe Connect (bank withdrawal linking) ───────────────────────────
