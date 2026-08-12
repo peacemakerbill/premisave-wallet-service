@@ -149,6 +149,15 @@ public class StripeService {
      *   authentication (CardException with code "authentication_required"),
      *   falls back to a client-confirmed PaymentIntent pre-filled with the
      *   same saved card, rather than failing the deposit outright.
+     *
+     * Explicitly restricted to payment_method_type "card" on every branch —
+     * without this, Stripe falls back to whatever payment methods are
+     * enabled on the Dashboard (this account had Link enabled), and any
+     * redirect-capable method in that set makes Stripe require a return_url
+     * at confirm time. flutter_stripe's plain card confirm doesn't supply
+     * one, so an unrestricted PaymentIntent fails at confirm with
+     * "you must provide a return_url" — same restriction createSetupIntent
+     * above already applies, just missing here until now.
      */
     public StripePaymentIntentResult createOrChargePaymentIntent(
             String customerId, String existingPaymentMethodId, BigDecimal amountKes,
@@ -162,6 +171,7 @@ public class StripeService {
                 .setCurrency(currency.toLowerCase())
                 .setDescription("Premisave wallet deposit")
                 .setCustomer(customerId)
+                .addPaymentMethodType("card")
                 .putMetadata("idempotency_key", idempotencyKey)
                 .putMetadata("user_id", userId);
 
@@ -191,6 +201,7 @@ public class StripeService {
                             .setDescription("Premisave wallet deposit")
                             .setCustomer(customerId)
                             .setPaymentMethod(existingPaymentMethodId)
+                            .addPaymentMethodType("card")
                             .putMetadata("idempotency_key", idempotencyKey)
                             .putMetadata("user_id", userId)
                             .build();
