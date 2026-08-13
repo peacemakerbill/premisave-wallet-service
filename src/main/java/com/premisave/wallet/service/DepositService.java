@@ -177,6 +177,22 @@ public class DepositService {
         return Map.of("clientSecret", si.getClientSecret(), "setupIntentId", si.getId());
     }
 
+    /**
+     * Confirms a SetupIntent and saves the resulting card.
+     *
+     * IMPORTANT: si.getPaymentMethod() is NOT re-validated by a plain GET —
+     * a SetupIntent keeps remembering its payment_method even after that
+     * PaymentMethod has since been detached elsewhere (e.g. via
+     * removeSavedCard). A duplicate or stale call to this method with an
+     * old setupIntentId — a re-sent Postman request, a retried frontend
+     * call, etc. — would otherwise silently resurrect a "ghost" SavedCard
+     * pointing at a PaymentMethod Stripe itself no longer considers
+     * attached to anyone, which then fails with "not attached to a
+     * customer" the next time someone tries to remove it. To prevent that,
+     * this fetches the PaymentMethod itself and checks pm.getCustomer() —
+     * null means it's already been detached, in which case this call is a
+     * no-op rather than re-saving stale state.
+     */
     @Transactional
     public void confirmStripeSetupIntent(String setupIntentId, String userId) {
         Wallet wallet = walletRepository.findByUserId(userId)
@@ -189,17 +205,24 @@ public class DepositService {
 
         if (si.getPaymentMethod() != null) {
             String paymentMethodId = (String) si.getPaymentMethod();
-            String brand = null;
-            String last4 = null;
+
+            PaymentMethod pm;
             try {
-                PaymentMethod pm = stripeService.retrievePaymentMethod(paymentMethodId);
-                if (pm.getCard() != null) {
-                    brand = pm.getCard().getBrand();
-                    last4 = pm.getCard().getLast4();
-                }
+                pm = stripeService.retrievePaymentMethod(paymentMethodId);
             } catch (Exception e) {
-                log.warn("Setup intent confirmed but failed to fetch card display details: {}", e.getMessage());
+                log.warn("Setup intent confirmed but failed to fetch payment method {}: {}", paymentMethodId, e.getMessage());
+                return;
             }
+
+            if (pm.getCustomer() == null) {
+                log.warn("SetupIntent {} payment_method {} is no longer attached to a customer — skipping " +
+                        "(likely a stale or duplicate confirm call for a card already removed)",
+                        setupIntentId, paymentMethodId);
+                return;
+            }
+
+            String brand = pm.getCard() != null ? pm.getCard().getBrand() : null;
+            String last4 = pm.getCard() != null ? pm.getCard().getLast4() : null;
 
             upsertSavedCardAsDefault(wallet, paymentMethodId, brand, last4);
             walletRepository.save(wallet);
@@ -312,6 +335,22 @@ public class DepositService {
      * "default payment method" is for invoicing, not what this off-session
      * deposit flow reads from.
      */
+    /**
+     * Sets a specific already-saved card as the one
+     * DepositService.initiateStripeDeposit will charge —
+     * PUT /wallet/stripe/cards/{paymentMethodId}/default. Doesn't call
+     * Stripe at all — this is purely an app-level concept; Stripe's own
+     * "default payment method" is for invoicing, not what this off-session
+     * deposit flow reads from.
+     *
+     * SECURITY:
+     *  - Ownership: paymentMethodId is looked up scoped to the caller's own
+     *    wallet, never fetched globally — a caller can't set another
+     *    user's card as their own default by guessing/reusing a pm_xxx id.
+     *  - Already-default rejection: matches freezeWallet/unfreezeWallet's
+     *    pattern — an explicit 409 beats a silent no-op that reports
+     *    "Default card updated" when nothing actually changed.
+     */
     @Transactional
     public void setDefaultSavedCard(String userId, String paymentMethodId) {
         Wallet wallet = walletRepository.findByUserId(userId)
@@ -320,6 +359,10 @@ public class DepositService {
         SavedCard card = savedCardRepository.findByStripePaymentMethodId(paymentMethodId)
                 .filter(c -> c.getWalletId().equals(wallet.getId()))
                 .orElseThrow(() -> new IllegalStateException("This card is not linked to your wallet."));
+
+        if (card.isDefault()) {
+            throw new IllegalStateException("This card is already your default card.");
+        }
 
         for (SavedCard other : savedCardRepository.findByWalletIdOrderByCreatedAtDesc(wallet.getId())) {
             if (other.isDefault() && !other.getId().equals(card.getId())) {

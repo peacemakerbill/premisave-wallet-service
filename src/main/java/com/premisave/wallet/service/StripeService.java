@@ -118,6 +118,18 @@ public class StripeService {
         try {
             stripeClient.v1().paymentMethods().detach(paymentMethodId, PaymentMethodDetachParams.builder().build());
             log.info("Stripe PaymentMethod detached: id={}", paymentMethodId);
+        } catch (com.stripe.exception.InvalidRequestException e) {
+            if (e.getMessage() != null && e.getMessage().contains("not attached to a customer")) {
+                // Already detached on Stripe's side — e.g. a stale
+                // SavedCard row resurrected by a re-confirmed/duplicate
+                // SetupIntent confirm call (see DepositService.
+                // confirmStripeSetupIntent javadoc). The end state the
+                // caller wants — this card gone — is already true, so
+                // treat it as a no-op success rather than a failure.
+                log.warn("Stripe PaymentMethod {} was already detached — treating as already-removed", paymentMethodId);
+                return;
+            }
+            throw new RuntimeException("Failed to detach Stripe PaymentMethod " + paymentMethodId + ": " + e.getMessage(), e);
         } catch (StripeException e) {
             throw new RuntimeException("Failed to detach Stripe PaymentMethod " + paymentMethodId + ": " + e.getMessage(), e);
         }
