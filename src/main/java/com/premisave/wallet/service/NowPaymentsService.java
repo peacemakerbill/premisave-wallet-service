@@ -17,6 +17,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -44,11 +45,27 @@ public class NowPaymentsService {
     private final ObjectMapper objectMapper = new ObjectMapper()
             .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true);
 
+    // Cached payout JWT — obtained via POST /v1/auth, valid 5 minutes.
+    // Refreshed with a 30-second safety margin rather than waiting for an
+    // actual 401, so a payout call doesn't fail mid-request on an
+    // about-to-expire token. synchronized rather than a more elaborate
+    // concurrency structure since payouts are inherently low-frequency
+    // (a human-initiated withdrawal, not a hot path) — contention here is
+    // not a realistic concern.
+    private String cachedPayoutToken;
+    private Instant cachedPayoutTokenExpiry = Instant.EPOCH;
+
     public record CreatePaymentResult(boolean success, String paymentId, String payAddress, String payAmount,
                                        String payCurrency, String paymentStatus, String message) {
     }
 
     public record PaymentStatusResult(boolean success, String paymentStatus, String actuallyPaid, String message) {
+    }
+
+    public record CreatePayoutResult(boolean success, String payoutId, String status, String message) {
+    }
+
+    public record PayoutStatusResult(boolean success, String status, String message) {
     }
 
     /**
@@ -141,6 +158,187 @@ public class NowPaymentsService {
         } catch (Exception e) {
             log.error("NOWPayments getPaymentStatus error: {}", e.getMessage(), e);
             return new PaymentStatusResult(false, null, null, "NOWPayments getPaymentStatus error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Obtains (or reuses a cached) short-lived JWT for payout endpoints —
+     * POST /v1/auth with the DASHBOARD LOGIN email/password (NOT the
+     * apiKey), returning a token valid 5 minutes. Confirmed against
+     * NOWPayments' own official Node.js SDK and multiple independent
+     * integration guides, since this endpoint isn't in the same Postman
+     * documentation as the deposit API and is easy to get wrong.
+     *
+     * Payout calls need BOTH this JWT (Authorization: Bearer) AND the
+     * regular x-api-key header — deposits only ever need the latter.
+     */
+    private synchronized String getAuthToken() throws java.io.IOException {
+        if (cachedPayoutToken != null && Instant.now().isBefore(cachedPayoutTokenExpiry)) {
+            return cachedPayoutToken;
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("email", config.getPayoutEmail());
+        body.put("password", config.getPayoutPassword());
+
+        String json = objectMapper.writeValueAsString(body);
+        RequestBody requestBody = RequestBody.create(json, MediaType.parse("application/json"));
+        Request request = new Request.Builder()
+                .url(config.getBaseUrl() + "/v1/auth")
+                .addHeader("Content-Type", "application/json")
+                .post(requestBody)
+                .build();
+
+        try (Response response = httpClient.newCall(request).execute()) {
+            String responseBody = response.body() != null ? response.body().string() : "";
+            if (!response.isSuccessful()) {
+                throw new java.io.IOException("NOWPayments auth failed (" + response.code() + "): " + responseBody);
+            }
+            JsonNode node = objectMapper.readTree(responseBody);
+            String token = node.path("token").asText(null);
+            if (token == null) {
+                throw new java.io.IOException("NOWPayments auth response missing 'token' field: " + responseBody);
+            }
+            // 30s safety margin inside the real 5-minute window.
+            cachedPayoutToken = token;
+            cachedPayoutTokenExpiry = Instant.now().plusSeconds(270);
+            return token;
+        }
+    }
+
+    /**
+     * Creates a payout — POST /v1/payout. Single-recipient even though
+     * NOWPayments' own "Mass Payouts" branding implies batches; the
+     * withdrawals array always carries exactly one entry here, matching
+     * how Premisave models one user's one withdrawal request.
+     *
+     * DOES NOT move funds by itself. NOWPayments requires a SEPARATE
+     * verification step (see verifyPayout below) before this executes —
+     * per their own support docs, an unverified payout auto-rejects after
+     * 1 hour. Whether that verification can be automated (TOTP app-based
+     * 2FA) or needs a human (email-based 2FA) depends entirely on how 2FA
+     * is configured on the NOWPayments account itself — see
+     * DisbursementService.verifyNowPaymentsDisbursement's javadoc.
+     */
+    public CreatePayoutResult createPayout(String address, String currency, BigDecimal amount, String uniqueExternalId) {
+        try {
+            String token = getAuthToken();
+
+            Map<String, Object> withdrawal = new LinkedHashMap<>();
+            withdrawal.put("address", address);
+            withdrawal.put("currency", currency.toLowerCase());
+            withdrawal.put("amount", amount);
+            withdrawal.put("unique_external_id", uniqueExternalId);
+
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("ipn_callback_url", config.getCallbackUrl());
+            body.put("withdrawals", List.of(withdrawal));
+
+            String json = objectMapper.writeValueAsString(body);
+            RequestBody requestBody = RequestBody.create(json, MediaType.parse("application/json"));
+            Request request = new Request.Builder()
+                    .url(config.getBaseUrl() + "/v1/payout")
+                    .addHeader("Authorization", "Bearer " + token)
+                    .addHeader("x-api-key", config.getApiKey())
+                    .addHeader("Content-Type", "application/json")
+                    .post(requestBody)
+                    .build();
+
+            try (Response response = httpClient.newCall(request).execute()) {
+                String responseBody = response.body() != null ? response.body().string() : "";
+                if (!response.isSuccessful()) {
+                    log.warn("NOWPayments createPayout failed: status={} body={}", response.code(), responseBody);
+                    return new CreatePayoutResult(false, null, null,
+                            "NOWPayments createPayout failed (" + response.code() + "): " + responseBody);
+                }
+
+                // Response wraps the single withdrawal under "withdrawals":
+                // [{...}] — same shape as the request, per NOWPayments'
+                // batch-oriented design. Not independently confirmed
+                // against a live sandbox response at the time this was
+                // written — verify the actual field path once you can hit
+                // the real endpoint, and adjust if it differs.
+                JsonNode node = objectMapper.readTree(responseBody);
+                JsonNode first = node.path("withdrawals").isArray() && node.path("withdrawals").size() > 0
+                        ? node.path("withdrawals").get(0)
+                        : node;
+
+                String payoutId = first.path("id").asText(null);
+                String status = first.path("status").asText(null);
+
+                log.info("NOWPayments payout created: payoutId={} uniqueExternalId={} address={} amount={} {} status={}",
+                        payoutId, uniqueExternalId, address, amount, currency, status);
+                return new CreatePayoutResult(true, payoutId, status, "Payout created — awaiting verification");
+            }
+        } catch (Exception e) {
+            log.error("NOWPayments createPayout error: {}", e.getMessage(), e);
+            return new CreatePayoutResult(false, null, null, "NOWPayments createPayout error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Verifies a created payout with a 2FA code — POST /v1/payout/{id}/verify
+     * — the step that actually makes it execute. Per NOWPayments' own
+     * support docs: if this isn't called within roughly 1 hour of
+     * creation, the payout is automatically rejected.
+     */
+    public boolean verifyPayout(String payoutId, String verificationCode) {
+        try {
+            String token = getAuthToken();
+
+            Map<String, Object> body = Map.of("verification_code", verificationCode);
+            String json = objectMapper.writeValueAsString(body);
+            RequestBody requestBody = RequestBody.create(json, MediaType.parse("application/json"));
+            Request request = new Request.Builder()
+                    .url(config.getBaseUrl() + "/v1/payout/" + payoutId + "/verify")
+                    .addHeader("Authorization", "Bearer " + token)
+                    .addHeader("x-api-key", config.getApiKey())
+                    .addHeader("Content-Type", "application/json")
+                    .post(requestBody)
+                    .build();
+
+            try (Response response = httpClient.newCall(request).execute()) {
+                String responseBody = response.body() != null ? response.body().string() : "";
+                if (!response.isSuccessful()) {
+                    log.warn("NOWPayments verifyPayout failed: payoutId={} status={} body={}",
+                            payoutId, response.code(), responseBody);
+                    return false;
+                }
+                log.info("NOWPayments payout verified: payoutId={}", payoutId);
+                return true;
+            }
+        } catch (Exception e) {
+            log.error("NOWPayments verifyPayout error: payoutId={} {}", payoutId, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /** GET /v1/payout/{id} — manual status check, mainly for reconciliation; the IPN webhook is the primary path. */
+    public PayoutStatusResult getPayoutStatus(String payoutId) {
+        try {
+            String token = getAuthToken();
+
+            Request request = new Request.Builder()
+                    .url(config.getBaseUrl() + "/v1/payout/" + payoutId)
+                    .addHeader("Authorization", "Bearer " + token)
+                    .addHeader("x-api-key", config.getApiKey())
+                    .get()
+                    .build();
+
+            try (Response response = httpClient.newCall(request).execute()) {
+                String responseBody = response.body() != null ? response.body().string() : "";
+                if (!response.isSuccessful()) {
+                    log.warn("NOWPayments getPayoutStatus failed: payoutId={} status={} body={}",
+                            payoutId, response.code(), responseBody);
+                    return new PayoutStatusResult(false, null,
+                            "NOWPayments getPayoutStatus failed (" + response.code() + "): " + responseBody);
+                }
+                JsonNode node = objectMapper.readTree(responseBody);
+                return new PayoutStatusResult(true, node.path("status").asText(null), "OK");
+            }
+        } catch (Exception e) {
+            log.error("NOWPayments getPayoutStatus error: payoutId={} {}", payoutId, e.getMessage(), e);
+            return new PayoutStatusResult(false, null, "NOWPayments getPayoutStatus error: " + e.getMessage());
         }
     }
 

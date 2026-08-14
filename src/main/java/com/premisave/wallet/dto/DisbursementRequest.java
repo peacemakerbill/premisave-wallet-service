@@ -28,6 +28,8 @@ public class DisbursementRequest {
      *  - FLUTTERWAVE → IGNORED. Use flutterwaveAccountBank/flutterwaveAccountNumber
      *                  instead — a bank/mobile-money transfer needs a
      *                  two-part destination, not a single string.
+     *  - NOWPAYMENTS → Required — the recipient's crypto wallet address.
+     *                  Paired with nowPaymentsCurrency below (which crypto).
      *
      * Not annotated @NotBlank here since it's genuinely optional for MPESA/
      * STRIPE/FLUTTERWAVE; DisbursementService enforces it manually per provider.
@@ -35,7 +37,7 @@ public class DisbursementRequest {
     private String destination;
 
     /**
-     * Provider: MPESA | STRIPE | PAYPAL | FLUTTERWAVE
+     * Provider: MPESA | STRIPE | PAYPAL | FLUTTERWAVE | NOWPAYMENTS
      * Defaults to MPESA if omitted.
      */
     private String provider;
@@ -80,4 +82,12 @@ public class DisbursementRequest {
 
     /** Optional, provider=FLUTTERWAVE only — beneficiary's display name, passed through to Flutterwave. */
     private String flutterwaveBeneficiaryName;
+
+    /**
+     * Required for provider=NOWPAYMENTS — the cryptocurrency being sent
+     * (e.g. "trx", "btc", "usdttrc20"). Paired with destination above (the
+     * wallet address). NOWPayments' payout endpoint takes this as its own
+     * per-withdrawal currency field, separate from the KES amount field.
+     */
+    private String nowPaymentsCurrency;
 }

@@ -45,4 +45,15 @@ public class NowPaymentsConfig {
      * as ipn_callback_url on every Create Payment request.
      */
     private String callbackUrl;
+
+    /**
+     * Your NOWPayments DASHBOARD LOGIN email/password — NOT the same thing
+     * as apiKey above, and a meaningfully more sensitive secret. Required
+     * only for payouts: NOWPayments' payout endpoints need a short-lived
+     * JWT (see NowPaymentsService.getAuthToken), obtained via POST /v1/auth
+     * with these credentials, IN ADDITION to the x-api-key header every
+     * other call uses. Deposits never touch these two fields at all.
+     */
+    private String payoutEmail;
+    private String payoutPassword;
 }
