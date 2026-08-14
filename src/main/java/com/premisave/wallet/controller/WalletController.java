@@ -4,7 +4,10 @@ import com.premisave.wallet.dto.*;
 import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.repository.WalletRepository;
 import com.premisave.wallet.service.DepositService;
+import com.premisave.wallet.service.FlutterwaveDepositService;
 import com.premisave.wallet.service.FlutterwaveService;
+import com.premisave.wallet.service.PaypalDepositService;
+import com.premisave.wallet.service.StripeDepositService;
 import com.premisave.wallet.service.TransferService;
 import com.premisave.wallet.service.WalletService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -29,6 +32,9 @@ public class WalletController {
     private final WalletService walletService;
     private final TransferService transferService;
     private final DepositService depositService;
+    private final StripeDepositService stripeDepositService;
+    private final PaypalDepositService paypalDepositService;
+    private final FlutterwaveDepositService flutterwaveDepositService;
     private final FlutterwaveService flutterwaveService;
     private final WalletRepository walletRepository;
 
@@ -137,7 +143,7 @@ public class WalletController {
     @PostMapping("/paypal/link")
     public ResponseEntity<ApiResponse<Map<String, String>>> createPaypalLink(Authentication auth, HttpServletRequest request) {
         String userId = resolveUserId(request);
-        Map<String, String> result = depositService.createPaypalLinkToken(userId);
+        Map<String, String> result = paypalDepositService.createPaypalLinkToken(userId);
         return ResponseEntity.ok(ApiResponse.success("PayPal link initiated", result));
     }
 
@@ -150,7 +156,7 @@ public class WalletController {
             throw new IllegalArgumentException("setupTokenId is required");
         }
         String userId = resolveUserId(request);
-        depositService.confirmPaypalLink(setupTokenId, userId);
+        paypalDepositService.confirmPaypalLink(setupTokenId, userId);
         return ResponseEntity.ok(ApiResponse.success("PayPal account linked"));
     }
 
@@ -196,7 +202,7 @@ public class WalletController {
     public ResponseEntity<ApiResponse<Map<String, String>>> createStripeSetupIntent(Authentication auth, HttpServletRequest request) {
         String userId = resolveUserId(request);
         String email = auth.getName();
-        Map<String, String> result = depositService.createStripeSetupIntent(userId, email);
+        Map<String, String> result = stripeDepositService.createStripeSetupIntent(userId, email);
         return ResponseEntity.ok(ApiResponse.success("Setup intent created", result));
     }
 
@@ -209,7 +215,7 @@ public class WalletController {
             throw new IllegalArgumentException("setupIntentId is required");
         }
         String userId = resolveUserId(request);
-        depositService.confirmStripeSetupIntent(setupIntentId, userId);
+        stripeDepositService.confirmStripeSetupIntent(setupIntentId, userId);
         return ResponseEntity.ok(ApiResponse.success("Card saved"));
     }
 
@@ -224,7 +230,7 @@ public class WalletController {
     public ResponseEntity<ApiResponse<List<SavedCardResponse>>> listStripeSavedCards(
             Authentication auth, HttpServletRequest request) {
         String userId = resolveUserId(request);
-        List<SavedCardResponse> response = depositService.listSavedCards(userId).stream()
+        List<SavedCardResponse> response = stripeDepositService.listSavedCards(userId).stream()
                 .map(c -> new SavedCardResponse(c.getStripePaymentMethodId(), c.getBrand(), c.getLast4(), c.isDefault()))
                 .toList();
         return ResponseEntity.ok(ApiResponse.success("Saved cards retrieved", response));
@@ -239,7 +245,7 @@ public class WalletController {
     public ResponseEntity<ApiResponse<Void>> removeStripeSavedCard(
             @PathVariable String paymentMethodId, Authentication auth, HttpServletRequest request) {
         String userId = resolveUserId(request);
-        depositService.removeSavedCard(userId, paymentMethodId);
+        stripeDepositService.removeSavedCard(userId, paymentMethodId);
         return ResponseEntity.ok(ApiResponse.success("Saved card removed"));
     }
 
@@ -267,7 +273,7 @@ public class WalletController {
     public ResponseEntity<ApiResponse<Void>> setDefaultStripeSavedCard(
             @PathVariable String paymentMethodId, Authentication auth, HttpServletRequest request) {
         String userId = resolveUserId(request);
-        depositService.setDefaultSavedCard(userId, paymentMethodId);
+        stripeDepositService.setDefaultSavedCard(userId, paymentMethodId);
         return ResponseEntity.ok(ApiResponse.success("Default card updated"));
     }
 
@@ -299,7 +305,7 @@ public class WalletController {
             Authentication auth, HttpServletRequest request) {
         String userId = resolveUserId(request);
         String email = auth.getName();
-        Map<String, String> result = depositService.createStripeConnectLink(userId, email);
+        Map<String, String> result = stripeDepositService.createStripeConnectLink(userId, email);
         return ResponseEntity.ok(ApiResponse.success("Stripe Connect onboarding started", result));
     }
 
@@ -373,7 +379,7 @@ public class WalletController {
             throw new IllegalArgumentException("orderId is required");
         }
         String userId = resolveUserId(request);
-        PaymentResponse response = depositService.confirmPaypalDeposit(orderId, userId);
+        PaymentResponse response = paypalDepositService.confirmPaypalDeposit(orderId, userId);
         return ResponseEntity.ok(ApiResponse.success("PayPal deposit processed", response));
     }
 
@@ -386,7 +392,7 @@ public class WalletController {
             throw new IllegalArgumentException("paymentIntentId is required");
         }
         String userId = resolveUserId(request);
-        PaymentResponse response = depositService.confirmStripeDeposit(paymentIntentId, userId);
+        PaymentResponse response = stripeDepositService.confirmStripeDeposit(paymentIntentId, userId);
         return ResponseEntity.ok(ApiResponse.success("Stripe deposit processed", response));
     }
 
@@ -399,7 +405,7 @@ public class WalletController {
             throw new IllegalArgumentException("txRef is required");
         }
         String userId = resolveUserId(request);
-        PaymentResponse response = depositService.confirmFlutterwaveDeposit(txRef, userId);
+        PaymentResponse response = flutterwaveDepositService.confirmFlutterwaveDeposit(txRef, userId);
         return ResponseEntity.ok(ApiResponse.success("Flutterwave deposit processed", response));
     }
 

@@ -8,12 +8,15 @@ import com.premisave.wallet.dto.FlutterwaveWebhookRequest;
 import com.premisave.wallet.dto.MpesaResultCallbackRequest;
 import com.premisave.wallet.dto.MpesaStkCallbackRequest;
 import com.premisave.wallet.dto.PaypalWebhookRequest;
-import com.premisave.wallet.service.DepositService;
 import com.premisave.wallet.service.DisbursementService;
+import com.premisave.wallet.service.FlutterwaveDepositService;
 import com.premisave.wallet.service.FlutterwaveService;
+import com.premisave.wallet.service.MpesaDepositService;
 import com.premisave.wallet.service.MpesaOperationsService;
+import com.premisave.wallet.service.PaypalDepositService;
 import com.premisave.wallet.service.PaypalService;
 import com.premisave.wallet.service.PullTransactionService;
+import com.premisave.wallet.service.StripeDepositService;
 import com.stripe.model.Event;
 import com.stripe.model.PaymentIntent;
 import com.stripe.model.Payout;
@@ -57,7 +60,10 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class PaymentCallbackController {
 
-	private final DepositService depositService;
+	private final MpesaDepositService mpesaDepositService;
+	private final StripeDepositService stripeDepositService;
+	private final PaypalDepositService paypalDepositService;
+	private final FlutterwaveDepositService flutterwaveDepositService;
 	private final DisbursementService disbursementService;
 	private final MpesaOperationsService mpesaOperationsService;
 	private final PullTransactionService pullTransactionService;
@@ -95,7 +101,7 @@ public class PaymentCallbackController {
 		try {
 			if (stk.getResultCode() != 0) {
 				// Not an error on our side — user cancelled, wrong PIN, timed out, etc.
-				depositService.markStkTransactionFailed(checkoutRequestId, stk.getResultDesc());
+				mpesaDepositService.markStkTransactionFailed(checkoutRequestId, stk.getResultDesc());
 				return ResponseEntity.ok(ApiResponse.success("Callback processed (payment not completed)"));
 			}
 
@@ -110,7 +116,7 @@ public class PaymentCallbackController {
 			String mpesaReceipt = String.valueOf(values.get("MpesaReceiptNumber"));
 			String phoneNumber = String.valueOf(values.get("PhoneNumber"));
 
-			depositService.creditWalletFromStkCallback(checkoutRequestId, amount, mpesaReceipt, phoneNumber);
+			mpesaDepositService.creditWalletFromStkCallback(checkoutRequestId, amount, mpesaReceipt, phoneNumber);
 
 			return ResponseEntity.ok(ApiResponse.success("Callback processed"));
 		} catch (Exception e) {
@@ -193,7 +199,7 @@ public class PaymentCallbackController {
 
 		try {
 			BigDecimal amount = callback.getAmount() != null ? new BigDecimal(callback.getAmount()) : BigDecimal.ZERO;
-			depositService.creditWalletFromExpressCheckout(requestId, amount, callback.getTransactionId(),
+			mpesaDepositService.creditWalletFromExpressCheckout(requestId, amount, callback.getTransactionId(),
 					callback.getResultDesc(), success);
 		} catch (Exception e) {
 			log.error("Failed to process B2B Express Checkout callback: requestId={}", requestId, e);
@@ -360,7 +366,7 @@ public class PaymentCallbackController {
 				BigDecimal amount = BigDecimal.valueOf(pi.getAmount()).divide(BigDecimal.valueOf(100));
 
 				if (reference != null) {
-					depositService.creditWalletFromStripeCallback(reference, amount, pi.getId(), pi.getCurrency(),
+					stripeDepositService.creditWalletFromStripeCallback(reference, amount, pi.getId(), pi.getCurrency(),
 							pi.getCustomer(), pi.getPaymentMethod());
 					log.info("Stripe deposit completed: reference={} amount={}", reference, amount);
 				} else {
@@ -380,7 +386,7 @@ public class PaymentCallbackController {
 						: "Payment failed";
 
 				if (reference != null) {
-					depositService.markStripeTransactionFailed(reference, reason);
+					stripeDepositService.markStripeTransactionFailed(reference, reason);
 					log.info("Stripe deposit failed: reference={} reason={}", reference, reason);
 				} else {
 					log.warn("Stripe PaymentIntent {} failed but has no idempotency_key metadata — cannot reconcile", pi.getId());
@@ -389,7 +395,7 @@ public class PaymentCallbackController {
 				SetupIntent si = (SetupIntent) event.getDataObjectDeserializer().deserializeUnsafe();
 
 				if (si.getCustomer() != null && si.getPaymentMethod() != null) {
-					depositService.attachSavedCardByCustomerId(si.getCustomer(), si.getPaymentMethod());
+					stripeDepositService.attachSavedCardByCustomerId(si.getCustomer(), si.getPaymentMethod());
 					log.info("Stripe card saved via webhook: customerId={} paymentMethodId={}", si.getCustomer(),
 							si.getPaymentMethod());
 				} else {
@@ -515,7 +521,7 @@ public class PaymentCallbackController {
 			log.info("PayPal webhook received (verified): type={}", payload.getEventType());
 
 			if ("CHECKOUT.ORDER.APPROVED".equals(payload.getEventType()) && payload.getResource() != null) {
-				depositService.confirmPaypalDeposit(payload.getResource().getId());
+				paypalDepositService.confirmPaypalDeposit(payload.getResource().getId());
 			} else if ("VAULT.PAYMENT-TOKEN.CREATED".equals(payload.getEventType()) && payload.getResource() != null) {
 				var resource = payload.getResource();
 				String vaultId = resource.getId();
@@ -523,7 +529,7 @@ public class PaymentCallbackController {
 				String email = resource.getPaymentSource() != null && resource.getPaymentSource().getPaypal() != null
 						? resource.getPaymentSource().getPaypal().getEmailAddress()
 						: null;
-				depositService.attachPaypalVaultToken(vaultId, customerId, email);
+				paypalDepositService.attachPaypalVaultToken(vaultId, customerId, email);
 			} else if ("PAYMENT.CAPTURE.COMPLETED".equals(payload.getEventType())) {
 				// Backstop for vault-reuse auto-capture: when an order was
 				// captured synchronously at creation time (existing vault_id,
@@ -537,7 +543,7 @@ public class PaymentCallbackController {
 						.path("order_id").asText(null);
 
 				if (orderId != null && !orderId.isBlank()) {
-					depositService.confirmPaypalDeposit(orderId);
+					paypalDepositService.confirmPaypalDeposit(orderId);
 				} else {
 					log.warn(
 							"PAYMENT.CAPTURE.COMPLETED webhook missing resource.supplementary_data.related_ids.order_id — cannot reconcile");
@@ -622,9 +628,9 @@ public class PaymentCallbackController {
 				} else if ("succeeded".equalsIgnoreCase(status)) {
 					// Re-verify server-side before crediting — see
 					// FlutterwaveService.verifyChargeById's javadoc.
-					depositService.creditWalletFromFlutterwaveCallback(txRef, chargeId);
+					flutterwaveDepositService.creditWalletFromFlutterwaveCallback(txRef, chargeId);
 				} else {
-					depositService.markFlutterwaveTransactionFailed(txRef, "Flutterwave reported status=" + status);
+					flutterwaveDepositService.markFlutterwaveTransactionFailed(txRef, "Flutterwave reported status=" + status);
 				}
 			} else if ("transfer.disburse".equals(event) && data != null) {
 				String transferId = data.path("id").asText(null);
