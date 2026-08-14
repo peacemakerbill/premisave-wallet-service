@@ -14,7 +14,7 @@ public class DepositRequest {
     private BigDecimal amount;
 
     /**
-     * Payment provider: MPESA | MPESA_TILL | STRIPE | PAYPAL | FLUTTERWAVE
+     * Payment provider: MPESA | MPESA_TILL | STRIPE | PAYPAL | FLUTTERWAVE | NOWPAYMENTS
      * Defaults to MPESA if omitted.
      */
     private String provider;
@@ -37,8 +37,14 @@ public class DepositRequest {
     private String payerTillNumber;
 
     /**
-     * ISO 4217 currency code (e.g. KES, USD, EUR).
+     * ISO 4217 currency code (e.g. KES, USD, EUR) for most providers.
      * Defaults to KES for M-Pesa, USD for PayPal and Flutterwave.
+     *
+     * EXCEPTION — provider=NOWPAYMENTS: this is the CRYPTOCURRENCY the
+     * customer will pay in (e.g. "usdttrc20", "btc"), not a fiat code. The
+     * wallet is always credited in KES regardless; NOWPayments quotes what
+     * that KES amount costs in the chosen crypto. See
+     * NowPaymentsDepositService.initiateNowPaymentsDeposit.
      */
     private String currency;
 
@@ -78,4 +84,18 @@ public class DepositRequest {
      * Mobile Money docs before going live with a new country.
      */
     private String flutterwaveMobileNetwork;
+
+    /**
+     * SANDBOX TESTING ONLY, provider=NOWPAYMENTS only — e.g. "finished",
+     * "failed", "partially_paid". Passed straight through to NOWPayments'
+     * Create Payment "case" parameter, which makes it immediately simulate
+     * that outcome via a synthetic IPN callback — no real crypto needed,
+     * same purpose as flutterwave.sandbox-scenario-key, just per-request
+     * here instead of account-wide, since NOWPayments' own API takes it
+     * per-payment rather than per-account.
+     *
+     * NOWPayments' production environment simply doesn't recognize "case"
+     * at all — leave this null/blank in production requests regardless.
+     */
+    private String nowPaymentsSandboxCase;
 }

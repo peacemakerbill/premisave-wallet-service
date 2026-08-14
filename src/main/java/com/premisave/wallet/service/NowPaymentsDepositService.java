@@ -44,6 +44,12 @@ public class NowPaymentsDepositService {
      * order_id is set to the idempotencyKey, same role as every other
      * provider's txRef/reference — this is what the IPN webhook and any
      * manual status check key back off of.
+     *
+     * request.getNowPaymentsSandboxCase() (sandbox only) is forwarded
+     * straight through to NOWPayments' Create Payment "case" parameter —
+     * set it to "finished"/"failed"/"partially_paid"/etc. to get an
+     * instant synthetic IPN callback simulating that outcome, no real
+     * crypto required. Null in production, where it's simply not sent.
      */
     public PaymentResponse initiateNowPaymentsDeposit(String userId, DepositRequest request, Wallet wallet,
                                                         String idempotencyKey) {
@@ -55,7 +61,8 @@ public class NowPaymentsDepositService {
         }
 
         NowPaymentsService.CreatePaymentResult result = nowPaymentsService.createPayment(
-                request.getAmount(), "kes", payCurrency, idempotencyKey, "Premisave wallet deposit", null);
+                request.getAmount(), "kes", payCurrency, idempotencyKey, "Premisave wallet deposit",
+                request.getNowPaymentsSandboxCase());
 
         if (!result.success()) {
             log.warn("NOWPayments payment creation rejected: userId={} reason={}", userId, result.message());
