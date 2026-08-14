@@ -149,6 +149,33 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ex.getMessage()));
     }
 
+    /**
+     * Thrown by PaymentCallbackController.stripeWebhook / stripeConnectWebhook
+     * (via StripeService.constructWebhookEvent) when the Stripe-Signature
+     * header doesn't match what's expected for the given secret. Centralized
+     * here rather than caught locally in each webhook method, matching every
+     * other exception in this file — also lets both endpoints share one
+     * handler while still telling them apart via the request path, since the
+     * fix differs slightly (STRIPE_WEBHOOK_SECRET vs STRIPE_CONNECT_WEBHOOK_SECRET).
+     *
+     * Expected, recoverable class of failure — a mismatched or stale secret,
+     * usually from switching sandboxes or rotating webhook destinations. No
+     * stack trace: the fix is always "update the secret to match this
+     * destination's current signing secret," never a code change. Stripe
+     * retries automatically once corrected, so a 400 here is safe.
+     */
+    @ExceptionHandler(com.stripe.exception.SignatureVerificationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleStripeSignatureVerification(
+            com.stripe.exception.SignatureVerificationException ex, HttpServletRequest request) {
+        String envVarHint = request.getRequestURI().contains("/connect/webhook")
+                ? "STRIPE_CONNECT_WEBHOOK_SECRET matches the Connect Webhook destination's"
+                : "STRIPE_WEBHOOK_SECRET matches the Platform Webhook destination's";
+        log.warn("Stripe webhook signature verification failed at {} — check {} current signing secret",
+                request.getRequestURI(), envVarHint);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.error("Invalid webhook signature"));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleGeneric(Exception ex, HttpServletRequest request) {
         log.error("Unhandled exception at {}: {}", request.getRequestURI(), ex.getMessage(), ex);

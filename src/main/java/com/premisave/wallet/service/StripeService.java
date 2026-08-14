@@ -451,11 +451,20 @@ public class StripeService {
         return payload != null && payload.contains("\"object\":\"v2.core.event\"");
     }
 
-    public com.stripe.model.Event constructWebhookEvent(String payload, String sigHeader, String webhookSecret) {
+    public com.stripe.model.Event constructWebhookEvent(String payload, String sigHeader, String webhookSecret)
+            throws com.stripe.exception.SignatureVerificationException {
         try {
             return com.stripe.net.Webhook.constructEvent(payload, sigHeader, webhookSecret);
         } catch (com.stripe.exception.SignatureVerificationException e) {
-            throw new RuntimeException("Invalid Stripe webhook signature", e);
+            // Not wrapped — left as its real type so PaymentCallbackController
+            // can catch SignatureVerificationException specifically and log
+            // it as a clean one-liner (a mismatched/stale webhook secret is
+            // an expected, recoverable config issue during testing, not a
+            // bug — same reasoning as the isV2Event check above). A generic
+            // RuntimeException here would force the caller to either log
+            // every failure with a full stack trace or fragile message-string
+            // matching to tell them apart.
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("Failed to parse Stripe webhook payload: " + e.getMessage(), e);
         }
