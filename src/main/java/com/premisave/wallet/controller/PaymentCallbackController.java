@@ -348,17 +348,22 @@ public class PaymentCallbackController {
 
 	@PostMapping("/stripe/webhook")
 	public ResponseEntity<ApiResponse<Void>> stripeWebhook(@RequestBody String payload,
-			@RequestHeader("Stripe-Signature") String sigHeader) {
+			@RequestHeader("Stripe-Signature") String sigHeader)
+			throws com.stripe.exception.SignatureVerificationException {
 
 		if (stripeService.isV2Event(payload)) {
 			log.info("Ignoring Stripe v2 Core Event on platform webhook — this integration only handles v1 events");
 			return ResponseEntity.ok(ApiResponse.success("Webhook ignored (v2 event)"));
 		}
 
-		try {
-			Event event = stripeService.constructWebhookEvent(payload, sigHeader, stripeWebhookSecret);
-			log.info("Stripe webhook received: type={} id={}", event.getType(), event.getId());
+		// Called outside the try/catch below on purpose — its generic
+		// catch (Exception e) would otherwise intercept
+		// SignatureVerificationException too (it's an Exception subtype)
+		// before it could ever reach GlobalExceptionHandler.
+		Event event = stripeService.constructWebhookEvent(payload, sigHeader, stripeWebhookSecret);
+		log.info("Stripe webhook received: type={} id={}", event.getType(), event.getId());
 
+		try {
 			if ("payment_intent.succeeded".equals(event.getType())) {
 				PaymentIntent pi = (PaymentIntent) event.getDataObjectDeserializer().deserializeUnsafe();
 
@@ -410,8 +415,6 @@ public class PaymentCallbackController {
 		}
 	}
 
-	// ─── Stripe Connect Webhook (payouts, connected account status) ───────────
-
 	/**
 	 * SEPARATE endpoint from /payments/stripe/webhook above — Stripe requires
 	 * a distinct webhook destination configured to "Listen to events on
@@ -439,18 +442,22 @@ public class PaymentCallbackController {
 	 */
 	@PostMapping("/stripe/connect/webhook")
 	public ResponseEntity<ApiResponse<Void>> stripeConnectWebhook(@RequestBody String payload,
-			@RequestHeader("Stripe-Signature") String sigHeader) {
+			@RequestHeader("Stripe-Signature") String sigHeader)
+			throws com.stripe.exception.SignatureVerificationException {
 
 		if (stripeService.isV2Event(payload)) {
 			log.info("Ignoring Stripe v2 Core Event on Connect webhook — this integration only handles v1 events");
 			return ResponseEntity.ok(ApiResponse.success("Webhook ignored (v2 event)"));
 		}
 
-		try {
-			Event event = stripeService.constructWebhookEvent(payload, sigHeader, stripeConnectWebhookSecret);
-			log.info("Stripe Connect webhook received: type={} id={} account={}",
-					event.getType(), event.getId(), event.getAccount());
+		// Same reasoning as stripeWebhook above — called outside the try
+		// block below so SignatureVerificationException isn't swallowed by
+		// its generic catch (Exception e) before reaching GlobalExceptionHandler.
+		Event event = stripeService.constructWebhookEvent(payload, sigHeader, stripeConnectWebhookSecret);
+		log.info("Stripe Connect webhook received: type={} id={} account={}",
+				event.getType(), event.getId(), event.getAccount());
 
+		try {
 			if ("payout.paid".equals(event.getType())) {
 				Payout payout = (Payout) event.getDataObjectDeserializer().deserializeUnsafe();
 				disbursementService.completeStripeConnectDisbursement(payout.getId(), true, null);
