@@ -19,19 +19,7 @@ import java.util.List;
 /**
  * Logs the raw request body for every payment-provider callback endpoint,
  * BEFORE Jackson attempts to deserialize it into a DTO.
- *
- * Added after an incident where B2C/B2Pochi ResultURL callbacks were
- * confirmed (via the zrok tunnel logs) to be reaching this service, but
- * never appeared in application logs at all — not even the controller's
- * first log.info line. Root cause was a schema mismatch in
- * MpesaResultCallbackRequest (see that class) that made Jackson reject the
- * whole request with HttpMessageNotReadableException before the controller
- * method — and therefore its logging — ever ran. Spring MVC reads the
- * request body directly off the raw InputStream, so by the time an
- * exception handler catches a deserialization failure, the body is already
- * consumed and unavailable unless it was cached up front — hence this
- * filter wrapping the request in a ContentCachingRequestWrapper.
- *
+ * 
  * This filter exists so that class of failure (a provider changing its
  * payload shape) is never silent again, independent of whether
  * deserialization downstream succeeds or fails.
@@ -61,8 +49,10 @@ public class CallbackRequestLoggingFilter extends OncePerRequestFilter {
             "/payments/mpesa/b2pochi/timeout",
             "/payments/mpesa/pull/callback",
             "/payments/stripe/webhook",
+            "/payments/stripe/connect/webhook",
             "/payments/paypal/webhook",
-            "/payments/flutterwave/webhook"
+            "/payments/flutterwave/webhook",
+            "/payments/nowpayments/webhook"
     );
 
     @Override

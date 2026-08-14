@@ -13,6 +13,8 @@ import com.premisave.wallet.service.FlutterwaveDepositService;
 import com.premisave.wallet.service.FlutterwaveService;
 import com.premisave.wallet.service.MpesaDepositService;
 import com.premisave.wallet.service.MpesaOperationsService;
+import com.premisave.wallet.service.NowPaymentsDepositService;
+import com.premisave.wallet.service.NowPaymentsService;
 import com.premisave.wallet.service.PaypalDepositService;
 import com.premisave.wallet.service.PaypalService;
 import com.premisave.wallet.service.PullTransactionService;
@@ -36,9 +38,9 @@ import java.util.Map;
 /**
  * Handles incoming webhooks/callbacks from all payment providers: M-Pesa (STK
  * Push, B2C, B2B, B2B Express Checkout, Account Balance, Transaction Status,
- * Reversal, B2Pochi), Stripe (platform + Connect), PayPal, and Flutterwave.
- * All endpoints are PUBLIC (no JWT) — secured by signature verification or
- * IP allowlist at the gateway/firewall level.
+ * Reversal, B2Pochi), Stripe (platform + Connect), PayPal, Flutterwave, and
+ * NOWPayments. All endpoints are PUBLIC (no JWT) — secured by signature
+ * verification or IP allowlist at the gateway/firewall level.
  *
  * NOTE: the STK callback path below deliberately does NOT contain the substring
  * "mpesa" — Safaricom's sandbox rejects CallBackURLs containing that word with
@@ -64,12 +66,14 @@ public class PaymentCallbackController {
 	private final StripeDepositService stripeDepositService;
 	private final PaypalDepositService paypalDepositService;
 	private final FlutterwaveDepositService flutterwaveDepositService;
+	private final NowPaymentsDepositService nowPaymentsDepositService;
 	private final DisbursementService disbursementService;
 	private final MpesaOperationsService mpesaOperationsService;
 	private final PullTransactionService pullTransactionService;
 	private final StripeService stripeService;
 	private final PaypalService paypalService;
 	private final FlutterwaveService flutterwaveService;
+	private final NowPaymentsService nowPaymentsService;
 	private final ObjectMapper objectMapper = new ObjectMapper();
 
 	@Value("${stripe.webhook-secret:}")
@@ -667,6 +671,60 @@ public class PaymentCallbackController {
 			// Other event types intentionally ignored.
 		} catch (Exception e) {
 			log.error("Flutterwave webhook processing error: {}", e.getMessage(), e);
+		}
+		return ResponseEntity.ok().build();
+	}
+
+	// ─── NOWPayments Webhook (IPN) ──────────────────────────────────────────
+
+	/**
+	 * NOWPayments sends one POST per payment_status transition to this
+	 * single endpoint — no separate platform/Connect split like Stripe, and
+	 * no separate deposit/payout endpoints either.
+	 *
+	 * Verified via HMAC-SHA512 over the recursively-key-sorted JSON body,
+	 * sent in the "x-nowpayments-sig" header — see
+	 * NowPaymentsService.verifyIpnSignature for the full explanation and
+	 * its confirmed-against-official-sources caveats.
+	 *
+	 * "finished" is the only status that credits the wallet — see
+	 * NowPaymentsDepositService.creditWalletFromNowPaymentsCallback's
+	 * javadoc for why "confirmed" is deliberately NOT treated as success.
+	 * "partially_paid" gets flagged for manual review rather than
+	 * auto-resolved either way. Always returns 200 regardless of internal
+	 * outcome — same pattern as every other provider callback here.
+	 */
+	@PostMapping("/nowpayments/webhook")
+	public ResponseEntity<Void> nowPaymentsWebhook(@RequestBody String rawBody,
+			@RequestHeader(value = "x-nowpayments-sig", required = false) String signature) {
+
+		if (!nowPaymentsService.verifyIpnSignature(rawBody, signature)) {
+			log.warn("NOWPayments webhook rejected — x-nowpayments-sig mismatch or not configured");
+			return ResponseEntity.status(400).build();
+		}
+
+		try {
+			JsonNode data = objectMapper.readTree(rawBody);
+			String orderId = data.path("order_id").asText(null);
+			String paymentId = data.path("payment_id").asText(null);
+			String status = data.path("payment_status").asText("");
+
+			log.info("NOWPayments webhook received (verified): orderId={} paymentId={} status={}",
+					orderId, paymentId, status);
+
+			if (orderId == null || orderId.isBlank()) {
+				log.warn("NOWPayments webhook missing order_id — cannot reconcile");
+			} else if ("finished".equals(status)) {
+				nowPaymentsDepositService.creditWalletFromNowPaymentsCallback(orderId, paymentId);
+			} else if ("failed".equals(status) || "expired".equals(status) || "refunded".equals(status)) {
+				nowPaymentsDepositService.markNowPaymentsTransactionFailed(orderId, "NOWPayments reported status=" + status);
+			} else if ("partially_paid".equals(status)) {
+				nowPaymentsDepositService.flagNowPaymentsPartialPayment(orderId, paymentId);
+			}
+			// waiting / confirming / confirmed / sending — still pending, no action.
+
+		} catch (Exception e) {
+			log.error("NOWPayments webhook processing error: {}", e.getMessage(), e);
 		}
 		return ResponseEntity.ok().build();
 	}

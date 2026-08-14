@@ -241,6 +241,21 @@ flutterwave:
     min-amount: 1
     max-amount: 5000
 
+# ─── NOWPayments (crypto) ─────────────────────────────────────────────────────
+# No sandbox tunnel/CLI tooling exists like Stripe CLI's `stripe listen` —
+# callback-url below must be a real reachable HTTPS URL (zrok/ngrok in dev)
+# even while testing in sandbox. See NowPaymentsConfig for the full javadoc.
+nowpayments:
+  # https://api-sandbox.nowpayments.io for testing, https://api.nowpayments.io for production
+  base-url: ${NOWPAYMENTS_BASE_URL}
+  # Dashboard → Settings → Payments → API keys
+  api-key: ${NOWPAYMENTS_API_KEY}
+  # Dashboard → Settings → Payments → Instant payment notifications.
+  # NOT interchangeable between sandbox/production — see NowPaymentsService.verifyIpnSignature.
+  ipn-secret: ${NOWPAYMENTS_IPN_SECRET}
+  # Sent as ipn_callback_url on every Create Payment request.
+  callback-url: ${NOWPAYMENTS_CALLBACK_URL}
+
 # Frontend URL for CORS
 frontend:
   url: ${FRONTEND_URL:http://localhost:3000}

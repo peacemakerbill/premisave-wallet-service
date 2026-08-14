@@ -15,19 +15,14 @@ import java.util.UUID;
 /**
  * Deposit dispatcher — the shared "can this wallet deposit right now" check
  * (lookup + frozen guard), then delegates to the provider-specific service
- * that actually knows how to talk to that provider. This is deliberately
- * thin: it used to hold every provider's deposit logic directly, but that
- * grew large enough (especially Stripe, once card management and Connect
- * linking landed) that it was split into MpesaDepositService,
- * StripeDepositService, PaypalDepositService, and FlutterwaveDepositService
- * — one per provider, mirroring the existing MpesaService/StripeService/
- * PaypalService/FlutterwaveService split at the API-integration layer one
- * level down.
+ * that actually knows how to talk to that provider. One per provider:
+ * MpesaDepositService, StripeDepositService, PaypalDepositService,
+ * FlutterwaveDepositService, and now NowPaymentsDepositService — mirroring
+ * MpesaService/StripeService/PaypalService/FlutterwaveService/
+ * NowPaymentsService at the API-integration layer one level down.
  *
  * WalletController and PaymentCallbackController call the provider-specific
- * services directly for everything except this top-level dispatch — e.g.
- * card management goes straight to StripeDepositService, PayPal webhook
- * handling goes straight to PaypalDepositService.
+ * services directly for everything except this top-level dispatch.
  */
 @Slf4j
 @Service
@@ -39,6 +34,7 @@ public class DepositService {
     private final StripeDepositService stripeDepositService;
     private final PaypalDepositService paypalDepositService;
     private final FlutterwaveDepositService flutterwaveDepositService;
+    private final NowPaymentsDepositService nowPaymentsDepositService;
 
     public PaymentResponse initiateDeposit(String userId, String userEmail, DepositRequest request) {
         Wallet wallet = walletRepository.findByUserId(userId)
@@ -57,6 +53,7 @@ public class DepositService {
             case "STRIPE" -> stripeDepositService.initiateStripeDeposit(userId, userEmail, request, wallet, idempotencyKey);
             case "PAYPAL" -> paypalDepositService.initiatePaypalDeposit(userId, request, wallet, idempotencyKey);
             case "FLUTTERWAVE" -> flutterwaveDepositService.initiateFlutterwaveDeposit(userId, userEmail, request, wallet, idempotencyKey);
+            case "NOWPAYMENTS" -> nowPaymentsDepositService.initiateNowPaymentsDeposit(userId, request, wallet, idempotencyKey);
             default -> new PaymentResponse(false, null, "Unsupported deposit provider: " + provider);
         };
     }
