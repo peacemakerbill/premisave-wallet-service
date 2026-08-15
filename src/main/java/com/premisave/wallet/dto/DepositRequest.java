@@ -41,9 +41,9 @@ public class DepositRequest {
      * Defaults to KES for M-Pesa, USD for PayPal and Flutterwave.
      *
      * EXCEPTION — provider=NOWPAYMENTS: this is the CRYPTOCURRENCY the
-     * customer will pay in (e.g. "usdttrc20", "btc"), not a fiat code. The
-     * wallet is always credited in KES regardless; NOWPayments quotes what
-     * that KES amount costs in the chosen crypto. See
+     * customer will pay in (e.g. "usdttrc20", "btc"), not a fiat code.
+     * Which FIAT currency amount is priced in is a SEPARATE field —
+     * see nowPaymentsPriceCurrency below. See
      * NowPaymentsDepositService.initiateNowPaymentsDeposit.
      */
     private String currency;
@@ -98,4 +98,22 @@ public class DepositRequest {
      * at all — leave this null/blank in production requests regardless.
      */
     private String nowPaymentsSandboxCase;
+
+    /**
+     * Optional, provider=NOWPAYMENTS only — which FIAT currency
+     * request.getAmount() is denominated in for pricing purposes (e.g.
+     * "usd", "eur", "kes"). Defaults to "usd" if omitted — USD is the
+     * conventional reference currency for crypto pricing internationally,
+     * and forcing every depositor through KES specifically excludes
+     * non-Kenyan users who don't think in KES terms. A Kenya-based user
+     * who prefers to think in KES can still pass "kes" explicitly.
+     *
+     * This is genuinely different from every other provider's amount
+     * semantics: everywhere else, request.getAmount() IS a KES figure
+     * credited to the wallet as-is. Here, it's priced in WHATEVER
+     * currency this field says, then converted to KES via FxRateService
+     * at initiation time (skipped entirely if this is "kes") — see
+     * NowPaymentsDepositService.initiateNowPaymentsDeposit.
+     */
+    private String nowPaymentsPriceCurrency;
 }

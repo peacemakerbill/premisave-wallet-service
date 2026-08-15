@@ -15,6 +15,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+
 /**
  * NOWPayments (crypto) deposit business logic — mirrors
  * FlutterwaveDepositService's structure, one level up from
@@ -33,13 +35,29 @@ public class NowPaymentsDepositService {
     private final WalletRepository walletRepository;
     private final TransactionRepository transactionRepository;
     private final NowPaymentsService nowPaymentsService;
+    private final FxRateService fxRateService;
 
     /**
-     * Initiates a crypto deposit. request.getCurrency() is the
-     * CRYPTOCURRENCY the customer will pay in (e.g. "usdttrc20", "btc") —
-     * NOT the wallet's base currency. The wallet is always credited in
-     * KES; NOWPayments quotes what that KES amount costs in the chosen
-     * crypto and returns a one-time deposit address.
+     * Initiates a crypto deposit. TWO separate currency fields are in play
+     * here, deliberately not the same thing:
+     *
+     * request.getCurrency() = the CRYPTOCURRENCY the customer pays in
+     * (e.g. "usdttrc20", "btc").
+     *
+     * request.getNowPaymentsPriceCurrency() = the FIAT currency the amount
+     * is denominated in for pricing (defaults to "usd" — see
+     * DepositRequest.nowPaymentsPriceCurrency's javadoc for why this isn't
+     * hardcoded to KES the way every other provider's deposit amount is).
+     *
+     * request.getAmount() is priced in THAT fiat currency and sent to
+     * NOWPayments as-is (so their quote reflects exactly what the customer
+     * agreed to pay), then SEPARATELY converted to KES via FxRateService
+     * — skipped entirely if the price currency is already KES — and that
+     * converted figure is what actually gets stored as the pending
+     * Transaction's amount and credited to the wallet on confirmation.
+     * Same "compute the converted amount once at initiation, credit that
+     * fixed figure on confirmation" pattern already used by
+     * disburseStripe/disbursePaypal on the withdrawal side.
      *
      * order_id is set to the idempotencyKey, same role as every other
      * provider's txRef/reference — this is what the IPN webhook and any
@@ -60,8 +78,21 @@ public class NowPaymentsDepositService {
                             + "(e.g. \"usdttrc20\", \"btc\"), not the wallet's KES balance currency.");
         }
 
+        String priceCurrency = request.getNowPaymentsPriceCurrency() != null
+                && !request.getNowPaymentsPriceCurrency().isBlank()
+                ? request.getNowPaymentsPriceCurrency().toLowerCase()
+                : "usd";
+
+        BigDecimal kesAmount;
+        if ("kes".equals(priceCurrency)) {
+            kesAmount = request.getAmount();
+        } else {
+            BigDecimal rateToKes = fxRateService.getRate(priceCurrency.toUpperCase(), "KES");
+            kesAmount = request.getAmount().multiply(rateToKes).setScale(2, java.math.RoundingMode.HALF_UP);
+        }
+
         NowPaymentsService.CreatePaymentResult result = nowPaymentsService.createPayment(
-                request.getAmount(), "kes", payCurrency, idempotencyKey, "Premisave wallet deposit",
+                request.getAmount(), priceCurrency, payCurrency, idempotencyKey, "Premisave wallet deposit",
                 request.getNowPaymentsSandboxCase());
 
         if (!result.success()) {
@@ -69,16 +100,20 @@ public class NowPaymentsDepositService {
             return new PaymentResponse(false, null, "NOWPayments payment creation failed: " + result.message());
         }
 
+        log.info("NOWPayments deposit priced: userId={} priceAmount={} {} kesEquivalent={}",
+                userId, request.getAmount(), priceCurrency.toUpperCase(), kesAmount);
+
         Transaction tx = new Transaction();
         tx.setUserId(userId);
         tx.setWalletId(wallet.getId());
         tx.setType(TransactionType.DEPOSIT);
         tx.setStatus(TransactionStatus.PENDING);
-        tx.setAmount(request.getAmount()); // KES amount, credited as-is on confirmation
+        tx.setAmount(kesAmount); // KES-converted amount, credited as-is on confirmation
         tx.setCurrency(Currency.KES);
         tx.setReference(idempotencyKey);
         tx.setProviderReference(result.paymentId());
-        tx.setDescription("NOWPayments deposit (pending) - " + result.payAmount() + " " + result.payCurrency());
+        tx.setDescription("NOWPayments deposit (pending) - " + request.getAmount() + " " + priceCurrency.toUpperCase()
+                + " priced as " + result.payAmount() + " " + result.payCurrency());
         transactionRepository.save(tx);
 
         return new PaymentResponse(true, result.paymentId(),
