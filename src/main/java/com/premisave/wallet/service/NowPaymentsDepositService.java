@@ -12,10 +12,13 @@ import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * NOWPayments (crypto) deposit business logic — mirrors
@@ -197,5 +200,53 @@ public class NowPaymentsDepositService {
             transactionRepository.save(tx);
             log.warn("NOWPayments partial payment flagged for manual review: orderId={} paymentId={}", orderId, paymentId);
         }, () -> log.warn("Partial payment callback for unknown NOWPayments orderId={}: paymentId={}", orderId, paymentId));
+    }
+
+    /**
+     * Mirrors StripeDepositService.autoFailStuckStripeDeposits — same
+     * reasoning: a customer who creates a payment (gets a deposit address)
+     * and then never actually sends anything — wrong network, changed
+     * their mind, walked away — triggers no webhook at all, since nothing
+     * happened on NOWPayments' side to report. Without this, that
+     * transaction sits PENDING forever with no terminal state.
+     *
+     * Safe to auto-fail here for the same reason Stripe's version is safe:
+     * the wallet is never credited for a PENDING deposit in the first
+     * place (see initiateNowPaymentsDeposit).
+     *
+     * CUTOFF DELIBERATELY LONGER than Stripe's 30 minutes — a card
+     * authorization resolves in seconds; a genuine crypto payment can
+     * legitimately take much longer to reach enough blockchain
+     * confirmations, especially for slower networks (Bitcoin) versus
+     * faster ones (TRC20/USDT, typically used in this integration).
+     * 90 minutes is a starting point, not a rigorously derived number —
+     * tighten or loosen based on which cryptocurrencies your users
+     * actually end up using once there's real usage data.
+     *
+     * Identifies NOWPayments deposits by description prefix (set in
+     * initiateNowPaymentsDeposit's savePendingTransaction-equivalent
+     * inline save) rather than a dedicated provider field, same
+     * limitation and same reasoning as Stripe's version — Transaction
+     * doesn't currently store which provider a deposit used.
+     */
+    @Scheduled(fixedDelay = 15 * 60 * 1000)
+    public void autoFailStuckNowPaymentsDeposits() {
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(90);
+        List<Transaction> stuck = transactionRepository
+                .findByTypeAndStatusAndCreatedAtBefore(TransactionType.DEPOSIT, TransactionStatus.PENDING, cutoff)
+                .stream()
+                .filter(tx -> tx.getDescription() != null && tx.getDescription().startsWith("NOWPayments deposit"))
+                .toList();
+
+        for (Transaction tx : stuck) {
+            tx.setStatus(TransactionStatus.FAILED);
+            tx.setDescription("NOWPayments deposit failed: abandoned — no confirmation within 90 minutes");
+            transactionRepository.save(tx);
+        }
+
+        if (!stuck.isEmpty()) {
+            log.warn("{} NOWPayments deposit(s) auto-failed after sitting PENDING beyond 90 minutes: {}",
+                    stuck.size(), stuck.stream().map(Transaction::getId).toList());
+        }
     }
 }
