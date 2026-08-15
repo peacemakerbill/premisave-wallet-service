@@ -150,6 +150,22 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Thrown by MpesaC2BService.parseRegisterUrlsResponse when Safaricom
+     * rejects a Register URL call because URLs are already on file for
+     * the shortcode (errorCode 500.003.1001, "Duplicate notification
+     * info"). Same reasoning as handleIllegalState above — a real,
+     * well-understood business condition, not a system fault, so it gets
+     * its own 409 with the actual actionable message instead of falling
+     * through to handleGeneric's bare 500 "An unexpected error occurred".
+     */
+    @ExceptionHandler(com.premisave.wallet.exception.C2BUrlsAlreadyRegisteredException.class)
+    public ResponseEntity<ApiResponse<Void>> handleC2BUrlsAlreadyRegistered(
+            com.premisave.wallet.exception.C2BUrlsAlreadyRegisteredException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    /**
      * Thrown by PaymentCallbackController.stripeWebhook / stripeConnectWebhook
      * (via StripeService.constructWebhookEvent) when the Stripe-Signature
      * header doesn't match what's expected for the given secret. Centralized

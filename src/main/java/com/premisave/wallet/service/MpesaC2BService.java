@@ -10,6 +10,7 @@ import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.enums.TransactionStatus;
 import com.premisave.wallet.enums.TransactionType;
+import com.premisave.wallet.exception.C2BUrlsAlreadyRegisteredException;
 import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
@@ -160,6 +161,20 @@ public class MpesaC2BService {
      * all-zeros ResponseCode / "success" description success check
      * described above.
      *
+     * "Already registered" (errorCode 500.003.1001, "Duplicate
+     * notification info") is deliberately distinguished from every other
+     * rejection and thrown as C2BUrlsAlreadyRegisteredException, not a
+     * generic RuntimeException — this is a real, well-understood
+     * Safaricom state (URLs already on file for this shortcode), not a
+     * system fault, and previously fell through to
+     * GlobalExceptionHandler's catch-all as a bare 500 with no indication
+     * of what actually went wrong. Matches on the specific error code
+     * first (most precise), falling back to a case-insensitive substring
+     * check on the message in case Safaricom's exact code ever shifts
+     * slightly across environments — same defensive-fallback pattern used
+     * for Flutterwave's transfer-failure field-name uncertainty elsewhere
+     * in this codebase.
+     *
      * NOTE on CustomerMessage: Safaricom returns this field on several
      * Daraja APIs (most notably STK Push) as text meant to be shown to the
      * end customer on their phone/UI. Register URL has no end-customer in
@@ -177,6 +192,16 @@ public class MpesaC2BService {
             String errorMessage = node.path("errorMessage").asText("Unknown C2B registration error");
             log.warn("C2B URL registration rejected by Safaricom: errorCode={} errorMessage={}",
                     errorCode, errorMessage);
+
+            if ("500.003.1001".equals(errorCode)
+                    || errorMessage.toLowerCase().contains("duplicate notification")) {
+                throw new C2BUrlsAlreadyRegisteredException(
+                        "C2B URLs are already registered for shortcode " + config.getC2b().getShortcode()
+                                + " (Safaricom: " + errorMessage + "). Delete the existing registration first "
+                                + "(see c2b_url_deletion.java) before retrying — Safaricom doesn't support "
+                                + "overwriting an existing C2B URL registration in place.");
+            }
+
             throw new RuntimeException(
                     "C2B URL registration failed (" + errorCode + "): " + errorMessage);
         }
