@@ -2,15 +2,14 @@ package com.premisave.wallet.service;
 
 import com.premisave.wallet.dto.DepositRequest;
 import com.premisave.wallet.dto.PaymentResponse;
+import com.premisave.wallet.entity.Deposit;
 import com.premisave.wallet.entity.SavedCard;
-import com.premisave.wallet.entity.Transaction;
 import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.enums.Currency;
-import com.premisave.wallet.enums.TransactionStatus;
-import com.premisave.wallet.enums.TransactionType;
+import com.premisave.wallet.enums.DepositStatus;
 import com.premisave.wallet.exception.WalletNotFoundException;
+import com.premisave.wallet.repository.DepositRepository;
 import com.premisave.wallet.repository.SavedCardRepository;
-import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import com.stripe.model.PaymentIntent;
 import com.stripe.model.PaymentMethod;
@@ -33,9 +32,9 @@ import java.util.Map;
  * DepositService, mirroring StripeService's existing role at the
  * API-integration layer.
  *
- * By far the largest of the four provider-specific deposit services — Stripe
+ * By far the largest of the five provider-specific deposit services — Stripe
  * carries card management and Connect linking on top of ordinary deposit
- * flow, which the other three providers don't have an equivalent of.
+ * flow, which the other four providers don't have an equivalent of.
  *
  * Called from DepositService.initiateDeposit (dispatcher) for initiation,
  * and directly from WalletController/PaymentCallbackController for the
@@ -47,9 +46,10 @@ import java.util.Map;
 public class StripeDepositService {
 
     private final WalletRepository walletRepository;
-    private final TransactionRepository transactionRepository;
+    private final DepositRepository depositRepository;
     private final SavedCardRepository savedCardRepository;
     private final StripeService stripeService;
+    private final DepositTransactionRecorder depositTransactionRecorder;
 
     // ─── Deposits ────────────────────────────────────────────────────────────
 
@@ -70,8 +70,7 @@ public class StripeDepositService {
         log.info("Stripe deposit attempt: userId={} piId={} status={} requiresAction={}",
                 userId, result.paymentIntentId(), result.status(), result.requiresAction());
 
-        savePendingTransaction(userId, wallet.getId(), TransactionType.DEPOSIT,
-                request.getAmount(), Currency.KES, "Stripe deposit (pending payment confirmation)", idempotencyKey);
+        savePendingDeposit(userId, wallet.getId(), request.getAmount(), idempotencyKey);
 
         if ("succeeded".equals(result.status())) {
             creditWalletFromStripeCallback(idempotencyKey, request.getAmount(), result.paymentIntentId(),
@@ -153,6 +152,8 @@ public class StripeDepositService {
     }
 
     // ─── Saved cards (multiple per wallet) ──────────────────────────────────
+    // Unchanged from before this migration — none of this section reads or
+    // writes Transaction/Deposit at all.
 
     /**
      * Creates or updates the SavedCard row for this PaymentMethod, and makes
@@ -296,6 +297,7 @@ public class StripeDepositService {
     }
 
     // ─── Stripe Connect (linking a bank account for withdrawals) ───────────
+    // Unchanged — doesn't touch Transaction/Deposit either.
 
     /**
      * Starts (or resumes) Stripe Connect onboarding for this wallet, so the
@@ -331,16 +333,16 @@ public class StripeDepositService {
     @Transactional
     public void creditWalletFromStripeCallback(String reference, BigDecimal amount, String paymentIntentId,
                                                 String currency, String customerId, String paymentMethodId) {
-        Transaction tx = transactionRepository.findByReference(reference)
-                .orElseThrow(() -> new IllegalStateException("No pending transaction found for reference=" + reference));
+        Deposit deposit = depositRepository.findByReference(reference)
+                .orElseThrow(() -> new IllegalStateException("No pending deposit found for reference=" + reference));
 
-        if (tx.getStatus() == TransactionStatus.COMPLETED) {
+        if (deposit.getStatus() == DepositStatus.SUCCESS) {
             log.info("Stripe deposit already processed for reference={} — skipping duplicate credit", reference);
             return;
         }
 
-        Wallet wallet = walletRepository.findById(tx.getWalletId())
-                .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + tx.getWalletId()));
+        Wallet wallet = walletRepository.findById(deposit.getWalletId())
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + deposit.getWalletId()));
 
         wallet.setBalance(wallet.getBalance().add(amount));
 
@@ -364,12 +366,14 @@ public class StripeDepositService {
 
         walletRepository.save(wallet);
 
-        tx.setStatus(TransactionStatus.COMPLETED);
-        tx.setAmount(amount);
-        tx.setCurrency(resolveCurrency(currency));
-        tx.setProviderReference(paymentIntentId);
-        tx.setDescription("Stripe deposit (PaymentIntent " + paymentIntentId + ")");
-        transactionRepository.save(tx);
+        deposit.setStatus(DepositStatus.SUCCESS);
+        deposit.setAmount(amount);
+        deposit.setCurrency(resolveCurrency(currency));
+        deposit.setProviderReference(paymentIntentId);
+        depositRepository.save(deposit);
+
+        depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), amount,
+                deposit, deposit.getReference());
 
         log.info("Wallet credited via Stripe: reference={} amount={} piId={}", reference, amount, paymentIntentId);
     }
@@ -384,19 +388,19 @@ public class StripeDepositService {
                     "This PaymentIntent has no idempotency_key metadata and cannot be reconciled.");
         }
 
-        Transaction tx = transactionRepository.findByReference(reference)
-                .orElseThrow(() -> new IllegalStateException("No pending transaction found for Stripe reference=" + reference));
+        Deposit deposit = depositRepository.findByReference(reference)
+                .orElseThrow(() -> new IllegalStateException("No pending deposit found for Stripe reference=" + reference));
 
-        if (!tx.getUserId().equals(callerUserId)) {
+        if (!deposit.getUserId().equals(callerUserId)) {
             throw new IllegalArgumentException("This Stripe payment does not belong to the authenticated user");
         }
 
-        if (tx.getStatus() == TransactionStatus.COMPLETED) {
-            return new PaymentResponse(true, tx.getId(), "Deposit already completed");
+        if (deposit.getStatus() == DepositStatus.SUCCESS) {
+            return new PaymentResponse(true, deposit.getId(), "Deposit already completed");
         }
 
         if (!"succeeded".equals(pi.getStatus())) {
-            return new PaymentResponse(false, tx.getId(),
+            return new PaymentResponse(false, deposit.getId(),
                     "Payment has not completed yet (status: " + pi.getStatus() + ")");
         }
 
@@ -404,15 +408,15 @@ public class StripeDepositService {
         creditWalletFromStripeCallback(reference, amount, paymentIntentId, pi.getCurrency(),
                 pi.getCustomer(), pi.getPaymentMethod());
 
-        return new PaymentResponse(true, tx.getId(), "Stripe deposit successful");
+        return new PaymentResponse(true, deposit.getId(), "Stripe deposit successful");
     }
 
     /**
      * Marks a Stripe deposit as failed — the counterpart to
      * markStkTransactionFailed / markPaypalTransactionFailed /
-     * markFlutterwaveTransactionFailed (each in their own now-separate
-     * provider service), which Stripe was missing until now. Triggered by
-     * the payment_intent.payment_failed webhook (see
+     * markFlutterwaveTransactionFailed (each in their own provider
+     * service), which Stripe was missing until now. Triggered by the
+     * payment_intent.payment_failed webhook (see
      * PaymentCallbackController.stripeWebhook) — a declined card, an
      * abandoned 3DS challenge that Stripe itself gives up on, etc. No
      * refund logic needed: the wallet is never credited for a PENDING
@@ -421,14 +425,14 @@ public class StripeDepositService {
      */
     @Transactional
     public void markStripeTransactionFailed(String reference, String reason) {
-        transactionRepository.findByReference(reference).ifPresentOrElse(tx -> {
-            if (tx.getStatus() == TransactionStatus.COMPLETED) {
+        depositRepository.findByReference(reference).ifPresentOrElse(deposit -> {
+            if (deposit.getStatus() == DepositStatus.SUCCESS) {
                 log.warn("Ignoring failure callback for already-completed Stripe reference={}", reference);
                 return;
             }
-            tx.setStatus(TransactionStatus.FAILED);
-            tx.setDescription("Stripe deposit failed: " + reason);
-            transactionRepository.save(tx);
+            deposit.setStatus(DepositStatus.FAILED);
+            deposit.setFailureReason(reason);
+            depositRepository.save(deposit);
             log.warn("Stripe deposit failed: reference={} reason={}", reference, reason);
         }, () -> log.warn("Failure callback for unknown Stripe reference={}: {}", reference, reason));
     }
@@ -461,7 +465,7 @@ public class StripeDepositService {
      * (payment_intent.payment_failed) — a user who opens the card widget
      * and simply closes the app never triggers that webhook at all, since
      * nothing was actually attempted on Stripe's side. Without this, that
-     * transaction would sit PENDING forever with no terminal state.
+     * deposit would sit PENDING forever with no terminal state.
      *
      * Safe to auto-fail here — unlike DisbursementService.
      * flagStuckDisbursements, which only logs and never auto-resolves
@@ -472,48 +476,41 @@ public class StripeDepositService {
      * reconcile it manually after the fact; auto-failing here doesn't
      * foreclose that.
      *
-     * Identifies Stripe deposits by description prefix (set in
-     * initiateStripeDeposit's savePendingTransaction call) rather than a
-     * dedicated provider field — Transaction doesn't currently store which
-     * provider a deposit used, unlike Disbursement, which has both
-     * provider and channel.
+     * Now a real provider-filtered query (findByProviderAndStatusAndCreatedAtBefore)
+     * instead of the previous string-prefix matching against
+     * Transaction.description — Deposit has a genuine provider field.
      */
     @Scheduled(fixedDelay = 15 * 60 * 1000)
     public void autoFailStuckStripeDeposits() {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(30);
-        List<Transaction> stuck = transactionRepository
-                .findByTypeAndStatusAndCreatedAtBefore(TransactionType.DEPOSIT, TransactionStatus.PENDING, cutoff)
-                .stream()
-                .filter(tx -> tx.getDescription() != null && tx.getDescription().startsWith("Stripe deposit"))
-                .toList();
+        List<Deposit> stuck = depositRepository
+                .findByProviderAndStatusAndCreatedAtBefore("STRIPE", DepositStatus.PENDING, cutoff);
 
-        for (Transaction tx : stuck) {
-            tx.setStatus(TransactionStatus.FAILED);
-            tx.setDescription("Stripe deposit failed: abandoned — no confirmation within 30 minutes");
-            transactionRepository.save(tx);
+        for (Deposit deposit : stuck) {
+            deposit.setStatus(DepositStatus.FAILED);
+            deposit.setFailureReason("Abandoned — no confirmation within 30 minutes");
+            depositRepository.save(deposit);
         }
 
         if (!stuck.isEmpty()) {
             log.warn("{} Stripe deposit(s) auto-failed after sitting PENDING beyond 30 minutes: {}",
-                    stuck.size(), stuck.stream().map(Transaction::getId).toList());
+                    stuck.size(), stuck.stream().map(Deposit::getId).toList());
         }
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    private void savePendingTransaction(String userId, String walletId, TransactionType type,
-                                         BigDecimal amount, Currency currency,
-                                         String description, String reference) {
-        Transaction tx = new Transaction();
-        tx.setUserId(userId);
-        tx.setWalletId(walletId);
-        tx.setType(type);
-        tx.setStatus(TransactionStatus.PENDING);
-        tx.setAmount(amount);
-        tx.setCurrency(currency);
-        tx.setDescription(description);
-        tx.setReference(reference);
-        transactionRepository.save(tx);
+    private void savePendingDeposit(String userId, String walletId, BigDecimal amount, String reference) {
+        Deposit deposit = new Deposit();
+        deposit.setUserId(userId);
+        deposit.setWalletId(walletId);
+        deposit.setAmount(amount);
+        deposit.setCurrency(Currency.KES);
+        deposit.setProvider("STRIPE");
+        deposit.setChannel("STRIPE_CARD");
+        deposit.setStatus(DepositStatus.PENDING);
+        deposit.setReference(reference);
+        depositRepository.save(deposit);
     }
 
     private Currency resolveCurrency(String currency) {

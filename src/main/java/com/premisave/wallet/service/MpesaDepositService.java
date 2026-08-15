@@ -4,13 +4,12 @@ import com.premisave.wallet.dto.B2BExpressCheckoutResponse;
 import com.premisave.wallet.dto.DepositRequest;
 import com.premisave.wallet.dto.MpesaStkPushRequest;
 import com.premisave.wallet.dto.PaymentResponse;
-import com.premisave.wallet.entity.Transaction;
+import com.premisave.wallet.entity.Deposit;
 import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.enums.Currency;
-import com.premisave.wallet.enums.TransactionStatus;
-import com.premisave.wallet.enums.TransactionType;
+import com.premisave.wallet.enums.DepositStatus;
 import com.premisave.wallet.exception.WalletNotFoundException;
-import com.premisave.wallet.repository.TransactionRepository;
+import com.premisave.wallet.repository.DepositRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,8 +36,9 @@ import java.util.UUID;
 public class MpesaDepositService {
 
     private final WalletRepository walletRepository;
-    private final TransactionRepository transactionRepository;
+    private final DepositRepository depositRepository;
     private final MpesaService mpesaService;
+    private final DepositTransactionRecorder depositTransactionRecorder;
 
     // ─── M-Pesa STK Push ─────────────────────────────────────────────────────
 
@@ -67,9 +67,8 @@ public class MpesaDepositService {
 
         log.info("M-Pesa STK push: userId={} checkoutId={}", userId, result.checkoutRequestId());
 
-        savePendingTransaction(userId, wallet.getId(), TransactionType.DEPOSIT,
-                request.getAmount(), Currency.KES, "M-Pesa deposit (pending STK confirmation)",
-                result.checkoutRequestId());
+        savePendingDeposit(userId, wallet.getId(), request.getAmount(), "MPESA_STK",
+                phoneNumber, result.checkoutRequestId());
 
         String message = (result.customerMessage() != null && !result.customerMessage().isBlank())
                 ? result.customerMessage()
@@ -95,8 +94,8 @@ public class MpesaDepositService {
             return new PaymentResponse(false, requestRefId, result.getMessage());
         }
 
-        savePendingTransaction(userId, wallet.getId(), TransactionType.DEPOSIT,
-                request.getAmount(), Currency.KES, "M-Pesa till deposit (pending USSD confirmation)", requestRefId);
+        savePendingDeposit(userId, wallet.getId(), request.getAmount(), "MPESA_TILL",
+                request.getPayerTillNumber(), requestRefId);
 
         return new PaymentResponse(true, requestRefId,
                 "USSD push sent to your till. Approve on your phone to complete the deposit.");
@@ -107,27 +106,29 @@ public class MpesaDepositService {
     @Transactional
     public void creditWalletFromStkCallback(String checkoutRequestId, BigDecimal amount,
                                              String mpesaReceiptNumber, String phoneNumber) {
-        Transaction tx = transactionRepository.findByReference(checkoutRequestId)
+        Deposit deposit = depositRepository.findByReference(checkoutRequestId)
                 .orElseThrow(() -> new IllegalStateException(
-                        "No pending transaction found for CheckoutRequestID=" + checkoutRequestId));
+                        "No pending deposit found for CheckoutRequestID=" + checkoutRequestId));
 
-        if (tx.getStatus() == TransactionStatus.COMPLETED) {
+        if (deposit.getStatus() == DepositStatus.SUCCESS) {
             log.warn("STK callback already processed for CheckoutRequestID={} — skipping duplicate credit",
                     checkoutRequestId);
             return;
         }
 
-        Wallet wallet = walletRepository.findById(tx.getWalletId())
-                .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + tx.getWalletId()));
+        Wallet wallet = walletRepository.findById(deposit.getWalletId())
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + deposit.getWalletId()));
 
         wallet.setBalance(wallet.getBalance().add(amount));
         walletRepository.save(wallet);
 
-        tx.setStatus(TransactionStatus.COMPLETED);
-        tx.setAmount(amount);
-        tx.setProviderReference(mpesaReceiptNumber);
-        tx.setDescription("M-Pesa STK deposit from " + phoneNumber + " (receipt " + mpesaReceiptNumber + ")");
-        transactionRepository.save(tx);
+        deposit.setStatus(DepositStatus.SUCCESS);
+        deposit.setAmount(amount);
+        deposit.setProviderReference(mpesaReceiptNumber);
+        depositRepository.save(deposit);
+
+        depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), amount,
+                deposit, deposit.getReference());
 
         log.info("Wallet credited via M-Pesa STK: checkoutRequestId={} amount={} receipt={}",
                 checkoutRequestId, amount, mpesaReceiptNumber);
@@ -135,10 +136,10 @@ public class MpesaDepositService {
 
     @Transactional
     public void markStkTransactionFailed(String checkoutRequestId, String resultDesc) {
-        transactionRepository.findByReference(checkoutRequestId).ifPresentOrElse(tx -> {
-            tx.setStatus(TransactionStatus.FAILED);
-            tx.setDescription("M-Pesa STK push failed: " + resultDesc);
-            transactionRepository.save(tx);
+        depositRepository.findByReference(checkoutRequestId).ifPresentOrElse(deposit -> {
+            deposit.setStatus(DepositStatus.FAILED);
+            deposit.setFailureReason(resultDesc);
+            depositRepository.save(deposit);
             log.warn("STK push failed: checkoutRequestId={} reason={}", checkoutRequestId, resultDesc);
         }, () -> log.warn("STK failure callback for unknown CheckoutRequestID={}: {}", checkoutRequestId, resultDesc));
     }
@@ -146,35 +147,37 @@ public class MpesaDepositService {
     @Transactional
     public void creditWalletFromExpressCheckout(String requestRefId, BigDecimal amount,
                                                  String transactionId, String resultDesc, boolean success) {
-        Transaction tx = transactionRepository.findByReference(requestRefId)
+        Deposit deposit = depositRepository.findByReference(requestRefId)
                 .orElseThrow(() -> new IllegalStateException(
-                        "No pending transaction found for RequestRefID=" + requestRefId));
+                        "No pending deposit found for RequestRefID=" + requestRefId));
 
-        if (tx.getStatus() == TransactionStatus.COMPLETED) {
+        if (deposit.getStatus() == DepositStatus.SUCCESS) {
             log.warn("Express Checkout callback already processed for RequestRefID={} — skipping duplicate credit",
                     requestRefId);
             return;
         }
 
         if (!success) {
-            tx.setStatus(TransactionStatus.FAILED);
-            tx.setDescription("M-Pesa till deposit failed: " + resultDesc);
-            transactionRepository.save(tx);
+            deposit.setStatus(DepositStatus.FAILED);
+            deposit.setFailureReason(resultDesc);
+            depositRepository.save(deposit);
             log.warn("Express Checkout deposit failed: requestRefId={} reason={}", requestRefId, resultDesc);
             return;
         }
 
-        Wallet wallet = walletRepository.findById(tx.getWalletId())
-                .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + tx.getWalletId()));
+        Wallet wallet = walletRepository.findById(deposit.getWalletId())
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + deposit.getWalletId()));
 
         wallet.setBalance(wallet.getBalance().add(amount));
         walletRepository.save(wallet);
 
-        tx.setStatus(TransactionStatus.COMPLETED);
-        tx.setAmount(amount);
-        tx.setProviderReference(transactionId);
-        tx.setDescription("M-Pesa till deposit (receipt " + transactionId + ")");
-        transactionRepository.save(tx);
+        deposit.setStatus(DepositStatus.SUCCESS);
+        deposit.setAmount(amount);
+        deposit.setProviderReference(transactionId);
+        depositRepository.save(deposit);
+
+        depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), amount,
+                deposit, deposit.getReference());
 
         log.info("Wallet credited via B2B Express Checkout: requestRefId={} amount={} receipt={}",
                 requestRefId, amount, transactionId);
@@ -182,18 +185,18 @@ public class MpesaDepositService {
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    private void savePendingTransaction(String userId, String walletId, TransactionType type,
-                                         BigDecimal amount, Currency currency,
-                                         String description, String reference) {
-        Transaction tx = new Transaction();
-        tx.setUserId(userId);
-        tx.setWalletId(walletId);
-        tx.setType(type);
-        tx.setStatus(TransactionStatus.PENDING);
-        tx.setAmount(amount);
-        tx.setCurrency(currency);
-        tx.setDescription(description);
-        tx.setReference(reference);
-        transactionRepository.save(tx);
+    private void savePendingDeposit(String userId, String walletId, BigDecimal amount,
+                                     String channel, String source, String reference) {
+        Deposit deposit = new Deposit();
+        deposit.setUserId(userId);
+        deposit.setWalletId(walletId);
+        deposit.setAmount(amount);
+        deposit.setCurrency(Currency.KES);
+        deposit.setProvider("MPESA");
+        deposit.setChannel(channel);
+        deposit.setSource(source);
+        deposit.setStatus(DepositStatus.PENDING);
+        deposit.setReference(reference);
+        depositRepository.save(deposit);
     }
 }

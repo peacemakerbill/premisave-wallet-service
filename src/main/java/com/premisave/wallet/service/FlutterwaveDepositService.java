@@ -2,13 +2,12 @@ package com.premisave.wallet.service;
 
 import com.premisave.wallet.dto.DepositRequest;
 import com.premisave.wallet.dto.PaymentResponse;
-import com.premisave.wallet.entity.Transaction;
+import com.premisave.wallet.entity.Deposit;
 import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.enums.Currency;
-import com.premisave.wallet.enums.TransactionStatus;
-import com.premisave.wallet.enums.TransactionType;
+import com.premisave.wallet.enums.DepositStatus;
 import com.premisave.wallet.exception.WalletNotFoundException;
-import com.premisave.wallet.repository.TransactionRepository;
+import com.premisave.wallet.repository.DepositRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,9 +33,10 @@ import java.math.RoundingMode;
 public class FlutterwaveDepositService {
 
     private final WalletRepository walletRepository;
-    private final TransactionRepository transactionRepository;
+    private final DepositRepository depositRepository;
     private final FlutterwaveService flutterwaveService;
     private final FxRateService fxRateService;
+    private final DepositTransactionRecorder depositTransactionRecorder;
 
     /**
      * Initiates a Flutterwave mobile-money deposit via v4's General Flow.
@@ -55,12 +55,15 @@ public class FlutterwaveDepositService {
      * USD — the live FX rate from the local currency to KES is used to
      * compute what actually gets credited to the wallet. The FX rate is
      * logged for reconciliation against the eventual webhook payout amount.
+     * Stored as Deposit.priceAmount/priceCurrency — same fields
+     * NowPaymentsDepositService populates for its own fiat-pricing case,
+     * reused here since the underlying concept (amount priced in a
+     * non-KES currency, converted once at initiation) is identical.
      *
-     * chargeId is stored as Transaction.providerReference immediately —
-     * v4 only supports verifying a charge by ITS OWN id (GET
-     * /charges/{id}), not by our own reference the way v3's
-     * verify_by_reference worked, so confirmFlutterwaveDeposit below needs
-     * it on record.
+     * chargeId is stored as Deposit.providerReference immediately — v4
+     * only supports verifying a charge by ITS OWN id (GET /charges/{id}),
+     * not by our own reference the way v3's verify_by_reference worked,
+     * so confirmFlutterwaveDeposit below needs it on record.
      *
      * REQUIRES two fields on DepositRequest: flutterwaveCountryCode
      * (e.g. "233") and flutterwaveMobileNetwork (e.g. "MTN") — see
@@ -113,18 +116,20 @@ public class FlutterwaveDepositService {
         log.info("Flutterwave charge created: userId={} txRef={} chargeId={} localAmount={} {} kesEquivalent={} rate={} nextAction={}",
                 userId, txRef, result.chargeId(), chargeAmount, localCurrency, kesEquivalent, fxRate, result.nextActionType());
 
-        Transaction tx = new Transaction();
-        tx.setUserId(userId);
-        tx.setWalletId(wallet.getId());
-        tx.setType(TransactionType.DEPOSIT);
-        tx.setStatus(TransactionStatus.PENDING);
-        tx.setAmount(kesEquivalent);
-        tx.setCurrency(Currency.KES);
-        tx.setReference(txRef);
-        tx.setProviderReference(result.chargeId());
-        tx.setDescription("Flutterwave deposit (pending) - " + localCurrency + " " + chargeAmount
-                + " @ live rate " + fxRate);
-        transactionRepository.save(tx);
+        Deposit deposit = new Deposit();
+        deposit.setUserId(userId);
+        deposit.setWalletId(wallet.getId());
+        deposit.setAmount(kesEquivalent);
+        deposit.setCurrency(Currency.KES);
+        deposit.setProvider("FLUTTERWAVE");
+        deposit.setChannel("FLUTTERWAVE_MOBILE_MONEY");
+        deposit.setSource(request.getCustomerPhone());
+        deposit.setStatus(DepositStatus.PENDING);
+        deposit.setReference(txRef);
+        deposit.setProviderReference(result.chargeId());
+        deposit.setPriceAmount(chargeAmount);
+        deposit.setPriceCurrency(localCurrency.toLowerCase());
+        depositRepository.save(deposit);
 
         // Return the redirect URL from Flutterwave's next_action, if present.
         // Otherwise, return payment_instruction if it's a prompt-on-phone scenario.
@@ -141,39 +146,39 @@ public class FlutterwaveDepositService {
 
     @Transactional
     public PaymentResponse confirmFlutterwaveDeposit(String txRef, String callerUserId) {
-        Transaction tx = transactionRepository.findByReference(txRef)
+        Deposit deposit = depositRepository.findByReference(txRef)
                 .orElseThrow(() -> new IllegalStateException(
-                        "No pending transaction found for Flutterwave txRef=" + txRef));
+                        "No pending deposit found for Flutterwave txRef=" + txRef));
 
-        if (!tx.getUserId().equals(callerUserId)) {
+        if (!deposit.getUserId().equals(callerUserId)) {
             throw new IllegalArgumentException("This Flutterwave charge does not belong to the authenticated user");
         }
 
-        if (tx.getStatus() == TransactionStatus.COMPLETED) {
-            return new PaymentResponse(true, tx.getId(), "Deposit already completed");
+        if (deposit.getStatus() == DepositStatus.SUCCESS) {
+            return new PaymentResponse(true, deposit.getId(), "Deposit already completed");
         }
 
-        if (tx.getStatus() == TransactionStatus.FAILED) {
-            return new PaymentResponse(false, tx.getId(),
+        if (deposit.getStatus() == DepositStatus.FAILED) {
+            return new PaymentResponse(false, deposit.getId(),
                     "This Flutterwave charge previously failed and cannot be retried with the same reference.");
         }
 
-        String chargeId = tx.getProviderReference();
+        String chargeId = deposit.getProviderReference();
         if (chargeId == null) {
-            log.error("Flutterwave confirm: pending transaction txRef={} has no chargeId recorded", txRef);
-            return new PaymentResponse(false, tx.getId(),
+            log.error("Flutterwave confirm: pending deposit txRef={} has no chargeId recorded", txRef);
+            return new PaymentResponse(false, deposit.getId(),
                     "This charge is in an inconsistent state and needs manual review. Please contact support.");
         }
 
         FlutterwaveService.VerifyResult verifyResult = flutterwaveService.verifyChargeById(chargeId);
         if (!verifyResult.success()) {
             markFlutterwaveTransactionFailed(txRef, "Charge verification failed: " + verifyResult.message());
-            return new PaymentResponse(false, tx.getId(),
+            return new PaymentResponse(false, deposit.getId(),
                     "Flutterwave charge verification failed: " + verifyResult.message());
         }
 
         creditWalletFromFlutterwaveCallback(txRef, chargeId);
-        return new PaymentResponse(true, tx.getId(), "Flutterwave deposit successful");
+        return new PaymentResponse(true, deposit.getId(), "Flutterwave deposit successful");
     }
 
     /**
@@ -185,59 +190,61 @@ public class FlutterwaveDepositService {
      *
      * Both ensure verifyChargeById has been called first, preventing
      * spoofed/rejected charges from crediting the wallet. Safe idempotency:
-     * if a charge is already COMPLETED, this method no-ops — same pattern as
+     * if a charge is already SUCCESS, this method no-ops — same pattern as
      * confirmFlutterwaveDeposit (frontend redirect confirm) and by the
      * charge.completed webhook handler in PaymentCallbackController.
-     * The credited amount always comes from the transaction record created
+     * The credited amount always comes from the deposit record created
      * at initiation time (computed from a live FX rate at that moment),
      * same reasoning as before — this method only takes txRef and a
      * provider reference for the audit trail, not an amount.
      */
     @Transactional
     public void creditWalletFromFlutterwaveCallback(String txRef, String providerReference) {
-        Transaction tx = transactionRepository.findByReference(txRef).orElse(null);
+        Deposit deposit = depositRepository.findByReference(txRef).orElse(null);
 
-        if (tx == null) {
-            log.warn("Flutterwave reconciliation: no pending transaction found for txRef={} (providerReference={}) — " +
+        if (deposit == null) {
+            log.warn("Flutterwave reconciliation: no pending deposit found for txRef={} (providerReference={}) — " +
                     "cannot credit; needs manual review", txRef, providerReference);
             return;
         }
 
-        if (tx.getStatus() == TransactionStatus.COMPLETED) {
+        if (deposit.getStatus() == DepositStatus.SUCCESS) {
             log.info("Flutterwave deposit already processed for txRef={} — skipping duplicate credit", txRef);
             return;
         }
 
-        if (tx.getStatus() == TransactionStatus.FAILED) {
+        if (deposit.getStatus() == DepositStatus.FAILED) {
             log.warn("Flutterwave credit attempted for previously-failed txRef={} — ignoring, needs manual review", txRef);
             return;
         }
 
-        Wallet wallet = walletRepository.findById(tx.getWalletId())
-                .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + tx.getWalletId()));
+        Wallet wallet = walletRepository.findById(deposit.getWalletId())
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + deposit.getWalletId()));
 
-        wallet.setBalance(wallet.getBalance().add(tx.getAmount()));
+        wallet.setBalance(wallet.getBalance().add(deposit.getAmount()));
         walletRepository.save(wallet);
 
-        tx.setStatus(TransactionStatus.COMPLETED);
-        tx.setProviderReference(providerReference);
-        tx.setDescription("Flutterwave deposit (charge " + providerReference + ")");
-        transactionRepository.save(tx);
+        deposit.setStatus(DepositStatus.SUCCESS);
+        deposit.setProviderReference(providerReference);
+        depositRepository.save(deposit);
+
+        depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), deposit.getAmount(),
+                deposit, deposit.getReference());
 
         log.info("Wallet credited via Flutterwave: txRef={} amount={} providerReference={} (from initiationRate)",
-                txRef, tx.getAmount(), providerReference);
+                txRef, deposit.getAmount(), providerReference);
     }
 
     @Transactional
     public void markFlutterwaveTransactionFailed(String txRef, String reason) {
-        transactionRepository.findByReference(txRef).ifPresentOrElse(tx -> {
-            if (tx.getStatus() == TransactionStatus.COMPLETED) {
+        depositRepository.findByReference(txRef).ifPresentOrElse(deposit -> {
+            if (deposit.getStatus() == DepositStatus.SUCCESS) {
                 log.warn("Ignoring failure callback for already-completed Flutterwave txRef={}", txRef);
                 return;
             }
-            tx.setStatus(TransactionStatus.FAILED);
-            tx.setDescription("Flutterwave deposit failed: " + reason);
-            transactionRepository.save(tx);
+            deposit.setStatus(DepositStatus.FAILED);
+            deposit.setFailureReason(reason);
+            depositRepository.save(deposit);
             log.warn("Flutterwave deposit failed: txRef={} reason={}", txRef, reason);
         }, () -> log.warn("Failure callback for unknown Flutterwave txRef={}: {}", txRef, reason));
     }

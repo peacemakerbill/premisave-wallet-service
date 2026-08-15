@@ -28,11 +28,14 @@ public interface DepositRepository extends MongoRepository<Deposit, String> {
     List<Deposit> findByProviderAndStatusAndCreatedAtBefore(String provider, DepositStatus status, LocalDateTime cutoff);
 
     /**
-     * Used by IdempotencyService to detect a duplicate deposit request —
-     * same reasoning as DisbursementRepository.existsByReference: a
-     * Deposit record now exists immediately at initiation (status
-     * PENDING), separate from the Transaction row only created later once
-     * SUCCESS is confirmed.
+     * NOT currently used by IdempotencyService the way
+     * DisbursementRepository.existsByReference is — deposits don't go
+     * through that check at all. DepositService.initiateDeposit generates
+     * a fresh server-side UUID as the idempotency key on every call,
+     * rather than checking a client-supplied request.getReference() the
+     * way processDisbursement does. Kept here for symmetry with
+     * DisbursementRepository and because it's a reasonable query to have
+     * regardless — not wired into anything yet.
      */
     boolean existsByReference(String reference);
 }
