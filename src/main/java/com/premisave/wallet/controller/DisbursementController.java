@@ -4,6 +4,7 @@ import com.premisave.wallet.dto.ApiResponse;
 import com.premisave.wallet.dto.B2PochiRequest;
 import com.premisave.wallet.dto.DisbursementRequest;
 import com.premisave.wallet.dto.DisbursementResponse;
+import com.premisave.wallet.dto.NowPaymentsVerifyRequest;
 import com.premisave.wallet.service.DisbursementService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -50,5 +51,35 @@ public class DisbursementController {
         if (userId == null) userId = auth.getName();
         DisbursementResponse response = disbursementService.processB2PochiPayment(userId, request);
         return ResponseEntity.ok(ApiResponse.success("B2Pochi disbursement initiated", response));
+    }
+
+    /**
+     * Submits the 2FA code for a NOWPayments disbursement created via the
+     * generic POST /disbursements above (provider=NOWPAYMENTS) — the step
+     * that actually makes NOWPayments start processing the payout. Per
+     * NOWPayments' own support docs, a disbursement created but never
+     * verified is automatically rejected after roughly 1 hour.
+     *
+     * This endpoint deliberately doesn't care where verificationCode came
+     * from — an authenticator app, an email, whatever your NOWPayments
+     * account's Two-step authentication is actually set to (Dashboard →
+     * Account settings). See DisbursementService.
+     * verifyNowPaymentsDisbursement's javadoc for the full breakdown of
+     * what each configuration means for whether this can be automated.
+     *
+     * Ownership-checked in the service layer — a caller can't verify (and
+     * thereby trigger) a disbursement that isn't their own.
+     * POST /disbursements/nowpayments/{disbursementId}/verify
+     */
+    @PostMapping("/nowpayments/{disbursementId}/verify")
+    public ResponseEntity<ApiResponse<Void>> verifyNowPaymentsDisbursement(
+            @PathVariable String disbursementId,
+            @Valid @RequestBody NowPaymentsVerifyRequest request,
+            Authentication auth,
+            HttpServletRequest httpRequest) {
+        String userId = (String) httpRequest.getAttribute("userId");
+        if (userId == null) userId = auth.getName();
+        disbursementService.verifyNowPaymentsDisbursement(disbursementId, request.getVerificationCode(), userId);
+        return ResponseEntity.ok(ApiResponse.success("Verification submitted — payout now processing"));
     }
 }

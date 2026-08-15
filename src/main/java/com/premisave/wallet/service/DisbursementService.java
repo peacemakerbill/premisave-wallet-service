@@ -51,6 +51,7 @@ public class DisbursementService {
     private final FlutterwaveConfig flutterwaveConfig;
     private final IdempotencyService idempotencyService;
     private final FxRateService fxRateService;
+    private final NowPaymentsService nowPaymentsService;
 
     private static final List<String> PAYPAL_TERMINAL_FAILURE_STATUSES =
             List.of("FAILED", "DENIED", "BLOCKED", "RETURNED", "REFUNDED", "REVERSED", "CANCELED");
@@ -129,6 +130,19 @@ public class DisbursementService {
                         "Your linked Stripe account hasn't finished verification yet — payouts aren't enabled on it.");
             }
             destination = wallet.getStripeConnectedAccountId();
+        } else if ("NOWPAYMENTS".equals(provider)) {
+            // Unlike MPESA/PAYPAL/STRIPE above, there's no saved/verified
+            // crypto address on the wallet to resolve automatically — the
+            // caller supplies both the address and currency per request,
+            // same as PayPal's email field, just two fields instead of one
+            // since a crypto destination isn't identified by currency alone.
+            if (request.getDestination() == null || request.getDestination().isBlank()) {
+                throw new IllegalArgumentException("destination (crypto wallet address) is required for NOWPAYMENTS disbursements");
+            }
+            if (request.getNowPaymentsCurrency() == null || request.getNowPaymentsCurrency().isBlank()) {
+                throw new IllegalArgumentException("nowPaymentsCurrency is required for NOWPAYMENTS disbursements");
+            }
+            destination = request.getDestination();
         } else {
             if (request.getDestination() == null || request.getDestination().isBlank()) {
                 throw new IllegalArgumentException("destination is required for " + provider + " disbursements");
@@ -180,6 +194,7 @@ public class DisbursementService {
         ProviderResult result = switch (provider) {
             case "STRIPE" -> disburseStripe(request, destination, reference);
             case "PAYPAL" -> disbursePaypal(request, destination);
+            case "NOWPAYMENTS" -> disburseNowPayments(request, destination, reference);
             default -> new ProviderResult(false, "Unsupported provider: " + provider, null);
         };
 
@@ -188,18 +203,27 @@ public class DisbursementService {
         if (result.success()) {
             disbursement.setProviderReference(result.providerRef());
 
-            // Both PayPal and Stripe now resolve asynchronously — Stripe's
-            // Payout can fail after the money's already left our platform
-            // balance (see StripeService.transferAndPayout javadoc), so it
-            // gets the same PENDING-until-webhook treatment as every other
-            // provider rather than being debited synchronously.
-            if ("PAYPAL".equals(provider) || "STRIPE".equals(provider)) {
+            // PayPal, Stripe, and NOWPayments all resolve asynchronously —
+            // NOWPayments additionally requires a separate verify step
+            // before it even starts processing (see
+            // verifyNowPaymentsDisbursement below) — same PENDING-until-
+            // webhook treatment either way, since the wallet can't safely
+            // be debited until an external confirmation arrives.
+            if ("PAYPAL".equals(provider) || "STRIPE".equals(provider) || "NOWPAYMENTS".equals(provider)) {
                 disbursement.setStatus(DisbursementStatus.PENDING);
                 disbursementRepository.save(disbursement);
-                String providerLabel = "STRIPE".equals(provider) ? "Stripe" : "PayPal";
-                return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
-                        "Disbursement queued with " + providerLabel + " — your wallet will be debited once "
-                                + providerLabel + " confirms the payout.");
+                String providerLabel = switch (provider) {
+                    case "STRIPE" -> "Stripe";
+                    case "NOWPAYMENTS" -> "NOWPayments";
+                    default -> "PayPal";
+                };
+                String message = "NOWPAYMENTS".equals(provider)
+                        ? "Disbursement created with NOWPayments — verify it with your 2FA code "
+                                + "(POST /disbursements/nowpayments/" + disbursement.getId() + "/verify) "
+                                + "within 1 hour, or it will be automatically rejected."
+                        : "Disbursement queued with " + providerLabel + " — your wallet will be debited once "
+                                + providerLabel + " confirms the payout.";
+                return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), message);
             }
 
             // No synchronous-success provider remains in this switch — kept
@@ -452,6 +476,138 @@ public class DisbursementService {
                     "that connected account; needs manual reconciliation, NOT a routine no-op failure",
                     d.getId(), payoutId, failureReason, d.getDestination());
         }
+    }
+
+    // ─── Reconciliation from NOWPayments' payout IPN webhook ────────────────
+
+    /**
+     * Keyed by the NOWPayments payout id, stored as providerReference at
+     * initiation — see disburseNowPayments above. Statuses observed
+     * inconsistently across NOWPayments' own documentation (some sources
+     * list FINISHED/FAILED/REJECTED, others waiting/processing/sending/
+     * finished/failed) — PaymentCallbackController.nowPaymentsWebhook
+     * normalizes whatever it receives to a simple success/failure boolean
+     * before calling this, so this method itself doesn't need to know the
+     * exact status vocabulary.
+     *
+     * Same reasoning as every other provider here: the wallet is never
+     * debited until this fires, so a failure is a clean no-op, not a
+     * stranded-funds situation — unlike Stripe Connect above, NOWPayments'
+     * create+verify flow doesn't have an equivalent "money already left an
+     * intermediate balance" step before this final confirmation.
+     */
+    @Transactional
+    public void completeNowPaymentsDisbursement(String payoutId, boolean success, String failureReason) {
+        Disbursement d = disbursementRepository.findByProviderReference(payoutId).orElse(null);
+        if (d == null) {
+            log.warn("NOWPayments payout webhook for unknown payoutId={} — ignoring", payoutId);
+            return;
+        }
+
+        if (d.getStatus() != DisbursementStatus.PENDING) {
+            log.warn("NOWPayments payout webhook for already-finalized disbursement id={} status={} — ignoring duplicate",
+                    d.getId(), d.getStatus());
+            return;
+        }
+
+        if (success) {
+            d.setStatus(DisbursementStatus.SUCCESS);
+
+            if (d.getWalletId() != null) {
+                Wallet wallet = walletRepository.findById(d.getWalletId())
+                        .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + d.getWalletId()));
+
+                BigDecimal newBalance = wallet.getBalance().subtract(d.getAmount());
+                if (newBalance.compareTo(BigDecimal.ZERO) < 0) {
+                    log.error("Wallet {} balance went negative ({}) debiting confirmed NOWPayments disbursement id={} — needs manual reconciliation",
+                            wallet.getId(), newBalance, d.getId());
+                }
+                wallet.setBalance(newBalance);
+                walletRepository.save(wallet);
+
+                disbursementRepository.save(d);
+                saveDisbursementTransaction(d.getUserId(), d.getWalletId(), d.getAmount(), d, d.getReference());
+            } else {
+                disbursementRepository.save(d);
+            }
+
+            log.info("NOWPayments disbursement completed: id={} payoutId={}", d.getId(), payoutId);
+        } else {
+            // No refund needed — the wallet was never debited for a
+            // PENDING NOWPayments disbursement (see disburseNowPayments above).
+            d.setStatus(DisbursementStatus.FAILED);
+            d.setFailureReason(failureReason);
+            disbursementRepository.save(d);
+            log.warn("NOWPayments disbursement failed: id={} payoutId={} reason={}", d.getId(), payoutId, failureReason);
+        }
+    }
+
+    /**
+     * Verifies a NOWPayments disbursement with its 2FA code — the step
+     * that actually makes NOWPayments start processing the payout (see
+     * NowPaymentsService.verifyPayout's javadoc; per NOWPayments' own
+     * support docs, an unverified payout auto-rejects after ~1 hour).
+     *
+     * WHERE THE CODE COMES FROM depends entirely on how 2FA is configured
+     * on your NOWPayments account:
+     *  - App-based (TOTP, "Use an app" in Dashboard → Account settings →
+     *    Two step authentication) — this CAN be fully automated. If you
+     *    hold the TOTP secret server-side, generate the current code
+     *    yourself (e.g. via a small RFC 6238 implementation or a library
+     *    like `com.warrenstrange:googleauth`) and call this method
+     *    immediately after disburseNowPayments succeeds, with no human in
+     *    the loop — same fully-automated shape as every other provider's
+     *    withdrawal flow in this codebase. Not implemented here since it
+     *    depends on a secret this class has no access to; wire it in once
+     *    you've confirmed this is how 2FA is actually configured.
+     *  - Email-based — a human has to open an email and read the code out.
+     *    This genuinely cannot be automated by this backend; expose this
+     *    method behind an authenticated endpoint the user (or an admin)
+     *    calls manually once they have the code (see
+     *    DisbursementController — not included in this pass, since I don't
+     *    have that file's current content to safely add to).
+     *  - 2FA disabled entirely — NOWPayments creates the payout already
+     *    fully processing (per their own docs), and calling this at all
+     *    would simply fail since there's nothing left to verify. Check
+     *    d.getStatus() / a fresh getPayoutStatus() call before assuming
+     *    this step is even necessary if you go this route (not
+     *    recommended for a real business — see the earlier discussion of
+     *    what disabling this control actually trades away).
+     *
+     * Ownership-checked the same way withdrawal-adjacent actions are
+     * checked elsewhere in this codebase — callerUserId must match the
+     * disbursement's own userId, so one user can't verify (and thereby
+     * trigger) a payout that isn't theirs.
+     */
+    @Transactional
+    public void verifyNowPaymentsDisbursement(String disbursementId, String verificationCode, String callerUserId) {
+        Disbursement d = disbursementRepository.findById(disbursementId)
+                .orElseThrow(() -> new IllegalArgumentException("Disbursement not found: " + disbursementId));
+
+        if (!callerUserId.equals(d.getUserId())) {
+            throw new IllegalArgumentException("This disbursement does not belong to the authenticated user");
+        }
+
+        if (!"NOWPAYMENTS".equals(d.getProvider())) {
+            throw new IllegalArgumentException("Disbursement " + disbursementId + " is not a NOWPayments disbursement");
+        }
+
+        if (d.getStatus() != DisbursementStatus.PENDING) {
+            throw new IllegalStateException(
+                    "This disbursement is already " + d.getStatus() + " — nothing left to verify.");
+        }
+
+        boolean verified = nowPaymentsService.verifyPayout(d.getProviderReference(), verificationCode);
+        if (!verified) {
+            throw new IllegalStateException(
+                    "NOWPayments rejected the verification code — check it's correct and hasn't expired.");
+        }
+
+        log.info("NOWPayments disbursement verified: id={} payoutId={} — now processing, awaiting webhook confirmation",
+                d.getId(), d.getProviderReference());
+        // Deliberately NOT changing d.getStatus() here — it stays PENDING
+        // until completeNowPaymentsDisbursement resolves it via the
+        // webhook, same as every other provider's confirmation step.
     }
 
     // ─── B2B (admin/finance-initiated, business-to-business payment) ───────
@@ -811,6 +967,43 @@ public class DisbursementService {
             log.info("PayPal payout: kesAmount={} usdAmount={} rate={} batchId={}",
                     request.getAmount(), usdAmount, usdToKesRate, batchId);
             return new ProviderResult(true, "PayPal payout initiated (USD " + usdAmount + ")", batchId);
+        } catch (Exception e) {
+            return new ProviderResult(false, e.getMessage(), null);
+        }
+    }
+
+    /**
+     * Converts the wallet's KES amount into the target crypto using
+     * NOWPayments' own /v1/estimate rates (see NowPaymentsService.
+     * getEstimatedAmount's javadoc for why FxRateService can't do this),
+     * then creates the payout. Returns providerRef = the NOWPayments
+     * payout id — same role as Stripe's payoutId / PayPal's batchId — but
+     * note this payout does NOT execute yet even on success here; it sits
+     * awaiting 2FA verification (see verifyNowPaymentsDisbursement below).
+     */
+    private ProviderResult disburseNowPayments(DisbursementRequest request, String address, String idempotencyKey) {
+        try {
+            NowPaymentsService.EstimateResult estimate = nowPaymentsService.getEstimatedAmount(
+                    request.getAmount(), "kes", request.getNowPaymentsCurrency());
+
+            if (!estimate.success()) {
+                return new ProviderResult(false, estimate.message(), null);
+            }
+
+            NowPaymentsService.CreatePayoutResult result = nowPaymentsService.createPayout(
+                    address, request.getNowPaymentsCurrency(), estimate.estimatedAmount(), idempotencyKey);
+
+            if (!result.success()) {
+                return new ProviderResult(false, result.message(), null);
+            }
+
+            log.info("NOWPayments payout: address={} kesAmount={} {}Amount={} payoutId={}",
+                    address, request.getAmount(), request.getNowPaymentsCurrency(),
+                    estimate.estimatedAmount(), result.payoutId());
+            return new ProviderResult(true,
+                    "NOWPayments payout created (" + request.getNowPaymentsCurrency().toUpperCase()
+                            + " " + estimate.estimatedAmount() + ") — awaiting 2FA verification",
+                    result.payoutId());
         } catch (Exception e) {
             return new ProviderResult(false, e.getMessage(), null);
         }

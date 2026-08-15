@@ -678,21 +678,47 @@ public class PaymentCallbackController {
 	// ─── NOWPayments Webhook (IPN) ──────────────────────────────────────────
 
 	/**
-	 * NOWPayments sends one POST per payment_status transition to this
-	 * single endpoint — no separate platform/Connect split like Stripe, and
-	 * no separate deposit/payout endpoints either.
+	 * NOWPayments sends one POST per status transition to this SINGLE
+	 * endpoint for BOTH deposits and payouts — no separate platform/Connect
+	 * split like Stripe, and no separate deposit/payout URLs either, since
+	 * both create_payment and create_payout point their ipn_callback_url
+	 * here.
 	 *
 	 * Verified via HMAC-SHA512 over the recursively-key-sorted JSON body,
 	 * sent in the "x-nowpayments-sig" header — see
 	 * NowPaymentsService.verifyIpnSignature for the full explanation and
-	 * its confirmed-against-official-sources caveats.
+	 * its confirmed-against-official-sources caveats. Same signing scheme
+	 * for both deposit and payout callbacks — confirmed from NOWPayments'
+	 * own docs, not assumed.
 	 *
-	 * "finished" is the only status that credits the wallet — see
+	 * DEPOSIT callbacks are identified by a "payment_id" field — confirmed
+	 * shape, tested end to end earlier in this integration.
+	 *
+	 * PAYOUT callbacks are routed here too, but their exact field names
+	 * were NOT independently confirmed against a real captured payload at
+	 * the time this was written — NOWPayments' payout API documentation is
+	 * far less complete publicly than the deposit side. The field-name
+	 * fallbacks below (checking a few plausible names for the payout id
+	 * and status) are a best-effort guess, same defensive pattern already
+	 * used for Flutterwave's transfer.disburse failure-message field
+	 * uncertainty elsewhere in this file. CONFIRM the real field names
+	 * against an actual sandbox payout webhook delivery before relying on
+	 * this for anything user-facing — check Dashboard → Payments History
+	 * or your own captured raw body (see CallbackRequestLoggingFilter) the
+	 * first time a real payout webhook arrives, and adjust the field paths
+	 * below if they differ.
+	 *
+	 * "finished" is the only DEPOSIT status that credits the wallet — see
 	 * NowPaymentsDepositService.creditWalletFromNowPaymentsCallback's
 	 * javadoc for why "confirmed" is deliberately NOT treated as success.
-	 * "partially_paid" gets flagged for manual review rather than
-	 * auto-resolved either way. Always returns 200 regardless of internal
-	 * outcome — same pattern as every other provider callback here.
+	 * For PAYOUTS, "FINISHED" is treated as success and
+	 * "FAILED"/"REJECTED"/"REJECTED_NOT_CHECKED" as failure — matching the
+	 * status vocabulary from NOWPayments' own payout endpoint
+	 * documentation, which differs from the deposit side's lowercase
+	 * waiting/confirming/finished/etc. vocabulary.
+	 *
+	 * Always returns 200 regardless of internal outcome — same pattern as
+	 * every other provider callback here.
 	 */
 	@PostMapping("/nowpayments/webhook")
 	public ResponseEntity<Void> nowPaymentsWebhook(@RequestBody String rawBody,
@@ -705,23 +731,53 @@ public class PaymentCallbackController {
 
 		try {
 			JsonNode data = objectMapper.readTree(rawBody);
-			String orderId = data.path("order_id").asText(null);
-			String paymentId = data.path("payment_id").asText(null);
-			String status = data.path("payment_status").asText("");
 
-			log.info("NOWPayments webhook received (verified): orderId={} paymentId={} status={}",
-					orderId, paymentId, status);
+			if (data.has("payment_id")) {
+				// ── Deposit callback — confirmed shape ──
+				String orderId = data.path("order_id").asText(null);
+				String paymentId = data.path("payment_id").asText(null);
+				String status = data.path("payment_status").asText("");
 
-			if (orderId == null || orderId.isBlank()) {
-				log.warn("NOWPayments webhook missing order_id — cannot reconcile");
-			} else if ("finished".equals(status)) {
-				nowPaymentsDepositService.creditWalletFromNowPaymentsCallback(orderId, paymentId);
-			} else if ("failed".equals(status) || "expired".equals(status) || "refunded".equals(status)) {
-				nowPaymentsDepositService.markNowPaymentsTransactionFailed(orderId, "NOWPayments reported status=" + status);
-			} else if ("partially_paid".equals(status)) {
-				nowPaymentsDepositService.flagNowPaymentsPartialPayment(orderId, paymentId);
+				log.info("NOWPayments deposit webhook received (verified): orderId={} paymentId={} status={}",
+						orderId, paymentId, status);
+
+				if (orderId == null || orderId.isBlank()) {
+					log.warn("NOWPayments deposit webhook missing order_id — cannot reconcile");
+				} else if ("finished".equals(status)) {
+					nowPaymentsDepositService.creditWalletFromNowPaymentsCallback(orderId, paymentId);
+				} else if ("failed".equals(status) || "expired".equals(status) || "refunded".equals(status)) {
+					nowPaymentsDepositService.markNowPaymentsTransactionFailed(orderId, "NOWPayments reported status=" + status);
+				} else if ("partially_paid".equals(status)) {
+					nowPaymentsDepositService.flagNowPaymentsPartialPayment(orderId, paymentId);
+				}
+				// waiting / confirming / confirmed / sending — still pending, no action.
+
+			} else {
+				// ── Payout callback — field names NOT independently
+				// confirmed, see javadoc above. Falls back across a few
+				// plausible names for the payout id.
+				String payoutId = data.path("id").asText(null);
+				if (payoutId == null || payoutId.isBlank()) {
+					payoutId = data.path("payout_id").asText(null);
+				}
+				if (payoutId == null || payoutId.isBlank()) {
+					payoutId = data.path("withdrawal_id").asText(null);
+				}
+
+				String status = data.path("status").asText("");
+
+				log.info("NOWPayments payout webhook received (verified): payoutId={} status={}", payoutId, status);
+
+				if (payoutId == null || payoutId.isBlank()) {
+					log.warn("NOWPayments payout webhook missing an identifiable payout id field — cannot reconcile. Raw body logged separately via CallbackRequestLoggingFilter — inspect it to find the real field name.");
+				} else if ("FINISHED".equalsIgnoreCase(status)) {
+					disbursementService.completeNowPaymentsDisbursement(payoutId, true, null);
+				} else if ("FAILED".equalsIgnoreCase(status) || "REJECTED".equalsIgnoreCase(status)
+						|| "REJECTED_NOT_CHECKED".equalsIgnoreCase(status)) {
+					disbursementService.completeNowPaymentsDisbursement(payoutId, false, "NOWPayments reported status=" + status);
+				}
+				// NEW / CREATING / WAITING / PROCESSING — still pending, no action.
 			}
-			// waiting / confirming / confirmed / sending — still pending, no action.
 
 		} catch (Exception e) {
 			log.error("NOWPayments webhook processing error: {}", e.getMessage(), e);

@@ -68,6 +68,9 @@ public class NowPaymentsService {
     public record PayoutStatusResult(boolean success, String status, String message) {
     }
 
+    public record EstimateResult(boolean success, BigDecimal estimatedAmount, String message) {
+    }
+
     /**
      * Creates a crypto payment — POST /v1/payment. priceAmount/priceCurrency
      * is what you're charging in YOUR currency (KES here); payCurrency is
@@ -158,6 +161,53 @@ public class NowPaymentsService {
         } catch (Exception e) {
             log.error("NOWPayments getPaymentStatus error: {}", e.getMessage(), e);
             return new PaymentStatusResult(false, null, null, "NOWPayments getPaymentStatus error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * GET /v1/estimate — converts a fiat amount into its current crypto
+     * equivalent using NOWPayments' own live rates. Needed for payouts
+     * because FxRateService (Frankfurter, used for Stripe/PayPal FX) has
+     * no cryptocurrency rates at all — this is NOWPayments' own quoting
+     * engine, the same one the deposit side implicitly uses when it
+     * quotes pay_amount on a Create Payment call, just called directly
+     * here since a payout's amount has to be computed up front rather
+     * than returned alongside address/QR-code creation.
+     *
+     * Only needs x-api-key, not the payout JWT — same auth tier as the
+     * deposit-side calls.
+     */
+    public EstimateResult getEstimatedAmount(BigDecimal fiatAmount, String fiatCurrency, String cryptoCurrency) {
+        try {
+            String url = config.getBaseUrl() + "/v1/estimate?amount=" + fiatAmount
+                    + "&currency_from=" + fiatCurrency.toLowerCase()
+                    + "&currency_to=" + cryptoCurrency.toLowerCase();
+
+            Request request = new Request.Builder()
+                    .url(url)
+                    .addHeader("x-api-key", config.getApiKey())
+                    .get()
+                    .build();
+
+            try (Response response = httpClient.newCall(request).execute()) {
+                String responseBody = response.body() != null ? response.body().string() : "";
+                if (!response.isSuccessful()) {
+                    log.warn("NOWPayments getEstimatedAmount failed: status={} body={}", response.code(), responseBody);
+                    return new EstimateResult(false, null,
+                            "NOWPayments getEstimatedAmount failed (" + response.code() + "): " + responseBody);
+                }
+                JsonNode node = objectMapper.readTree(responseBody);
+                BigDecimal estimatedAmount = node.has("estimated_amount")
+                        ? new BigDecimal(node.get("estimated_amount").asText())
+                        : null;
+                if (estimatedAmount == null) {
+                    return new EstimateResult(false, null, "NOWPayments estimate response missing 'estimated_amount': " + responseBody);
+                }
+                return new EstimateResult(true, estimatedAmount, "OK");
+            }
+        } catch (Exception e) {
+            log.error("NOWPayments getEstimatedAmount error: {}", e.getMessage(), e);
+            return new EstimateResult(false, null, "NOWPayments getEstimatedAmount error: " + e.getMessage());
         }
     }
 
