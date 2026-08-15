@@ -8,17 +8,21 @@ import com.premisave.wallet.dto.FlutterwaveWebhookRequest;
 import com.premisave.wallet.dto.MpesaResultCallbackRequest;
 import com.premisave.wallet.dto.MpesaStkCallbackRequest;
 import com.premisave.wallet.dto.PaypalWebhookRequest;
-import com.premisave.wallet.service.DisbursementService;
 import com.premisave.wallet.service.FlutterwaveDepositService;
+import com.premisave.wallet.service.FlutterwaveDisbursementService;
 import com.premisave.wallet.service.FlutterwaveService;
 import com.premisave.wallet.service.MpesaDepositService;
+import com.premisave.wallet.service.MpesaDisbursementService;
 import com.premisave.wallet.service.MpesaOperationsService;
 import com.premisave.wallet.service.NowPaymentsDepositService;
+import com.premisave.wallet.service.NowPaymentsDisbursementService;
 import com.premisave.wallet.service.NowPaymentsService;
 import com.premisave.wallet.service.PaypalDepositService;
+import com.premisave.wallet.service.PaypalDisbursementService;
 import com.premisave.wallet.service.PaypalService;
 import com.premisave.wallet.service.PullTransactionService;
 import com.premisave.wallet.service.StripeDepositService;
+import com.premisave.wallet.service.StripeDisbursementService;
 import com.stripe.model.Event;
 import com.stripe.model.PaymentIntent;
 import com.stripe.model.Payout;
@@ -67,7 +71,11 @@ public class PaymentCallbackController {
 	private final PaypalDepositService paypalDepositService;
 	private final FlutterwaveDepositService flutterwaveDepositService;
 	private final NowPaymentsDepositService nowPaymentsDepositService;
-	private final DisbursementService disbursementService;
+	private final MpesaDisbursementService mpesaDisbursementService;
+	private final StripeDisbursementService stripeDisbursementService;
+	private final PaypalDisbursementService paypalDisbursementService;
+	private final FlutterwaveDisbursementService flutterwaveDisbursementService;
+	private final NowPaymentsDisbursementService nowPaymentsDisbursementService;
 	private final MpesaOperationsService mpesaOperationsService;
 	private final PullTransactionService pullTransactionService;
 	private final StripeService stripeService;
@@ -140,7 +148,7 @@ public class PaymentCallbackController {
 
 		try {
 			boolean success = result.getResultCode() == 0;
-			disbursementService.completeMpesaDisbursement(result.getConversationID(), success, result.getResultDesc(),
+			mpesaDisbursementService.completeMpesaDisbursement(result.getConversationID(), success, result.getResultDesc(),
 					result.getTransactionID());
 		} catch (Exception e) {
 			log.error("Failed to process M-Pesa B2C result: conversationId={}", result.getConversationID(), e);
@@ -154,7 +162,7 @@ public class PaymentCallbackController {
 		String conversationId = callback.getResult() != null ? callback.getResult().getConversationID() : null;
 		log.warn("M-Pesa B2C timeout: conversationId={}", conversationId);
 		try {
-			disbursementService.markMpesaDisbursementTimedOut(conversationId);
+			mpesaDisbursementService.markMpesaDisbursementTimedOut(conversationId);
 		} catch (Exception e) {
 			log.error("Failed to process M-Pesa B2C timeout: conversationId={}", conversationId, e);
 		}
@@ -171,7 +179,7 @@ public class PaymentCallbackController {
 
 		try {
 			boolean success = result.getResultCode() == 0;
-			disbursementService.completeMpesaDisbursement(result.getConversationID(), success, result.getResultDesc(),
+			mpesaDisbursementService.completeMpesaDisbursement(result.getConversationID(), success, result.getResultDesc(),
 					result.getTransactionID());
 		} catch (Exception e) {
 			log.error("Failed to process M-Pesa B2B result: conversationId={}", result.getConversationID(), e);
@@ -185,7 +193,7 @@ public class PaymentCallbackController {
 		String conversationId = callback.getResult() != null ? callback.getResult().getConversationID() : null;
 		log.warn("M-Pesa B2B timeout: conversationId={}", conversationId);
 		try {
-			disbursementService.markMpesaDisbursementTimedOut(conversationId);
+			mpesaDisbursementService.markMpesaDisbursementTimedOut(conversationId);
 		} catch (Exception e) {
 			log.error("Failed to process M-Pesa B2B timeout: conversationId={}", conversationId, e);
 		}
@@ -315,7 +323,7 @@ public class PaymentCallbackController {
 
 		try {
 			boolean success = result.getResultCode() == 0;
-			disbursementService.completeMpesaDisbursement(result.getConversationID(), success, result.getResultDesc(),
+			mpesaDisbursementService.completeMpesaDisbursement(result.getConversationID(), success, result.getResultDesc(),
 					result.getTransactionID());
 		} catch (Exception e) {
 			log.error("Failed to process B2Pochi result: conversationId={}", result.getConversationID(), e);
@@ -329,7 +337,7 @@ public class PaymentCallbackController {
 		String conversationId = callback.getResult() != null ? callback.getResult().getConversationID() : null;
 		log.warn("M-Pesa B2Pochi timeout: conversationId={}", conversationId);
 		try {
-			disbursementService.markMpesaDisbursementTimedOut(conversationId);
+			mpesaDisbursementService.markMpesaDisbursementTimedOut(conversationId);
 		} catch (Exception e) {
 			log.error("Failed to process B2Pochi timeout: conversationId={}", conversationId, e);
 		}
@@ -428,7 +436,7 @@ public class PaymentCallbackController {
 	 *
 	 * Handles payout confirmation ONLY — this is the sole mechanism that
 	 * reconciles a STRIPE disbursement's PENDING status (see
-	 * DisbursementService.completeStripeConnectDisbursement); without it, a
+	 * StripeDisbursementService.completeStripeConnectDisbursement); without it, a
 	 * Stripe withdrawal never resolves and the wallet is never debited.
 	 * There's no polling alternative for this the way there is for account
 	 * status below, so this endpoint IS required once you have users
@@ -464,11 +472,11 @@ public class PaymentCallbackController {
 		try {
 			if ("payout.paid".equals(event.getType())) {
 				Payout payout = (Payout) event.getDataObjectDeserializer().deserializeUnsafe();
-				disbursementService.completeStripeConnectDisbursement(payout.getId(), true, null);
+				stripeDisbursementService.completeStripeConnectDisbursement(payout.getId(), true, null);
 			} else if ("payout.failed".equals(event.getType())) {
 				Payout payout = (Payout) event.getDataObjectDeserializer().deserializeUnsafe();
 				String reason = payout.getFailureMessage() != null ? payout.getFailureMessage() : payout.getFailureCode();
-				disbursementService.completeStripeConnectDisbursement(payout.getId(), false, reason);
+				stripeDisbursementService.completeStripeConnectDisbursement(payout.getId(), false, reason);
 			}
 			// account.updated and every other Connect event type
 			// intentionally ignored here — see javadoc above.
@@ -507,7 +515,7 @@ public class PaymentCallbackController {
 	 * DepositService.attachPaypalVaultToken) - PAYMENT.PAYOUTS-ITEM.*
 	 * (SUCCEEDED/FAILED/DENIED/BLOCKED/RETURNED/ REFUNDED/UNCLAIMED/HELD/CANCELED)
 	 * → reconciles a PayPal disbursement (see
-	 * DisbursementService.completePaypalDisbursement). Not modeled in
+	 * PaypalDisbursementService.completePaypalDisbursement). Not modeled in
 	 * PaypalWebhookRequest (its Resource type is shaped for orders/vault events),
 	 * so these fields are read straight off the raw JSON body, same approach as the
 	 * PAYMENT.CAPTURE.COMPLETED backstop below.
@@ -578,7 +586,7 @@ public class PaymentCallbackController {
 						payload.getEventType(), payoutBatchId, payoutItemId, transactionStatus);
 
 				if (payoutBatchId != null && !payoutBatchId.isBlank()) {
-					disbursementService.completePaypalDisbursement(payoutBatchId, transactionStatus,
+					paypalDisbursementService.completePaypalDisbursement(payoutBatchId, transactionStatus,
 							paypalTransactionId, errorMessage);
 				} else {
 					log.warn(
@@ -664,7 +672,7 @@ public class PaymentCallbackController {
 					log.warn("Flutterwave transfer.disburse webhook missing data.id — cannot reconcile");
 				} else {
 					boolean success = "SUCCESSFUL".equalsIgnoreCase(status);
-					disbursementService.completeFlutterwaveDisbursement(transferId, success,
+					flutterwaveDisbursementService.completeFlutterwaveDisbursement(transferId, success,
 							failureMessage != null ? failureMessage : status);
 				}
 			}
@@ -771,10 +779,10 @@ public class PaymentCallbackController {
 				if (payoutId == null || payoutId.isBlank()) {
 					log.warn("NOWPayments payout webhook missing an identifiable payout id field — cannot reconcile. Raw body logged separately via CallbackRequestLoggingFilter — inspect it to find the real field name.");
 				} else if ("FINISHED".equalsIgnoreCase(status)) {
-					disbursementService.completeNowPaymentsDisbursement(payoutId, true, null);
+					nowPaymentsDisbursementService.completeNowPaymentsDisbursement(payoutId, true, null);
 				} else if ("FAILED".equalsIgnoreCase(status) || "REJECTED".equalsIgnoreCase(status)
 						|| "REJECTED_NOT_CHECKED".equalsIgnoreCase(status)) {
-					disbursementService.completeNowPaymentsDisbursement(payoutId, false, "NOWPayments reported status=" + status);
+					nowPaymentsDisbursementService.completeNowPaymentsDisbursement(payoutId, false, "NOWPayments reported status=" + status);
 				}
 				// NEW / CREATING / WAITING / PROCESSING — still pending, no action.
 			}
