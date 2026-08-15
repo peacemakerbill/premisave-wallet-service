@@ -86,8 +86,11 @@ public class DepositRequest {
     private String flutterwaveMobileNetwork;
 
     /**
-     * SANDBOX TESTING ONLY, provider=NOWPAYMENTS only — e.g. "finished",
-     * "failed", "partially_paid". Passed straight through to NOWPayments'
+     * SANDBOX TESTING ONLY, provider=NOWPAYMENTS only — one of
+     * "success", "failed", "partially_paid", or "common" (NOWPayments'
+     * own valid values, confirmed via their API's error response — "finished"
+     * is NOT valid here despite being a real payment_status value elsewhere;
+     * don't confuse the two). Passed straight through to NOWPayments'
      * Create Payment "case" parameter, which makes it immediately simulate
      * that outcome via a synthetic IPN callback — no real crypto needed,
      * same purpose as flutterwave.sandbox-scenario-key, just per-request

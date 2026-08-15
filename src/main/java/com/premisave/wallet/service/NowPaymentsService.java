@@ -78,8 +78,12 @@ public class NowPaymentsService {
      * NOWPayments quotes the crypto-equivalent amount and a one-time deposit
      * address in the response.
      *
-     * sandboxCase is sandbox-only — set to "finished", "failed",
-     * "partially_paid", etc. to make NOWPayments immediately simulate that
+     * sandboxCase is sandbox-only — one of "success", "failed",
+     * "partially_paid", or "common" (confirmed valid values, from
+     * NOWPayments' own API error response — "finished" is NOT one of
+     * them, despite being a real payment_status value used elsewhere in
+     * this integration; the two are easy to conflate but genuinely
+     * different vocabularies). Makes NOWPayments immediately simulate that
      * outcome (via an IPN callback) without ever needing real crypto. Null
      * or blank in production, where it's simply not sent.
      */
