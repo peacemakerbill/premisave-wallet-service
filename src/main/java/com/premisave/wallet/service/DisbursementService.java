@@ -87,10 +87,41 @@ public class DisbursementService {
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
 
         if (wallet.isFrozen()) throw new WalletFrozenException("Wallet is frozen");
-        if (wallet.getBalance().compareTo(request.getAmount()) < 0)
-            throw new InsufficientFundsException("Insufficient funds for disbursement");
 
         String provider = request.getProvider() != null ? request.getProvider().toUpperCase() : "MPESA";
+
+        // MUST run before the balance check below, and BEFORE provider was
+        // previously resolved at this point in the method — moved
+        // provider resolution up two lines specifically to make this
+        // possible. Mutates request's own amount field in place (Lombok
+        // @Data setter) rather than threading a separately-converted value
+        // through every one of this method's ~10 existing
+        // request.getAmount() call sites (the balance check right below,
+        // disbursement.setAmount further down, a synchronous debit for
+        // some providers, etc.) — every one of those already correctly
+        // and uniformly reads request.getAmount(), so mutating it once
+        // here is the minimal, safe fix rather than a larger rewrite.
+        //
+        // Defaults to KES (no conversion) if unset — DELIBERATELY the
+        // OPPOSITE default from DepositRequest.nowPaymentsPriceCurrency
+        // (which defaults to USD). Every existing caller of THIS endpoint,
+        // across all five providers, has always assumed request.getAmount()
+        // is KES; flipping the default here would silently reinterpret
+        // every existing NOWPAYMENTS withdrawal request already in flight
+        // or hardcoded in a frontend. Only converts when a caller
+        // EXPLICITLY opts in with a non-KES value.
+        if ("NOWPAYMENTS".equals(provider) && request.getNowPaymentsPriceCurrency() != null
+                && !request.getNowPaymentsPriceCurrency().isBlank()
+                && !"kes".equalsIgnoreCase(request.getNowPaymentsPriceCurrency())) {
+            BigDecimal rateToKes = fxRateService.getRate(request.getNowPaymentsPriceCurrency().toUpperCase(), "KES");
+            BigDecimal kesAmount = request.getAmount().multiply(rateToKes).setScale(2, java.math.RoundingMode.HALF_UP);
+            log.info("NOWPayments withdrawal priced: requested={} {} kesEquivalent={}",
+                    request.getAmount(), request.getNowPaymentsPriceCurrency().toUpperCase(), kesAmount);
+            request.setAmount(kesAmount);
+        }
+
+        if (wallet.getBalance().compareTo(request.getAmount()) < 0)
+            throw new InsufficientFundsException("Insufficient funds for disbursement");
 
         if ("MPESA".equals(provider) && request.getCurrency() != null
                 && !"KES".equalsIgnoreCase(request.getCurrency())) {

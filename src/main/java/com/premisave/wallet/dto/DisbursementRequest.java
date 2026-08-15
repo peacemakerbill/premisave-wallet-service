@@ -90,4 +90,18 @@ public class DisbursementRequest {
      * per-withdrawal currency field, separate from the KES amount field.
      */
     private String nowPaymentsCurrency;
+
+    /**
+     * Optional, provider=NOWPAYMENTS only — which FIAT currency amount
+     * above is denominated in (e.g. "usd"). Defaults to KES (no
+     * conversion) if omitted — see DisbursementService.
+     * processDisbursement's javadoc for why this default is the OPPOSITE
+     * of DepositRequest.nowPaymentsPriceCurrency's USD default: every
+     * existing caller of this withdrawal endpoint has always assumed
+     * amount is KES, so flipping the default here would silently
+     * reinterpret existing requests rather than just adding a new option.
+     * Set this explicitly to let a non-Kenyan customer specify how much
+     * they want to withdraw in their own currency instead.
+     */
+    private String nowPaymentsPriceCurrency;
 }

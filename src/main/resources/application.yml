@@ -247,7 +247,7 @@ flutterwave:
 # even while testing in sandbox. See NowPaymentsConfig for the full javadoc.
 nowpayments:
   # https://api-sandbox.nowpayments.io for testing, https://api.nowpayments.io for production
-  base-url: ${NOWPAYMENTS_BASE_URL}
+  base-url: ${NOWPAYMENTS_BASE_URL:https://api-sandbox.nowpayments.io}
   # Dashboard → Settings → Payments → API keys
   api-key: ${NOWPAYMENTS_API_KEY}
   # Dashboard → Settings → Payments → Instant payment notifications.
@@ -255,6 +255,11 @@ nowpayments:
   ipn-secret: ${NOWPAYMENTS_IPN_SECRET}
   # Sent as ipn_callback_url on every Create Payment request.
   callback-url: ${NOWPAYMENTS_CALLBACK_URL}
+  # Your NOWPayments DASHBOARD LOGIN (not the API key above) — required only
+  # for payouts, via POST /v1/auth. See NowPaymentsConfig for why this is a
+  # meaningfully more sensitive secret than everything else in this block.
+  payout-email: ${NOWPAYMENTS_PAYOUT_EMAIL:}
+  payout-password: ${NOWPAYMENTS_PAYOUT_PASSWORD:}
 
 # Frontend URL for CORS
 frontend:

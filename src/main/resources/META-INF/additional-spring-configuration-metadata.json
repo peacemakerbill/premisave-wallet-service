@@ -531,6 +531,16 @@
 			"description": "Your own public HTTPS URL for /payments/nowpayments/webhook, sent as ipn_callback_url on every Create Payment request. No sandbox tunnel/CLI tooling exists here the way Stripe CLI's 'stripe listen' does — this needs to be a real reachable URL (e.g. via zrok/ngrok in dev) even while testing in sandbox."
 		},
 		{
+			"name": "nowpayments.payout-email",
+			"type": "java.lang.String",
+			"description": "Your NOWPayments DASHBOARD LOGIN email — NOT the same thing as nowpayments.api-key, and a meaningfully more sensitive secret. Required only for payouts: obtains a short-lived JWT via POST /v1/auth (see NowPaymentsService.getAuthToken), needed in addition to the x-api-key header every other call uses. Deposits never touch this."
+		},
+		{
+			"name": "nowpayments.payout-password",
+			"type": "java.lang.String",
+			"description": "Your NOWPayments DASHBOARD LOGIN password — paired with nowpayments.payout-email above for the same POST /v1/auth call. Treat this with real secrets-management discipline, more so than a typical API key — whoever holds it can log into the dashboard directly, not just make scoped API calls."
+		},
+		{
 			"name": "frontend.url",
 			"type": "java.lang.String",
 			"description": "Frontend application URL used for CORS allowed-origins configuration.",
