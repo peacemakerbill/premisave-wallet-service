@@ -25,8 +25,8 @@ public class TransferTransactionRecorder {
     private final TransactionRepository transactionRepository;
 
     public void record(Transfer transfer, Wallet sender, Wallet recipient) {
-        String reasonSuffix = transfer.getReason() != null && !transfer.getReason().isBlank()
-                ? " - " + transfer.getReason() : "";
+        String descriptionSuffix = transfer.getDescription() != null && !transfer.getDescription().isBlank()
+                ? " - " + transfer.getDescription() : "";
 
         Transaction debit = new Transaction();
         debit.setUserId(transfer.getSenderId());
@@ -35,7 +35,7 @@ public class TransferTransactionRecorder {
         debit.setStatus(TransactionStatus.COMPLETED);
         debit.setAmount(transfer.getAmount().negate());
         debit.setCurrency(Currency.KES);
-        debit.setDescription("Transfer to " + recipient.getAccountNumber() + reasonSuffix);
+        debit.setDescription("Transfer to " + recipient.getAccountNumber() + descriptionSuffix);
         debit.setReference(transfer.getReference());
         transactionRepository.save(debit);
 
@@ -46,7 +46,7 @@ public class TransferTransactionRecorder {
         credit.setStatus(TransactionStatus.COMPLETED);
         credit.setAmount(transfer.getAmount());
         credit.setCurrency(Currency.KES);
-        credit.setDescription("Transfer from " + sender.getAccountNumber() + reasonSuffix);
+        credit.setDescription("Transfer from " + sender.getAccountNumber() + descriptionSuffix);
         credit.setReference(transfer.getReference());
         transactionRepository.save(credit);
     }

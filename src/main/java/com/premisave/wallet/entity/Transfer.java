@@ -50,14 +50,12 @@ public class Transfer {
     private Currency currency;
 
     /**
-     * Free-text reason for the transfer (e.g. "Rent split", "Repaying a
-     * friend") — deliberately a plain String, not a rigid enum, matching
-     * how Deposit.provider/Disbursement.provider are also plain strings
-     * despite having a known set of common values. Consolidates what
-     * TransferRequest previously split awkwardly across two
-     * barely-used fields (description and purpose) into one.
+     * Free-text description of what this transfer is for (e.g. "Rent
+     * split", "Repaying a friend") — deliberately a plain String, not a
+     * rigid enum, matching how Deposit.provider/Disbursement.provider are
+     * also plain strings despite having a known set of common values.
      */
-    private String reason;
+    private String description;
 
     private TransferStatus status = TransferStatus.PENDING;
 
