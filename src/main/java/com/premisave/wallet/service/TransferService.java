@@ -106,8 +106,10 @@ public class TransferService {
         Transfer transfer = new Transfer();
         transfer.setSenderId(senderUserId);
         transfer.setSenderWalletId(sender.getId());
+        transfer.setSenderEmail(sender.getAccountNumber());
         transfer.setRecipientId(recipient.getUserId());
         transfer.setRecipientWalletId(recipient.getId());
+        transfer.setRecipientEmail(recipient.getAccountNumber());
         transfer.setAmount(amount);
         transfer.setTotalDebited(totalDebit);
         transfer.setCurrency(Currency.KES);

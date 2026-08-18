@@ -43,8 +43,24 @@ public class Transfer {
     private String senderId;
     private String senderWalletId;
 
+    /**
+     * Sender's email at the time of transfer — sourced from
+     * Wallet.accountNumber, which IS the user's email, not a separate
+     * lookup. Both wallets are already fetched in
+     * TransferService.executeTransfer regardless, so this costs nothing
+     * extra to capture. Deliberately NOT the user's full name — that data
+     * doesn't exist anywhere in wallet-service's own model at all (it
+     * lives in auth-service), and capturing it here would mean a new
+     * cross-service call inside the transfer path itself. Confirmed
+     * scope: email only, for now.
+     */
+    private String senderEmail;
+
     private String recipientId;
     private String recipientWalletId;
+
+    /** Recipient's email at the time of transfer — same sourcing/reasoning as senderEmail above. */
+    private String recipientEmail;
 
     private BigDecimal amount;
     private Currency currency;

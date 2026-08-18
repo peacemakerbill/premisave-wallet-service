@@ -34,6 +34,19 @@ public class Payment {
     private String userId;
     private String walletId;
 
+    /**
+     * Payer's email at the time of payment — sourced from
+     * Wallet.accountNumber, which IS the user's email, not a separate
+     * lookup. The wallet is already fetched in
+     * PaymentService.executePayment regardless, so this costs nothing
+     * extra to capture. Same reasoning as Transfer.senderEmail/
+     * recipientEmail — full name deliberately excluded, since that data
+     * doesn't exist anywhere in wallet-service's own model (it lives in
+     * auth-service), and capturing it would mean a new cross-service call
+     * inside the payment path itself.
+     */
+    private String email;
+
     private BigDecimal amount;
     private Currency currency;
 

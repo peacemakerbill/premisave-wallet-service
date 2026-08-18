@@ -85,6 +85,7 @@ public class PaymentService {
         Payment payment = new Payment();
         payment.setUserId(userId);
         payment.setWalletId(wallet.getId());
+        payment.setEmail(wallet.getAccountNumber());
         payment.setAmount(amount);
         payment.setCurrency(Currency.KES);
         payment.setService(service);
