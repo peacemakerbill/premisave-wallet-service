@@ -111,6 +111,20 @@ public class WalletController {
         return ResponseEntity.ok(ApiResponse.success("Transfer successful", response));
     }
 
+    /**
+     * Every transfer where the authenticated user is EITHER the sender or
+     * the recipient, newest first — each record's "direction" field
+     * ("SENT"/"RECEIVED") tells you which side you're looking at.
+     * GET /wallet/transfer/history
+     */
+    @GetMapping("/transfer/history")
+    public ResponseEntity<ApiResponse<List<TransferRecordResponse>>> getTransferHistory(
+            Authentication auth, HttpServletRequest request) {
+        String userId = resolveUserId(request);
+        List<TransferRecordResponse> history = transferService.getTransferHistory(userId);
+        return ResponseEntity.ok(ApiResponse.success("Transfer history retrieved", history));
+    }
+
     @PutMapping("/freeze")
     public ResponseEntity<ApiResponse<WalletResponse>> freeze(Authentication auth, HttpServletRequest request) {
         String userId = resolveUserId(request);

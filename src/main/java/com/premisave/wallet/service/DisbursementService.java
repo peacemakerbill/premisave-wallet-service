@@ -1,6 +1,7 @@
 package com.premisave.wallet.service;
 
 import com.premisave.wallet.dto.DisbursementRequest;
+import com.premisave.wallet.dto.DisbursementRecordResponse;
 import com.premisave.wallet.dto.DisbursementResponse;
 import com.premisave.wallet.entity.Disbursement;
 import com.premisave.wallet.entity.Wallet;
@@ -320,5 +321,32 @@ public class DisbursementService {
             log.warn("{} disbursement(s) stuck in PENDING beyond 30 minutes — needs manual reconciliation: {}",
                     stuck.size(), stuck.stream().map(Disbursement::getId).toList());
         }
+    }
+
+    // ─── User-facing history ──────────────────────────────────────────────────
+
+    /** GET /disbursements/history — every disbursement for this user, across all five providers, newest first. */
+    public List<DisbursementRecordResponse> getDisbursementHistory(String userId) {
+        return disbursementRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
+                .map(DisbursementService::toRecordResponse)
+                .toList();
+    }
+
+    private static DisbursementRecordResponse toRecordResponse(Disbursement d) {
+        DisbursementRecordResponse r = new DisbursementRecordResponse();
+        r.setId(d.getId());
+        r.setAmount(d.getAmount());
+        r.setTotalDebited(d.getTotalDebited());
+        r.setCommissionRate(d.getCommissionRate());
+        r.setCurrency(d.getCurrency());
+        r.setDestination(d.getDestination());
+        r.setProvider(d.getProvider());
+        r.setChannel(d.getChannel());
+        r.setStatus(d.getStatus());
+        r.setReference(d.getReference());
+        r.setProviderReference(d.getProviderReference());
+        r.setFailureReason(d.getFailureReason());
+        r.setCreatedAt(d.getCreatedAt());
+        return r;
     }
 }

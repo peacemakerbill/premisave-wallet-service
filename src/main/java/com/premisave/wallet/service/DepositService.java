@@ -1,15 +1,19 @@
 package com.premisave.wallet.service;
 
+import com.premisave.wallet.dto.DepositRecordResponse;
 import com.premisave.wallet.dto.DepositRequest;
 import com.premisave.wallet.dto.PaymentResponse;
+import com.premisave.wallet.entity.Deposit;
 import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.exception.WalletFrozenException;
 import com.premisave.wallet.exception.WalletNotFoundException;
+import com.premisave.wallet.repository.DepositRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -30,6 +34,7 @@ import java.util.UUID;
 public class DepositService {
 
     private final WalletRepository walletRepository;
+    private final DepositRepository depositRepository;
     private final MpesaDepositService mpesaDepositService;
     private final StripeDepositService stripeDepositService;
     private final PaypalDepositService paypalDepositService;
@@ -56,5 +61,33 @@ public class DepositService {
             case "NOWPAYMENTS" -> nowPaymentsDepositService.initiateNowPaymentsDeposit(userId, request, wallet, idempotencyKey);
             default -> new PaymentResponse(false, null, "Unsupported deposit provider: " + provider);
         };
+    }
+
+    /** GET /deposits/history — every deposit for this user, across all five providers, newest first. */
+    public List<DepositRecordResponse> getDepositHistory(String userId) {
+        return depositRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
+                .map(DepositService::toRecordResponse)
+                .toList();
+    }
+
+    private static DepositRecordResponse toRecordResponse(Deposit d) {
+        DepositRecordResponse r = new DepositRecordResponse();
+        r.setId(d.getId());
+        r.setAmount(d.getAmount());
+        r.setCurrency(d.getCurrency());
+        r.setProvider(d.getProvider());
+        r.setChannel(d.getChannel());
+        r.setSource(d.getSource());
+        r.setStatus(d.getStatus());
+        r.setReference(d.getReference());
+        r.setProviderReference(d.getProviderReference());
+        r.setFailureReason(d.getFailureReason());
+        r.setPayAddress(d.getPayAddress());
+        r.setPayAmount(d.getPayAmount());
+        r.setPayCurrency(d.getPayCurrency());
+        r.setPriceAmount(d.getPriceAmount());
+        r.setPriceCurrency(d.getPriceCurrency());
+        r.setCreatedAt(d.getCreatedAt());
+        return r;
     }
 }

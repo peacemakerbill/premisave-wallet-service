@@ -2,6 +2,7 @@ package com.premisave.wallet.service;
 
 import com.premisave.wallet.dto.InternalPaymentRequest;
 import com.premisave.wallet.dto.PaymentInitiateRequest;
+import com.premisave.wallet.dto.PaymentRecordResponse;
 import com.premisave.wallet.dto.PaymentResponse;
 import com.premisave.wallet.entity.Payment;
 import com.premisave.wallet.entity.Wallet;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -101,5 +103,28 @@ public class PaymentService {
                 userId, amount, service, reference, initiatedBy);
 
         return new PaymentResponse(true, payment.getId(), "Payment successful");
+    }
+
+    /** GET /payments/history — every payment for this user, newest first. */
+    public List<PaymentRecordResponse> getPaymentHistory(String userId) {
+        return paymentRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
+                .map(PaymentService::toRecordResponse)
+                .toList();
+    }
+
+    private static PaymentRecordResponse toRecordResponse(Payment p) {
+        PaymentRecordResponse r = new PaymentRecordResponse();
+        r.setId(p.getId());
+        r.setAmount(p.getAmount());
+        r.setCurrency(p.getCurrency());
+        r.setService(p.getService());
+        r.setDescription(p.getDescription());
+        r.setStatus(p.getStatus());
+        r.setReference(p.getReference());
+        r.setFailureReason(p.getFailureReason());
+        r.setInitiatedBy(p.getInitiatedBy());
+        r.setEmail(p.getEmail());
+        r.setCreatedAt(p.getCreatedAt());
+        return r;
     }
 }

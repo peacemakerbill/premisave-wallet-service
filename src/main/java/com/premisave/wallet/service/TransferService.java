@@ -2,6 +2,7 @@ package com.premisave.wallet.service;
 
 import com.premisave.wallet.dto.InternalTransferRequest;
 import com.premisave.wallet.dto.PaymentResponse;
+import com.premisave.wallet.dto.TransferRecordResponse;
 import com.premisave.wallet.dto.TransferRequest;
 import com.premisave.wallet.entity.Transfer;
 import com.premisave.wallet.entity.Wallet;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -129,5 +131,39 @@ public class TransferService {
                 sender.getAccountNumber(), recipient.getAccountNumber(), amount, commission, totalDebit, reference, initiatedBy);
 
         return new PaymentResponse(true, reference, "Transfer successful");
+    }
+
+    /**
+     * GET /wallet/transfer/history — every transfer where this user is
+     * EITHER the sender or the recipient, newest first. The `direction`
+     * field on each record ("SENT"/"RECEIVED") is computed here at
+     * mapping time, not stored on Transfer itself — Transfer has no
+     * concept of "which side is the viewer," since the same record is
+     * viewed from two different perspectives depending on who's asking.
+     */
+    public List<TransferRecordResponse> getTransferHistory(String userId) {
+        return transferRepository.findBySenderIdOrRecipientIdOrderByCreatedAtDesc(userId, userId).stream()
+                .map(t -> toRecordResponse(t, userId))
+                .toList();
+    }
+
+    private static TransferRecordResponse toRecordResponse(Transfer t, String viewingUserId) {
+        TransferRecordResponse r = new TransferRecordResponse();
+        r.setId(t.getId());
+        r.setSenderId(t.getSenderId());
+        r.setSenderEmail(t.getSenderEmail());
+        r.setRecipientId(t.getRecipientId());
+        r.setRecipientEmail(t.getRecipientEmail());
+        r.setDirection(viewingUserId.equals(t.getSenderId()) ? "SENT" : "RECEIVED");
+        r.setAmount(t.getAmount());
+        r.setTotalDebited(t.getTotalDebited());
+        r.setCurrency(t.getCurrency());
+        r.setDescription(t.getDescription());
+        r.setStatus(t.getStatus());
+        r.setReference(t.getReference());
+        r.setFailureReason(t.getFailureReason());
+        r.setInitiatedBy(t.getInitiatedBy());
+        r.setCreatedAt(t.getCreatedAt());
+        return r;
     }
 }

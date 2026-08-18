@@ -2,6 +2,7 @@ package com.premisave.wallet.controller;
 
 import com.premisave.wallet.dto.ApiResponse;
 import com.premisave.wallet.dto.B2PochiRequest;
+import com.premisave.wallet.dto.DisbursementRecordResponse;
 import com.premisave.wallet.dto.DisbursementRequest;
 import com.premisave.wallet.dto.DisbursementResponse;
 import com.premisave.wallet.dto.NowPaymentsVerifyRequest;
@@ -12,6 +13,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/disbursements")
@@ -81,5 +84,22 @@ public class DisbursementController {
         if (userId == null) userId = auth.getName();
         disbursementService.verifyNowPaymentsDisbursement(disbursementId, request.getVerificationCode(), userId);
         return ResponseEntity.ok(ApiResponse.success("Verification submitted — payout now processing"));
+    }
+
+    /**
+     * Every disbursement for the authenticated user, across all five
+     * providers, newest first. Naturally excludes admin-initiated B2B/B2C
+     * top-up records without any extra filtering — those are stored under
+     * the initiating admin's own userId, not any customer's, so a regular
+     * user querying their own history would never see them regardless.
+     * GET /disbursements/history
+     */
+    @GetMapping("/history")
+    public ResponseEntity<ApiResponse<List<DisbursementRecordResponse>>> getHistory(
+            Authentication auth, HttpServletRequest httpRequest) {
+        String userId = (String) httpRequest.getAttribute("userId");
+        if (userId == null) userId = auth.getName();
+        List<DisbursementRecordResponse> history = disbursementService.getDisbursementHistory(userId);
+        return ResponseEntity.ok(ApiResponse.success("Disbursement history retrieved", history));
     }
 }
