@@ -1,6 +1,7 @@
 package com.premisave.wallet.controller;
 
 import com.premisave.wallet.dto.ApiResponse;
+import com.premisave.wallet.dto.BalanceOverviewResponse;
 import com.premisave.wallet.dto.DailyFinanceReportResponse;
 import com.premisave.wallet.dto.DepositRecordResponse;
 import com.premisave.wallet.dto.DisbursementRecordResponse;
@@ -96,6 +97,18 @@ public class AdminFinanceController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         DailyFinanceReportResponse report = adminReportService.getDailyReport(date);
         return ResponseEntity.ok(ApiResponse.success("Daily report retrieved", report));
+    }
+
+    /**
+     * Detailed platform balance snapshot — total/active/frozen balances,
+     * provider-linkage adoption counts, all-time commission revenue, and
+     * the top N wallets by balance. topN defaults to 10 if omitted.
+     */
+    @GetMapping("/reports/balance-overview")
+    public ResponseEntity<ApiResponse<BalanceOverviewResponse>> getBalanceOverview(
+            @RequestParam(defaultValue = "10") int topN) {
+        BalanceOverviewResponse overview = adminReportService.getBalanceOverview(topN);
+        return ResponseEntity.ok(ApiResponse.success("Balance overview retrieved", overview));
     }
 
     @GetMapping("/deposits")
