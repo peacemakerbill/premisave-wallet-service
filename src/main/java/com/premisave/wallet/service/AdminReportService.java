@@ -2,6 +2,7 @@ package com.premisave.wallet.service;
 
 import com.premisave.wallet.dto.BalanceOverviewResponse;
 import com.premisave.wallet.dto.DailyFinanceReportResponse;
+import com.premisave.wallet.dto.SystemSummaryResponse;
 import com.premisave.wallet.entity.CompanyLedgerEntry;
 import com.premisave.wallet.entity.Deposit;
 import com.premisave.wallet.entity.Disbursement;
@@ -163,6 +164,82 @@ public class AdminReportService {
         r.setTopWalletsByBalance(top);
 
         return r;
+    }
+
+    /**
+     * All-time platform summary — GET /admin/finance/reports/summary.
+     * Mostly orchestration, not new logic: reuses sumAmounts/groupAndSum/
+     * sumBalances, the same helpers getDailyReport and getBalanceOverview
+     * already use, just without a date filter (findAll() per entity
+     * rather than a single day's Criteria range).
+     *
+     * Likely the most expensive of the three admin reports to run at real
+     * scale — spans every record ever created across five entities, not
+     * one day's activity (getDailyReport) or current wallet state
+     * (getBalanceOverview). Same "small enough today, revisit with a real
+     * aggregation pipeline once it isn't" flag as the other two.
+     */
+    public SystemSummaryResponse getSystemSummary() {
+        List<Wallet> wallets = walletRepository.findAll();
+        List<Deposit> deposits = mongoTemplate.findAll(Deposit.class);
+        List<Disbursement> disbursements = mongoTemplate.findAll(Disbursement.class);
+        List<Transfer> transfers = mongoTemplate.findAll(Transfer.class);
+        List<Payment> payments = mongoTemplate.findAll(Payment.class);
+        List<CompanyLedgerEntry> ledgerEntries = mongoTemplate.findAll(CompanyLedgerEntry.class);
+
+        SystemSummaryResponse s = new SystemSummaryResponse();
+
+        // Wallets
+        List<Wallet> active = wallets.stream().filter(w -> !w.isFrozen()).toList();
+        List<Wallet> frozen = wallets.stream().filter(Wallet::isFrozen).toList();
+        s.setTotalWalletCount(wallets.size());
+        s.setActiveWalletCount(active.size());
+        s.setFrozenWalletCount(frozen.size());
+        s.setTotalPlatformBalance(sumBalances(wallets));
+
+        // Deposits
+        s.setTotalDepositCount(deposits.size());
+        s.setTotalDepositVolume(sumAmounts(deposits, Deposit::getAmount));
+        s.setDepositCountByStatus(deposits.stream()
+                .collect(Collectors.groupingBy(d -> d.getStatus().name(), Collectors.counting())));
+        s.setDepositVolumeByProvider(groupAndSum(deposits, Deposit::getProvider, Deposit::getAmount));
+
+        // Disbursements
+        s.setTotalDisbursementCount(disbursements.size());
+        s.setTotalDisbursementVolume(sumAmounts(disbursements, Disbursement::getAmount));
+        s.setTotalDisbursementDebited(sumAmounts(disbursements,
+                d -> d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount()));
+        s.setDisbursementCountByStatus(disbursements.stream()
+                .collect(Collectors.groupingBy(d -> d.getStatus().name(), Collectors.counting())));
+        s.setDisbursementVolumeByProvider(groupAndSum(disbursements, Disbursement::getProvider, Disbursement::getAmount));
+
+        // Transfers
+        s.setTotalTransferCount(transfers.size());
+        s.setTotalTransferVolume(sumAmounts(transfers, Transfer::getAmount));
+        s.setTotalTransferCommission(sumAmounts(transfers,
+                t -> t.getTotalDebited() != null ? t.getTotalDebited().subtract(t.getAmount()) : BigDecimal.ZERO));
+
+        // Payments
+        s.setTotalPaymentCount(payments.size());
+        s.setTotalPaymentVolume(sumAmounts(payments, Payment::getAmount));
+        s.setPaymentVolumeByService(groupAndSum(payments, Payment::getService, Payment::getAmount));
+
+        // Company revenue
+        BigDecimal commissionFromTransfers = ledgerEntries.stream()
+                .filter(e -> "COMMISSION_TRANSFER".equals(e.getType()))
+                .map(CompanyLedgerEntry::getAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal commissionFromDisbursements = ledgerEntries.stream()
+                .filter(e -> "COMMISSION_DISBURSEMENT".equals(e.getType()))
+                .map(CompanyLedgerEntry::getAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        s.setTotalCommissionFromTransfers(commissionFromTransfers);
+        s.setTotalCommissionFromDisbursements(commissionFromDisbursements);
+        s.setTotalCommissionRevenue(commissionFromTransfers.add(commissionFromDisbursements));
+
+        return s;
     }
 
     private BigDecimal sumBalances(List<Wallet> wallets) {

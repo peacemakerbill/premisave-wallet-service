@@ -3,6 +3,7 @@ package com.premisave.wallet.controller;
 import com.premisave.wallet.dto.ApiResponse;
 import com.premisave.wallet.dto.BalanceOverviewResponse;
 import com.premisave.wallet.dto.DailyFinanceReportResponse;
+import com.premisave.wallet.dto.SystemSummaryResponse;
 import com.premisave.wallet.dto.DepositRecordResponse;
 import com.premisave.wallet.dto.DisbursementRecordResponse;
 import com.premisave.wallet.dto.PaymentRecordResponse;
@@ -109,6 +110,18 @@ public class AdminFinanceController {
             @RequestParam(defaultValue = "10") int topN) {
         BalanceOverviewResponse overview = adminReportService.getBalanceOverview(topN);
         return ResponseEntity.ok(ApiResponse.success("Balance overview retrieved", overview));
+    }
+
+    /**
+     * All-time platform summary — total volume ever processed across
+     * every entity, status breakdowns, provider breakdowns, and all-time
+     * commission revenue. Distinct in scope from the daily report (one
+     * day) and balance overview (current wallet state).
+     */
+    @GetMapping("/reports/summary")
+    public ResponseEntity<ApiResponse<SystemSummaryResponse>> getSystemSummary() {
+        SystemSummaryResponse summary = adminReportService.getSystemSummary();
+        return ResponseEntity.ok(ApiResponse.success("System summary retrieved", summary));
     }
 
     @GetMapping("/deposits")
