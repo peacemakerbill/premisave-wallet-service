@@ -12,8 +12,8 @@ import com.premisave.wallet.service.DisbursementService;
 import com.premisave.wallet.service.PaymentService;
 import com.premisave.wallet.service.TransferService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PagedModel;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -43,6 +43,22 @@ import org.springframework.web.bind.annotation.RestController;
  * Pagination follows the exact convention AdminWalletController's own
  * GET /admin/wallet/transactions already uses — a bare Pageable parameter,
  * resolved automatically from query params like ?page=0&size=20&sort=createdAt,desc.
+ *
+ * EVERY method wraps its Page<T> result in org.springframework.data.web.
+ * PagedModel<T> explicitly, rather than returning Page<T> directly.
+ * First attempt at this used the global @EnableSpringDataWebSupport
+ * (pageSerializationMode = VIA_DTO) annotation instead — syntactically
+ * correct per Spring's own documentation, but confirmed NOT to actually
+ * suppress the "Serializing PageImpl instances as-is is not supported"
+ * warning in THIS app (verified via a real redeploy — fresh PID, same
+ * warning, first request). Rather than debug why the global config isn't
+ * taking effect here (this app logs "Multiple Spring Data modules found,
+ * entering strict repository configuration mode" at startup, and there
+ * are documented cases of this annotation interacting unpredictably with
+ * other Spring Data configuration present in an app), switched to this
+ * explicit, per-method wrapping instead — it can't fail the same way,
+ * since it doesn't depend on any global Jackson module registration
+ * succeeding correctly.
  */
 @RestController
 @RequestMapping("/admin/finance")
@@ -57,23 +73,27 @@ public class AdminFinanceController {
     private final CommissionService commissionService;
 
     @GetMapping("/deposits")
-    public ResponseEntity<ApiResponse<Page<DepositRecordResponse>>> getAllDeposits(Pageable pageable) {
-        return ResponseEntity.ok(ApiResponse.success("Deposits retrieved", depositService.getAllDeposits(pageable)));
+    public ResponseEntity<ApiResponse<PagedModel<DepositRecordResponse>>> getAllDeposits(Pageable pageable) {
+        PagedModel<DepositRecordResponse> body = new PagedModel<>(depositService.getAllDeposits(pageable));
+        return ResponseEntity.ok(ApiResponse.success("Deposits retrieved", body));
     }
 
     @GetMapping("/disbursements")
-    public ResponseEntity<ApiResponse<Page<DisbursementRecordResponse>>> getAllDisbursements(Pageable pageable) {
-        return ResponseEntity.ok(ApiResponse.success("Disbursements retrieved", disbursementService.getAllDisbursements(pageable)));
+    public ResponseEntity<ApiResponse<PagedModel<DisbursementRecordResponse>>> getAllDisbursements(Pageable pageable) {
+        PagedModel<DisbursementRecordResponse> body = new PagedModel<>(disbursementService.getAllDisbursements(pageable));
+        return ResponseEntity.ok(ApiResponse.success("Disbursements retrieved", body));
     }
 
     @GetMapping("/transfers")
-    public ResponseEntity<ApiResponse<Page<TransferRecordResponse>>> getAllTransfers(Pageable pageable) {
-        return ResponseEntity.ok(ApiResponse.success("Transfers retrieved", transferService.getAllTransfers(pageable)));
+    public ResponseEntity<ApiResponse<PagedModel<TransferRecordResponse>>> getAllTransfers(Pageable pageable) {
+        PagedModel<TransferRecordResponse> body = new PagedModel<>(transferService.getAllTransfers(pageable));
+        return ResponseEntity.ok(ApiResponse.success("Transfers retrieved", body));
     }
 
     @GetMapping("/payments")
-    public ResponseEntity<ApiResponse<Page<PaymentRecordResponse>>> getAllPayments(Pageable pageable) {
-        return ResponseEntity.ok(ApiResponse.success("Payments retrieved", paymentService.getAllPayments(pageable)));
+    public ResponseEntity<ApiResponse<PagedModel<PaymentRecordResponse>>> getAllPayments(Pageable pageable) {
+        PagedModel<PaymentRecordResponse> body = new PagedModel<>(paymentService.getAllPayments(pageable));
+        return ResponseEntity.ok(ApiResponse.success("Payments retrieved", body));
     }
 
     /**
@@ -82,7 +102,8 @@ public class AdminFinanceController {
      * previously visible only via direct MongoDB query.
      */
     @GetMapping("/ledger")
-    public ResponseEntity<ApiResponse<Page<CompanyLedgerEntry>>> getLedger(Pageable pageable) {
-        return ResponseEntity.ok(ApiResponse.success("Company ledger retrieved", commissionService.getAllLedgerEntries(pageable)));
+    public ResponseEntity<ApiResponse<PagedModel<CompanyLedgerEntry>>> getLedger(Pageable pageable) {
+        PagedModel<CompanyLedgerEntry> body = new PagedModel<>(commissionService.getAllLedgerEntries(pageable));
+        return ResponseEntity.ok(ApiResponse.success("Company ledger retrieved", body));
     }
 }
