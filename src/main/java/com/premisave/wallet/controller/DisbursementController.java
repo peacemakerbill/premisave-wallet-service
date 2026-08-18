@@ -6,14 +6,17 @@ import com.premisave.wallet.dto.DisbursementRecordResponse;
 import com.premisave.wallet.dto.DisbursementRequest;
 import com.premisave.wallet.dto.DisbursementResponse;
 import com.premisave.wallet.dto.NowPaymentsVerifyRequest;
+import com.premisave.wallet.enums.DisbursementStatus;
 import com.premisave.wallet.service.DisbursementService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @RestController
@@ -96,10 +99,14 @@ public class DisbursementController {
      */
     @GetMapping("/history")
     public ResponseEntity<ApiResponse<List<DisbursementRecordResponse>>> getHistory(
+            @RequestParam(required = false) DisbursementStatus status,
+            @RequestParam(required = false) String provider,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
             Authentication auth, HttpServletRequest httpRequest) {
         String userId = (String) httpRequest.getAttribute("userId");
         if (userId == null) userId = auth.getName();
-        List<DisbursementRecordResponse> history = disbursementService.getDisbursementHistory(userId);
+        List<DisbursementRecordResponse> history = disbursementService.getDisbursementHistory(userId, status, provider, fromDate, toDate);
         return ResponseEntity.ok(ApiResponse.success("Disbursement history retrieved", history));
     }
 }

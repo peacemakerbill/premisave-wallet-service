@@ -5,16 +5,23 @@ import com.premisave.wallet.dto.DepositRequest;
 import com.premisave.wallet.dto.PaymentResponse;
 import com.premisave.wallet.entity.Deposit;
 import com.premisave.wallet.entity.Wallet;
+import com.premisave.wallet.enums.DepositStatus;
 import com.premisave.wallet.exception.WalletFrozenException;
 import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.DepositRepository;
 import com.premisave.wallet.repository.WalletRepository;
+import com.premisave.wallet.util.DateRangeCriteriaUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -37,6 +44,7 @@ public class DepositService {
 
     private final WalletRepository walletRepository;
     private final DepositRepository depositRepository;
+    private final MongoTemplate mongoTemplate;
     private final MpesaDepositService mpesaDepositService;
     private final StripeDepositService stripeDepositService;
     private final PaypalDepositService paypalDepositService;
@@ -67,7 +75,31 @@ public class DepositService {
 
     /** GET /deposits/history — every deposit for this user, across all five providers, newest first. */
     public List<DepositRecordResponse> getDepositHistory(String userId) {
-        return depositRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
+        return getDepositHistory(userId, null, null, null, null);
+    }
+
+    /**
+     * Filtered version — status/provider/date-range all optional. Built
+     * with a dynamic Criteria rather than a derived repository query
+     * method, since Spring Data's method-name derivation doesn't scale to
+     * "any combination of optional filters" without a combinatorial
+     * explosion of method signatures. With every filter left null, this
+     * produces the identical result set the unfiltered overload above
+     * always has — no behavior change for existing callers.
+     */
+    public List<DepositRecordResponse> getDepositHistory(String userId, DepositStatus status, String provider,
+                                                           LocalDate fromDate, LocalDate toDate) {
+        Criteria criteria = Criteria.where("userId").is(userId);
+        if (status != null) {
+            criteria = criteria.and("status").is(status);
+        }
+        if (provider != null && !provider.isBlank()) {
+            criteria = criteria.and("provider").is(provider.toUpperCase());
+        }
+        criteria = DateRangeCriteriaUtil.applyDateRange(criteria, "createdAt", fromDate, toDate);
+
+        Query query = new Query(criteria).with(Sort.by(Sort.Direction.DESC, "createdAt"));
+        return mongoTemplate.find(query, Deposit.class).stream()
                 .map(DepositService::toRecordResponse)
                 .toList();
     }

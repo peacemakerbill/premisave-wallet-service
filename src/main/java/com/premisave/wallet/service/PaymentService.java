@@ -11,14 +11,20 @@ import com.premisave.wallet.enums.PaymentStatus;
 import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.PaymentRepository;
 import com.premisave.wallet.repository.WalletRepository;
+import com.premisave.wallet.util.DateRangeCriteriaUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -52,6 +58,7 @@ public class PaymentService {
 
     private final WalletRepository walletRepository;
     private final PaymentRepository paymentRepository;
+    private final MongoTemplate mongoTemplate;
     private final WalletService walletService;
     private final IdempotencyService idempotencyService;
     private final PaymentTransactionRecorder paymentTransactionRecorder;
@@ -109,7 +116,26 @@ public class PaymentService {
 
     /** GET /payments/history — every payment for this user, newest first. */
     public List<PaymentRecordResponse> getPaymentHistory(String userId) {
-        return paymentRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
+        return getPaymentHistory(userId, null, null, null, null);
+    }
+
+    /**
+     * Filtered version — status/service-category/date-range all optional.
+     * Same dynamic-Criteria approach as the other three history methods.
+     */
+    public List<PaymentRecordResponse> getPaymentHistory(String userId, PaymentStatus status, String service,
+                                                           LocalDate fromDate, LocalDate toDate) {
+        Criteria criteria = Criteria.where("userId").is(userId);
+        if (status != null) {
+            criteria = criteria.and("status").is(status);
+        }
+        if (service != null && !service.isBlank()) {
+            criteria = criteria.and("service").is(service.toUpperCase());
+        }
+        criteria = DateRangeCriteriaUtil.applyDateRange(criteria, "createdAt", fromDate, toDate);
+
+        Query query = new Query(criteria).with(Sort.by(Sort.Direction.DESC, "createdAt"));
+        return mongoTemplate.find(query, Payment.class).stream()
                 .map(PaymentService::toRecordResponse)
                 .toList();
     }

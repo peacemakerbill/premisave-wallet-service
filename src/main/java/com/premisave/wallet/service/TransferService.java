@@ -12,14 +12,20 @@ import com.premisave.wallet.exception.WalletFrozenException;
 import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.TransferRepository;
 import com.premisave.wallet.repository.WalletRepository;
+import com.premisave.wallet.util.DateRangeCriteriaUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -53,6 +59,7 @@ public class TransferService {
 
     private final WalletRepository walletRepository;
     private final TransferRepository transferRepository;
+    private final MongoTemplate mongoTemplate;
     private final WalletService walletService;
     private final IdempotencyService idempotencyService;
     private final TransferTransactionRecorder transferTransactionRecorder;
@@ -144,7 +151,42 @@ public class TransferService {
      * viewed from two different perspectives depending on who's asking.
      */
     public List<TransferRecordResponse> getTransferHistory(String userId) {
-        return transferRepository.findBySenderIdOrRecipientIdOrderByCreatedAtDesc(userId, userId).stream()
+        return getTransferHistory(userId, null, null, null, null);
+    }
+
+    /**
+     * Filtered version — status/direction/date-range all optional. Same
+     * dynamic-Criteria approach as the other three history methods, with
+     * one genuine difference: `direction` isn't a stored field at all
+     * (see TransferRecordResponse's javadoc — it's computed relative to
+     * the viewing user), so filtering on it means choosing WHICH field
+     * gets matched, not adding an equality condition alongside userId:
+     *   "SENT"     -> senderId = userId only
+     *   "RECEIVED" -> recipientId = userId only
+     *   omitted    -> senderId = userId OR recipientId = userId (today's
+     *                 unfiltered behavior — every transfer this user is
+     *                 party to, sent or received)
+     */
+    public List<TransferRecordResponse> getTransferHistory(String userId, TransferStatus status, String direction,
+                                                             LocalDate fromDate, LocalDate toDate) {
+        Criteria criteria;
+        if ("SENT".equalsIgnoreCase(direction)) {
+            criteria = Criteria.where("senderId").is(userId);
+        } else if ("RECEIVED".equalsIgnoreCase(direction)) {
+            criteria = Criteria.where("recipientId").is(userId);
+        } else {
+            criteria = new Criteria().orOperator(
+                    Criteria.where("senderId").is(userId),
+                    Criteria.where("recipientId").is(userId));
+        }
+
+        if (status != null) {
+            criteria = criteria.and("status").is(status);
+        }
+        criteria = DateRangeCriteriaUtil.applyDateRange(criteria, "createdAt", fromDate, toDate);
+
+        Query query = new Query(criteria).with(Sort.by(Sort.Direction.DESC, "createdAt"));
+        return mongoTemplate.find(query, Transfer.class).stream()
                 .map(t -> toRecordResponse(t, userId))
                 .toList();
     }

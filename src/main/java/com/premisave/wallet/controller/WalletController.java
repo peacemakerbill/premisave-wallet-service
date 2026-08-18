@@ -2,6 +2,7 @@ package com.premisave.wallet.controller;
 
 import com.premisave.wallet.dto.*;
 import com.premisave.wallet.entity.Wallet;
+import com.premisave.wallet.enums.TransferStatus;
 import com.premisave.wallet.repository.WalletRepository;
 import com.premisave.wallet.service.DepositService;
 import com.premisave.wallet.service.FlutterwaveDepositService;
@@ -14,7 +15,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.format.annotation.DateTimeFormat;
 
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -119,9 +122,13 @@ public class WalletController {
      */
     @GetMapping("/transfer/history")
     public ResponseEntity<ApiResponse<List<TransferRecordResponse>>> getTransferHistory(
+            @RequestParam(required = false) TransferStatus status,
+            @RequestParam(required = false) String direction,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
             Authentication auth, HttpServletRequest request) {
         String userId = resolveUserId(request);
-        List<TransferRecordResponse> history = transferService.getTransferHistory(userId);
+        List<TransferRecordResponse> history = transferService.getTransferHistory(userId, status, direction, fromDate, toDate);
         return ResponseEntity.ok(ApiResponse.success("Transfer history retrieved", history));
     }
 

@@ -12,16 +12,22 @@ import com.premisave.wallet.exception.WalletFrozenException;
 import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.DisbursementRepository;
 import com.premisave.wallet.repository.WalletRepository;
+import com.premisave.wallet.util.DateRangeCriteriaUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -61,6 +67,7 @@ public class DisbursementService {
 
     private final WalletRepository walletRepository;
     private final DisbursementRepository disbursementRepository;
+    private final MongoTemplate mongoTemplate;
     private final IdempotencyService idempotencyService;
     private final FxRateService fxRateService;
     private final MpesaDisbursementService mpesaDisbursementService;
@@ -329,7 +336,28 @@ public class DisbursementService {
 
     /** GET /disbursements/history — every disbursement for this user, across all five providers, newest first. */
     public List<DisbursementRecordResponse> getDisbursementHistory(String userId) {
-        return disbursementRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
+        return getDisbursementHistory(userId, null, null, null, null);
+    }
+
+    /**
+     * Filtered version — status/provider/date-range all optional. Same
+     * dynamic-Criteria approach as DepositService.getDepositHistory, same
+     * reasoning: with every filter left null, produces the identical
+     * result set the unfiltered overload above always has.
+     */
+    public List<DisbursementRecordResponse> getDisbursementHistory(String userId, DisbursementStatus status,
+                                                                     String provider, LocalDate fromDate, LocalDate toDate) {
+        Criteria criteria = Criteria.where("userId").is(userId);
+        if (status != null) {
+            criteria = criteria.and("status").is(status);
+        }
+        if (provider != null && !provider.isBlank()) {
+            criteria = criteria.and("provider").is(provider.toUpperCase());
+        }
+        criteria = DateRangeCriteriaUtil.applyDateRange(criteria, "createdAt", fromDate, toDate);
+
+        Query query = new Query(criteria).with(Sort.by(Sort.Direction.DESC, "createdAt"));
+        return mongoTemplate.find(query, Disbursement.class).stream()
                 .map(DisbursementService::toRecordResponse)
                 .toList();
     }
