@@ -50,6 +50,16 @@ public class Transfer {
     private Currency currency;
 
     /**
+     * What actually left the sender's wallet — amount + commission (see
+     * CommissionService, commission.internal-transfer-rate). The
+     * recipient still receives exactly `amount`, unaffected — the
+     * commission is charged ON TOP of the transfer, not deducted from
+     * it, per confirmed design. Equal to amount when the configured rate
+     * is zero.
+     */
+    private BigDecimal totalDebited;
+
+    /**
      * Free-text description of what this transfer is for (e.g. "Rent
      * split", "Repaying a friend") — deliberately a plain String, not a
      * rigid enum, matching how Deposit.provider/Disbursement.provider are

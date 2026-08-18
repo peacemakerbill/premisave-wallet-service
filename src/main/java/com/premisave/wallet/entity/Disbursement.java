@@ -24,16 +24,41 @@ public class Disbursement {
     private BigDecimal amount;
     private Currency currency;
 
+    /**
+     * What actually gets/got debited from the wallet at confirmation time
+     * — amount + gateway commission (see CommissionService,
+     * commission.gateway-rate). The external provider/recipient still
+     * receives exactly `amount`, unaffected — the commission is charged
+     * ON TOP of the withdrawal, not deducted from it, same design as
+     * Transfer.totalDebited. Equal to amount when the configured rate is
+     * zero, or null for a Disbursement created before this field existed
+     * (admin B2B/B2C top-up, which deliberately don't carry commission
+     * at all — see MpesaDisbursementService).
+     */
+    private BigDecimal totalDebited;
+
+    /**
+     * The exact commission rate applied at INITIATION time, not
+     * re-derived from current config at confirmation time — since a
+     * disbursement can sit PENDING for a while awaiting a webhook, and
+     * commission.gateway-rate could theoretically change in that window,
+     * this locks in what was actually agreed to when the withdrawal was
+     * first requested, so a later config change can't retroactively
+     * change what gets recorded in the company ledger for an in-flight
+     * disbursement.
+     */
+    private BigDecimal commissionRate;
+
     private String destination; // phone number, paypal email, receiver shortcode, etc.
-    private String provider;    // MPESA, PAYPAL, STRIPE, FLUTTERWAVE
-    private String channel;     // B2C, B2B, PAYPAL_PAYOUT, STRIPE_PAYOUT, FLUTTERWAVE_BANK, FLUTTERWAVE_MOBILE_MONEY
+    private String provider;    // MPESA, PAYPAL, STRIPE, FLUTTERWAVE, NOWPAYMENTS
+    private String channel;     // B2C, B2C_POCHI, B2B, B2C_TOPUP, PAYPAL_PAYOUT, STRIPE_PAYOUT, FLUTTERWAVE_BANK, FLUTTERWAVE_MOBILE_MONEY, NOWPAYMENTS_PAYOUT
 
     private DisbursementStatus status = DisbursementStatus.PENDING;
 
     private String reference;
 
     @Indexed
-    private String providerReference; // ConversationID (M-Pesa), Payout Batch ID (PayPal), Transfer ID (Flutterwave) — used to reconcile async result callbacks
+    private String providerReference; // ConversationID (M-Pesa), Payout Batch ID (PayPal), Transfer ID (Flutterwave), Payout ID (NOWPayments) — used to reconcile async result callbacks
 
     private String failureReason;
 
@@ -54,8 +79,6 @@ public class Disbursement {
      * transfer initiation fails, this caches the recipient ID so a retry can
      * reuse it and avoid creating orphaned duplicates. Populated only for
      * FLUTTERWAVE disbursements; null for all other providers.
-     * See FlutterwaveService.createTransferRecipient and
-     * DisbursementService.processFlutterwaveDisbursement.
      */
     private String flutterwaveRecipientId;
 

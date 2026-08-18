@@ -50,6 +50,7 @@ public class MpesaDisbursementService {
     private final MpesaService mpesaService;
     private final IdempotencyService idempotencyService;
     private final DisbursementTransactionRecorder transactionRecorder;
+    private final CommissionService commissionService;
 
     // ─── User-facing B2C withdrawal ──────────────────────────────────────────
 
@@ -61,7 +62,8 @@ public class MpesaDisbursementService {
      * Stripe/NOWPayments use. The wallet is NOT debited here — only once
      * completeMpesaDisbursement confirms success via Safaricom's ResultURL.
      */
-    public DisbursementResponse disburseMpesa(String userId, Wallet wallet, DisbursementRequest request) {
+    public DisbursementResponse disburseMpesa(String userId, Wallet wallet, DisbursementRequest request,
+                                               BigDecimal commission) {
         String destination = resolveVerifiedPhoneNumber(wallet);
         String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
 
@@ -69,6 +71,8 @@ public class MpesaDisbursementService {
         disbursement.setUserId(userId);
         disbursement.setWalletId(wallet.getId());
         disbursement.setAmount(request.getAmount());
+        disbursement.setTotalDebited(request.getAmount().add(commission));
+        disbursement.setCommissionRate(commissionService.getGatewayRate());
         disbursement.setDestination(destination);
         disbursement.setProvider("MPESA");
         disbursement.setChannel("B2C");
@@ -111,7 +115,17 @@ public class MpesaDisbursementService {
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + initiatedByUserId));
 
         if (wallet.isFrozen()) throw new WalletFrozenException("Wallet is frozen");
-        if (wallet.getBalance().compareTo(request.getAmount()) < 0)
+
+        // Computed here rather than in DisbursementService — this method
+        // is called directly from DisbursementController, never routed
+        // through DisbursementService.processDisbursement's central
+        // dispatcher, so it needs its own commission computation and
+        // balance check, mirroring what the dispatcher does for every
+        // other provider.
+        BigDecimal commission = commissionService.calculateGatewayCommission(request.getAmount());
+        BigDecimal totalDebit = request.getAmount().add(commission);
+
+        if (wallet.getBalance().compareTo(totalDebit) < 0)
             throw new InsufficientFundsException("Insufficient funds for disbursement");
 
         String phoneNumber = resolveVerifiedPochiPhoneNumber(wallet);
@@ -136,6 +150,8 @@ public class MpesaDisbursementService {
         disbursement.setUserId(initiatedByUserId);
         disbursement.setWalletId(wallet.getId());
         disbursement.setAmount(request.getAmount());
+        disbursement.setTotalDebited(totalDebit);
+        disbursement.setCommissionRate(commissionService.getGatewayRate());
         disbursement.setCurrency(Currency.KES);
         disbursement.setDestination(phoneNumber);
         disbursement.setProvider("MPESA");
@@ -305,10 +321,16 @@ public class MpesaDisbursementService {
                 // signal for manual reconciliation, not something to
                 // silently block, since the M-Pesa payout already happened
                 // and has to be reflected somewhere.
+                //
+                // Debits d.getTotalDebited() (amount + commission), NOT
+                // d.getAmount() — the customer's phone still receives
+                // d.getAmount() unaffected via M-Pesa, but their wallet
+                // owes the extra commission on top. See CommissionService.
                 Wallet wallet = walletRepository.findById(d.getWalletId())
                         .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + d.getWalletId()));
 
-                BigDecimal newBalance = wallet.getBalance().subtract(d.getAmount());
+                BigDecimal debitAmount = d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount();
+                BigDecimal newBalance = wallet.getBalance().subtract(debitAmount);
                 if (newBalance.compareTo(BigDecimal.ZERO) < 0) {
                     log.error("Wallet {} balance went negative ({}) debiting confirmed M-Pesa disbursement id={} — needs manual reconciliation",
                             wallet.getId(), newBalance, d.getId());
@@ -317,7 +339,8 @@ public class MpesaDisbursementService {
                 walletRepository.save(wallet);
 
                 disbursementRepository.save(d);
-                transactionRecorder.record(d.getUserId(), d.getWalletId(), d.getAmount(), d, d.getReference());
+                transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmount, d, d.getReference());
+                commissionService.recordGatewayCommissionFromDisbursement(d);
             } else {
                 disbursementRepository.save(d);
             }

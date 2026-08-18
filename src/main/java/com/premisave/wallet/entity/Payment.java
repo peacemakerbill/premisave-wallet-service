@@ -41,7 +41,7 @@ public class Payment {
     private String service;
 
     /** Specific, human-readable detail beyond the category (e.g. "August 2026 ad subscription") — new, not previously captured at all. */
-    private String reason;
+    private String description;
 
     private PaymentStatus status = PaymentStatus.PENDING;
 

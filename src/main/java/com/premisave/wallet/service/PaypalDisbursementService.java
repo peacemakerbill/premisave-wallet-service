@@ -29,6 +29,7 @@ public class PaypalDisbursementService {
     private final PaypalService paypalService;
     private final FxRateService fxRateService;
     private final DisbursementTransactionRecorder transactionRecorder;
+    private final CommissionService commissionService;
 
     private static final List<String> PAYPAL_TERMINAL_FAILURE_STATUSES =
             List.of("FAILED", "DENIED", "BLOCKED", "RETURNED", "REFUNDED", "REVERSED", "CANCELED");
@@ -78,7 +79,13 @@ public class PaypalDisbursementService {
                 Wallet wallet = walletRepository.findById(d.getWalletId())
                         .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + d.getWalletId()));
 
-                BigDecimal newBalance = wallet.getBalance().subtract(d.getAmount());
+                // Debits d.getTotalDebited() (amount + commission), NOT
+                // d.getAmount() — PayPal still pays out d.getAmount()
+                // unaffected, but the wallet owes the extra commission on
+                // top. Falls back to d.getAmount() for a legacy
+                // disbursement created before this field existed.
+                BigDecimal debitAmount = d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount();
+                BigDecimal newBalance = wallet.getBalance().subtract(debitAmount);
                 if (newBalance.compareTo(BigDecimal.ZERO) < 0) {
                     log.error("Wallet {} balance went negative ({}) debiting confirmed PayPal disbursement id={} — needs manual reconciliation",
                             wallet.getId(), newBalance, d.getId());
@@ -87,7 +94,8 @@ public class PaypalDisbursementService {
                 walletRepository.save(wallet);
 
                 disbursementRepository.save(d);
-                transactionRecorder.record(d.getUserId(), d.getWalletId(), d.getAmount(), d, d.getReference());
+                transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmount, d, d.getReference());
+                commissionService.recordGatewayCommissionFromDisbursement(d);
             } else {
                 disbursementRepository.save(d);
             }

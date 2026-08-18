@@ -28,6 +28,7 @@ public class StripeDisbursementService {
     private final StripeService stripeService;
     private final FxRateService fxRateService;
     private final DisbursementTransactionRecorder transactionRecorder;
+    private final CommissionService commissionService;
 
     /**
      * Converts the wallet's KES amount to whatever currency the withdrawal
@@ -107,7 +108,13 @@ public class StripeDisbursementService {
                 Wallet wallet = walletRepository.findById(d.getWalletId())
                         .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + d.getWalletId()));
 
-                BigDecimal newBalance = wallet.getBalance().subtract(d.getAmount());
+                // Debits d.getTotalDebited() (amount + commission), NOT
+                // d.getAmount() — Stripe still pays out d.getAmount()
+                // unaffected, but the wallet owes the extra commission on
+                // top. Falls back to d.getAmount() for a legacy
+                // disbursement created before this field existed.
+                BigDecimal debitAmount = d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount();
+                BigDecimal newBalance = wallet.getBalance().subtract(debitAmount);
                 if (newBalance.compareTo(BigDecimal.ZERO) < 0) {
                     log.error("Wallet {} balance went negative ({}) debiting confirmed Stripe Connect disbursement id={} — needs manual reconciliation",
                             wallet.getId(), newBalance, d.getId());
@@ -116,7 +123,8 @@ public class StripeDisbursementService {
                 walletRepository.save(wallet);
 
                 disbursementRepository.save(d);
-                transactionRecorder.record(d.getUserId(), d.getWalletId(), d.getAmount(), d, d.getReference());
+                transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmount, d, d.getReference());
+                commissionService.recordGatewayCommissionFromDisbursement(d);
             } else {
                 disbursementRepository.save(d);
             }

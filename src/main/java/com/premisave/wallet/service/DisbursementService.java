@@ -65,6 +65,7 @@ public class DisbursementService {
     private final PaypalDisbursementService paypalDisbursementService;
     private final FlutterwaveDisbursementService flutterwaveDisbursementService;
     private final NowPaymentsDisbursementService nowPaymentsDisbursementService;
+    private final CommissionService commissionService;
 
     // ─── User-facing disbursement (phone / PayPal / Stripe / Flutterwave / NOWPayments) ───
 
@@ -127,7 +128,18 @@ public class DisbursementService {
             request.setAmount(kesAmount);
         }
 
-        if (wallet.getBalance().compareTo(request.getAmount()) < 0)
+        // Computed ONCE, centrally, on the final (already KES-normalized)
+        // amount — every provider path below (both the two self-contained
+        // early returns and the shared ProviderResult switch) receives
+        // this same commission value, so it's derived exactly once rather
+        // than redundantly recomputed per provider. ADDED ON TOP,
+        // confirmed explicitly — see CommissionService's javadoc: the
+        // external provider/recipient still receives exactly
+        // request.getAmount(), unaffected; only the wallet debit grows.
+        BigDecimal commission = commissionService.calculateGatewayCommission(request.getAmount());
+        BigDecimal totalDebit = request.getAmount().add(commission);
+
+        if (wallet.getBalance().compareTo(totalDebit) < 0)
             throw new InsufficientFundsException("Insufficient funds for disbursement");
 
         if ("MPESA".equals(provider) && request.getCurrency() != null
@@ -138,11 +150,11 @@ public class DisbursementService {
         // MPESA and Flutterwave are self-contained early returns — see
         // class javadoc for why.
         if ("MPESA".equals(provider)) {
-            return mpesaDisbursementService.disburseMpesa(userId, wallet, request);
+            return mpesaDisbursementService.disburseMpesa(userId, wallet, request, commission);
         }
 
         if ("FLUTTERWAVE".equals(provider)) {
-            return flutterwaveDisbursementService.processFlutterwaveDisbursement(userId, wallet, request);
+            return flutterwaveDisbursementService.processFlutterwaveDisbursement(userId, wallet, request, commission);
         }
 
         String destination;
@@ -193,6 +205,8 @@ public class DisbursementService {
         disbursement.setUserId(userId);
         disbursement.setWalletId(wallet.getId());
         disbursement.setAmount(request.getAmount());
+        disbursement.setTotalDebited(totalDebit);
+        disbursement.setCommissionRate(commissionService.getGatewayRate());
         disbursement.setDestination(destination);
         disbursement.setProvider(provider);
         disbursement.setReference(reference);
@@ -239,8 +253,11 @@ public class DisbursementService {
             // as a safety net in case a future provider is added here that
             // DOES resolve synchronously (MPESA/FLUTTERWAVE are handled in
             // their own early-return branches above, in their own
-            // dedicated services).
-            wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
+            // dedicated services). Uses totalDebit for consistency with
+            // every other debit path, though this branch is genuinely
+            // unreachable today — no commission is recorded here since
+            // nothing currently reaches it to test that path either.
+            wallet.setBalance(wallet.getBalance().subtract(totalDebit));
             walletRepository.save(wallet);
 
             disbursement.setStatus(DisbursementStatus.SUCCESS);

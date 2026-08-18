@@ -261,6 +261,16 @@ nowpayments:
   payout-email: ${NOWPAYMENTS_PAYOUT_EMAIL:}
   payout-password: ${NOWPAYMENTS_PAYOUT_PASSWORD:}
 
+# ─── Commission rates ─────────────────────────────────────────────────────
+# See CommissionConfig for the full reasoning. Both are decimal fractions
+# (0.10 = 10%, not 10) — placeholder values below, tune to your actual
+# business economics before relying on these in production.
+commission:
+  # Internal wallet-to-wallet transfers — expected lower than gateway-rate.
+  internal-transfer-rate: ${COMMISSION_INTERNAL_TRANSFER_RATE:0.1}
+  # Gateway-bound disbursements (M-Pesa B2C/B2Pochi, PayPal, Stripe, Flutterwave, NOWPayments).
+  gateway-rate: ${COMMISSION_GATEWAY_RATE:0.2}
+
 # Frontend URL for CORS
 frontend:
   url: ${FRONTEND_URL:http://localhost:3000}

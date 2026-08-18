@@ -28,7 +28,7 @@ public class PaymentTransactionRecorder {
         tx.setAmount(payment.getAmount());
         tx.setCurrency(Currency.KES);
         tx.setDescription("Payment to " + payment.getService()
-                + (payment.getReason() != null && !payment.getReason().isBlank() ? " - " + payment.getReason() : ""));
+                + (payment.getDescription() != null && !payment.getDescription().isBlank() ? " - " + payment.getDescription() : ""));
         tx.setReference(payment.getReference());
         transactionRepository.save(tx);
     }

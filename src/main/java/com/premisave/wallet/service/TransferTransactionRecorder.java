@@ -15,8 +15,15 @@ import org.springframework.stereotype.Service;
  * — mirrors DepositTransactionRecorder/DisbursementTransactionRecorder in
  * spirit, but genuinely different in shape: a transfer touches two
  * wallets in one operation, so it needs two Transaction rows per call,
- * not one. Matches exactly what TransferService's own buildTransaction
- * helper used to do inline, now centralized here.
+ * not one.
+ *
+ * IMPORTANT: the debit Transaction uses transfer.getTotalDebited(), NOT
+ * transfer.getAmount() — since commission is charged on top (see
+ * CommissionService), what actually left the sender's wallet is
+ * amount + commission, and the Transaction row has to mathematically
+ * match the real balance change or the audit trail becomes internally
+ * inconsistent. The credit Transaction correctly uses the plain amount,
+ * since the recipient is unaffected by the commission entirely.
  */
 @Service
 @RequiredArgsConstructor
@@ -33,9 +40,9 @@ public class TransferTransactionRecorder {
         debit.setWalletId(sender.getId());
         debit.setType(TransactionType.TRANSFER);
         debit.setStatus(TransactionStatus.COMPLETED);
-        debit.setAmount(transfer.getAmount().negate());
+        debit.setAmount(transfer.getTotalDebited().negate());
         debit.setCurrency(Currency.KES);
-        debit.setDescription("Transfer to " + recipient.getAccountNumber() + descriptionSuffix);
+        debit.setDescription("Transfer to " + recipient.getAccountNumber() + descriptionSuffix + " (incl. commission)");
         debit.setReference(transfer.getReference());
         transactionRepository.save(debit);
 
