@@ -16,6 +16,7 @@ import java.time.LocalDateTime;
 @Data
 public class DepositRecordResponse {
     private String id;
+    private String userId;
     private BigDecimal amount;
     private Currency currency;
     private String provider;

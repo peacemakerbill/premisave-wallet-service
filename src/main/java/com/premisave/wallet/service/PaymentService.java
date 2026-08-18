@@ -13,6 +13,8 @@ import com.premisave.wallet.repository.PaymentRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -112,9 +114,15 @@ public class PaymentService {
                 .toList();
     }
 
+    /** Admin-only: every payment across every user, paginated — see AdminFinanceController. */
+    public Page<PaymentRecordResponse> getAllPayments(Pageable pageable) {
+        return paymentRepository.findAll(pageable).map(PaymentService::toRecordResponse);
+    }
+
     private static PaymentRecordResponse toRecordResponse(Payment p) {
         PaymentRecordResponse r = new PaymentRecordResponse();
         r.setId(p.getId());
+        r.setUserId(p.getUserId());
         r.setAmount(p.getAmount());
         r.setCurrency(p.getCurrency());
         r.setService(p.getService());

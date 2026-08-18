@@ -18,6 +18,7 @@ import java.time.LocalDateTime;
 @Data
 public class DisbursementRecordResponse {
     private String id;
+    private String userId;
     private BigDecimal amount;
     private BigDecimal totalDebited;
     private BigDecimal commissionRate;

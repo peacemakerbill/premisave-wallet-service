@@ -15,6 +15,8 @@ import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -332,9 +334,15 @@ public class DisbursementService {
                 .toList();
     }
 
+    /** Admin-only: every disbursement across every user, paginated — see AdminFinanceController. */
+    public Page<DisbursementRecordResponse> getAllDisbursements(Pageable pageable) {
+        return disbursementRepository.findAll(pageable).map(DisbursementService::toRecordResponse);
+    }
+
     private static DisbursementRecordResponse toRecordResponse(Disbursement d) {
         DisbursementRecordResponse r = new DisbursementRecordResponse();
         r.setId(d.getId());
+        r.setUserId(d.getUserId());
         r.setAmount(d.getAmount());
         r.setTotalDebited(d.getTotalDebited());
         r.setCommissionRate(d.getCommissionRate());

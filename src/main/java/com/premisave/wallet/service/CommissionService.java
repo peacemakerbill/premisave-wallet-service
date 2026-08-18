@@ -6,6 +6,8 @@ import com.premisave.wallet.entity.Disbursement;
 import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.repository.CompanyLedgerRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -110,5 +112,16 @@ public class CommissionService {
         recordCommission("COMMISSION_DISBURSEMENT", commission, d.getCommissionRate(), d.getAmount(),
                 "DISBURSEMENT", d.getId(), d.getReference(), d.getUserId(),
                 "Commission on " + d.getProvider() + " disbursement to " + d.getDestination());
+    }
+
+    /**
+     * Admin-only: every ledger entry, paginated — see AdminFinanceController.
+     * This is the only way to actually see the P&L data recorded by every
+     * transfer/disbursement commission until now — CompanyLedgerRepository
+     * has existed since Stage 1, but nothing exposed it through the API at
+     * all before this.
+     */
+    public Page<CompanyLedgerEntry> getAllLedgerEntries(Pageable pageable) {
+        return companyLedgerRepository.findAll(pageable);
     }
 }

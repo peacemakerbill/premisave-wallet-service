@@ -11,6 +11,8 @@ import com.premisave.wallet.repository.DepositRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -70,9 +72,15 @@ public class DepositService {
                 .toList();
     }
 
+    /** Admin-only: every deposit across every user, paginated — see AdminFinanceController. */
+    public Page<DepositRecordResponse> getAllDeposits(Pageable pageable) {
+        return depositRepository.findAll(pageable).map(DepositService::toRecordResponse);
+    }
+
     private static DepositRecordResponse toRecordResponse(Deposit d) {
         DepositRecordResponse r = new DepositRecordResponse();
         r.setId(d.getId());
+        r.setUserId(d.getUserId());
         r.setAmount(d.getAmount());
         r.setCurrency(d.getCurrency());
         r.setProvider(d.getProvider());

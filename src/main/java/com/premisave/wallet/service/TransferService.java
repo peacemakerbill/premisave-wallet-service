@@ -14,6 +14,8 @@ import com.premisave.wallet.repository.TransferRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -147,6 +149,18 @@ public class TransferService {
                 .toList();
     }
 
+    /**
+     * Admin-only: every transfer across every user, paginated — see
+     * AdminFinanceController. `direction` is left null on each record —
+     * unlike a user's own history, there's no single "viewing user" whose
+     * perspective determines SENT vs RECEIVED when looking at everyone's
+     * transfers at once; senderId/recipientId are already directly
+     * visible on each record regardless.
+     */
+    public Page<TransferRecordResponse> getAllTransfers(Pageable pageable) {
+        return transferRepository.findAll(pageable).map(t -> toRecordResponse(t, null));
+    }
+
     private static TransferRecordResponse toRecordResponse(Transfer t, String viewingUserId) {
         TransferRecordResponse r = new TransferRecordResponse();
         r.setId(t.getId());
@@ -154,7 +168,7 @@ public class TransferService {
         r.setSenderEmail(t.getSenderEmail());
         r.setRecipientId(t.getRecipientId());
         r.setRecipientEmail(t.getRecipientEmail());
-        r.setDirection(viewingUserId.equals(t.getSenderId()) ? "SENT" : "RECEIVED");
+        r.setDirection(viewingUserId != null ? (viewingUserId.equals(t.getSenderId()) ? "SENT" : "RECEIVED") : null);
         r.setAmount(t.getAmount());
         r.setTotalDebited(t.getTotalDebited());
         r.setCurrency(t.getCurrency());
