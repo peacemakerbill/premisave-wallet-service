@@ -1,11 +1,13 @@
 package com.premisave.wallet.controller;
 
 import com.premisave.wallet.dto.ApiResponse;
+import com.premisave.wallet.dto.DailyFinanceReportResponse;
 import com.premisave.wallet.dto.DepositRecordResponse;
 import com.premisave.wallet.dto.DisbursementRecordResponse;
 import com.premisave.wallet.dto.PaymentRecordResponse;
 import com.premisave.wallet.dto.TransferRecordResponse;
 import com.premisave.wallet.entity.CompanyLedgerEntry;
+import com.premisave.wallet.service.AdminReportService;
 import com.premisave.wallet.service.CommissionService;
 import com.premisave.wallet.service.DepositService;
 import com.premisave.wallet.service.DisbursementService;
@@ -14,11 +16,15 @@ import com.premisave.wallet.service.TransferService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PagedModel;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.time.LocalDate;
 
 /**
  * Admin-only, cross-user visibility into every financial entity built
@@ -71,6 +77,26 @@ public class AdminFinanceController {
     private final TransferService transferService;
     private final PaymentService paymentService;
     private final CommissionService commissionService;
+    private final AdminReportService adminReportService;
+
+    /**
+     * Comprehensive daily financial report — built fresh against every
+     * entity from tonight's work (Deposit/Disbursement/Transfer/Payment/
+     * CompanyLedgerEntry), not an extension of AdminWalletController's
+     * existing getDailyReport, whose real implementation was never seen
+     * in this session. Deliberately a different URL
+     * (/admin/finance/reports/daily, not /admin/wallet/reports/daily) —
+     * see AdminReportService's javadoc for the full reasoning. Malformed
+     * date input (e.g. ?date=2026 or ?date=2026-08-8) now returns a clean
+     * 400 with a clear message instead of a raw stack trace — see
+     * GlobalExceptionHandler.handleTypeMismatch.
+     */
+    @GetMapping("/reports/daily")
+    public ResponseEntity<ApiResponse<DailyFinanceReportResponse>> getDailyReport(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        DailyFinanceReportResponse report = adminReportService.getDailyReport(date);
+        return ResponseEntity.ok(ApiResponse.success("Daily report retrieved", report));
+    }
 
     @GetMapping("/deposits")
     public ResponseEntity<ApiResponse<PagedModel<DepositRecordResponse>>> getAllDeposits(Pageable pageable) {

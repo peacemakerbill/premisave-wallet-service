@@ -108,6 +108,56 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error("Validation failed", errors));
     }
 
+    /**
+     * Catches a malformed @RequestParam/@PathVariable value BEFORE it ever
+     * reaches a controller method — e.g. ?date=2026 or ?date=2026-08-8
+     * against a LocalDate parameter (missing zero-padding on the day),
+     * or an invalid string against an enum-typed filter like
+     * DepositStatus/DisbursementStatus/TransferStatus/PaymentStatus.
+     * Previously fell all the way through to the generic Exception
+     * handler below, surfacing as a bare 500 with a full stack trace in
+     * the logs for what is genuinely just bad user input, not a system
+     * fault — same category of fix as C2BUrlsAlreadyRegisteredException
+     * earlier.
+     *
+     * Deliberately GENERIC, not scoped to any one endpoint — this fires
+     * for any typed @RequestParam anywhere in the app, including every
+     * status/fromDate/toDate/direction filter added across the Deposit/
+     * Disbursement/Transfer/Payment history endpoints, plus the existing
+     * admin transaction/report filters.
+     *
+     * For an enum target type specifically, the message lists the actual
+     * valid values (via getEnumConstants()) rather than just saying
+     * "invalid" — turns a dead end into something the caller can
+     * immediately act on without needing to check the API docs.
+     */
+    @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTypeMismatch(
+            org.springframework.web.method.annotation.MethodArgumentTypeMismatchException ex) {
+        String paramName = ex.getName();
+        Object rawValue = ex.getValue();
+        Class<?> requiredType = ex.getRequiredType();
+
+        String message;
+        if (requiredType != null && requiredType.isEnum()) {
+            String validValues = java.util.Arrays.stream(requiredType.getEnumConstants())
+                    .map(Object::toString)
+                    .collect(java.util.stream.Collectors.joining(", "));
+            message = "Invalid value '" + rawValue + "' for parameter '" + paramName
+                    + "' — expected one of: " + validValues;
+        } else if (requiredType == java.time.LocalDate.class) {
+            message = "Invalid date '" + rawValue + "' for parameter '" + paramName
+                    + "' — expected format: yyyy-MM-dd (e.g. 2026-08-19)";
+        } else {
+            message = "Invalid value '" + rawValue + "' for parameter '" + paramName + "'";
+        }
+
+        log.warn("Request parameter type mismatch: parameter={} value={} requiredType={}",
+                paramName, rawValue, requiredType != null ? requiredType.getSimpleName() : "unknown");
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.error(message));
+    }
+
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
