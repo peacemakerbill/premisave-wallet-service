@@ -263,13 +263,14 @@ nowpayments:
 
 # ─── Commission rates ─────────────────────────────────────────────────────
 # See CommissionConfig for the full reasoning. Both are decimal fractions
-# (0.10 = 10%, not 10) — placeholder values below, tune to your actual
-# business economics before relying on these in production.
+# (0.01 = 1%, not 1). Defaults below (1% internal / 3% gateway) are the
+# actual chosen rates, roughly in line with typical real-world payment
+# processing fees — not placeholders anymore.
 commission:
   # Internal wallet-to-wallet transfers — expected lower than gateway-rate.
-  internal-transfer-rate: ${COMMISSION_INTERNAL_TRANSFER_RATE:0.1}
+  internal-transfer-rate: ${COMMISSION_INTERNAL_TRANSFER_RATE:0.01}
   # Gateway-bound disbursements (M-Pesa B2C/B2Pochi, PayPal, Stripe, Flutterwave, NOWPayments).
-  gateway-rate: ${COMMISSION_GATEWAY_RATE:0.2}
+  gateway-rate: ${COMMISSION_GATEWAY_RATE:0.03}
 
 # Frontend URL for CORS
 frontend:

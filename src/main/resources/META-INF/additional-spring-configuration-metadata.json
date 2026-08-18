@@ -541,6 +541,18 @@
 			"description": "Your NOWPayments DASHBOARD LOGIN password — paired with nowpayments.payout-email above for the same POST /v1/auth call. Treat this with real secrets-management discipline, more so than a typical API key — whoever holds it can log into the dashboard directly, not just make scoped API calls."
 		},
 		{
+			"name": "commission.internal-transfer-rate",
+			"type": "java.math.BigDecimal",
+			"description": "Commission rate taken on internal wallet-to-wallet transfers (POST /wallet/transfer, POST /internal/transfer) — a decimal fraction, e.g. 0.01 for 1%, not 1. Expected lower than commission.gateway-rate, matching real payment-processing economics (an internal transfer costs nothing external, unlike a gateway withdrawal).",
+			"defaultValue": 0.01
+		},
+		{
+			"name": "commission.gateway-rate",
+			"type": "java.math.BigDecimal",
+			"description": "Commission rate taken on gateway-bound disbursements (M-Pesa B2C/B2Pochi, PayPal, Stripe, Flutterwave, NOWPayments) — a decimal fraction, e.g. 0.03 for 3%, not 3. Expected higher than commission.internal-transfer-rate, roughly in line with typical real-world gateway processing fees.",
+			"defaultValue": 0.03
+		},
+		{
 			"name": "frontend.url",
 			"type": "java.lang.String",
 			"description": "Frontend application URL used for CORS allowed-origins configuration.",
