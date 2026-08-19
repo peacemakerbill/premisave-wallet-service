@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 public class ManualAdjustmentRecordResponse {
     private String id;
     private String userId;
+    private String accountNumber;
     private ManualAdjustmentType type;
     private BigDecimal amount;
     private Currency currency;

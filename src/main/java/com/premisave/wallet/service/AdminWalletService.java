@@ -106,6 +106,7 @@ public class AdminWalletService {
         ManualAdjustment adjustment = new ManualAdjustment();
         adjustment.setUserId(userId);
         adjustment.setWalletId(wallet.getId());
+        adjustment.setAccountNumber(wallet.getAccountNumber());
         adjustment.setType(ManualAdjustmentType.CREDIT);
         adjustment.setAmount(request.getAmount());
         adjustment.setCurrency(Currency.KES);
@@ -145,6 +146,7 @@ public class AdminWalletService {
         ManualAdjustment adjustment = new ManualAdjustment();
         adjustment.setUserId(userId);
         adjustment.setWalletId(wallet.getId());
+        adjustment.setAccountNumber(wallet.getAccountNumber());
         adjustment.setType(ManualAdjustmentType.DEBIT);
         adjustment.setAmount(request.getAmount());
         adjustment.setCurrency(Currency.KES);
@@ -181,6 +183,7 @@ public class AdminWalletService {
         ManualAdjustmentRecordResponse r = new ManualAdjustmentRecordResponse();
         r.setId(a.getId());
         r.setUserId(a.getUserId());
+        r.setAccountNumber(a.getAccountNumber());
         r.setType(a.getType());
         r.setAmount(a.getAmount());
         r.setCurrency(a.getCurrency());

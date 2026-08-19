@@ -35,6 +35,17 @@ public class ManualAdjustment {
     private String userId;
     private String walletId;
 
+    /**
+     * The wallet's account number (= the user's email) at the time of
+     * adjustment — sourced from Wallet.accountNumber, which is already
+     * fetched in AdminWalletService.creditWallet/debitWallet for the
+     * balance check, so this costs nothing extra to capture. Same
+     * reasoning as Transfer.senderEmail/recipientEmail and Payment.email
+     * — lets an admin read who a walletId actually belongs to directly
+     * off the adjustment record, without a separate wallet lookup.
+     */
+    private String accountNumber;
+
     private ManualAdjustmentType type;
     private BigDecimal amount;
     private Currency currency;
