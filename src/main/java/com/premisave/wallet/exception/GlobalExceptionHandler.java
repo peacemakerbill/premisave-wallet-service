@@ -158,6 +158,45 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.error(message));
     }
 
+    /**
+     * Catches a request body that fails to deserialize at all — e.g. a
+     * field typed too narrowly for what the sender actually puts in it.
+     * Concrete case that surfaced this gap: Safaricom's M-Pesa ResultURL
+     * callback can send an ALPHANUMERIC ResultCode ("TP40153" — a
+     * permission-denied error) even though most of the time it's a plain
+     * integer ("0" for success). If the receiving DTO field is typed as
+     * int/Integer, Jackson throws InvalidFormatException wrapped in this
+     * exception — which previously fell all the way through to the
+     * generic Exception handler below, producing a full stack trace in
+     * the logs for what is a real Safaricom response, not a system fault.
+     *
+     * NOTE: for a webhook/callback endpoint specifically (M-Pesa
+     * ResultURL, Stripe/PayPal/Flutterwave/NOWPayments webhooks), it's
+     * not fully confirmed whether 400 is the ideal response here versus
+     * risking a retry loop if the calling provider treats any non-2xx as
+     * "retry this same payload" — the payload shape won't change between
+     * retries, so that would just repeat the same failure indefinitely.
+     * This is a genuine improvement over today regardless (clean log,
+     * proper status, no stack trace spam) — but the exact status code for
+     * webhook paths specifically may be worth revisiting with visibility
+     * into how each provider's retry behavior actually works.
+     */
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnreadableBody(
+            org.springframework.http.converter.HttpMessageNotReadableException ex) {
+        String message = "Request body could not be parsed";
+        Throwable cause = ex.getCause();
+        if (cause instanceof com.fasterxml.jackson.databind.exc.InvalidFormatException ife) {
+            String field = ife.getPath().isEmpty() ? "unknown"
+                    : ife.getPath().get(ife.getPath().size() - 1).getFieldName();
+            message = "Invalid value '" + ife.getValue() + "' for field '" + field
+                    + "' — expected " + ife.getTargetType().getSimpleName();
+        }
+
+        log.warn("Unreadable request body: {}", message);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.error(message));
+    }
+
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
