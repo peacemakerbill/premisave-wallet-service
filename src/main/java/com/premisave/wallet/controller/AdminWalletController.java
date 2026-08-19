@@ -14,6 +14,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PagedModel;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -71,20 +72,47 @@ public class AdminWalletController {
 
     // ==================== MANUAL ADJUSTMENTS ====================
 
+    /**
+     * Now takes Authentication (previously didn't at all) — resolved as
+     * performedBy and passed through to AdminWalletService.creditWallet,
+     * which records it on the new ManualAdjustment entity. reference in
+     * the request body is accepted but ignored — see
+     * ManualAdjustmentRequest's javadoc for why: the server always
+     * generates its own now.
+     */
     @PostMapping("/wallets/{userId}/credit")
     public ResponseEntity<ApiResponse<PaymentResponse>> creditWallet(
             @PathVariable String userId,
-            @Valid @RequestBody ManualAdjustmentRequest request) {
+            @Valid @RequestBody ManualAdjustmentRequest request,
+            Authentication auth) {
         return ResponseEntity.ok(ApiResponse.success("Wallet credited successfully", 
-                adminWalletService.creditWallet(userId, request)));
+                adminWalletService.creditWallet(userId, request, auth.getName())));
     }
 
+    /** Same change as creditWallet above. */
     @PostMapping("/wallets/{userId}/debit")
     public ResponseEntity<ApiResponse<PaymentResponse>> debitWallet(
             @PathVariable String userId,
-            @Valid @RequestBody ManualAdjustmentRequest request) {
+            @Valid @RequestBody ManualAdjustmentRequest request,
+            Authentication auth) {
         return ResponseEntity.ok(ApiResponse.success("Wallet debited successfully", 
-                adminWalletService.debitWallet(userId, request)));
+                adminWalletService.debitWallet(userId, request, auth.getName())));
+    }
+
+    /**
+     * Every manual adjustment (credit and debit), optionally filtered to
+     * one user via ?userId=. Wrapped in PagedModel explicitly, not
+     * returned as a raw Page<T> — confirmed necessary in this app via a
+     * real redeploy (see AdminFinanceController's javadoc for the full
+     * "Serializing PageImpl instances as-is is not supported" story).
+     * GET /admin/wallet/adjustments?userId=&page=&size=&sort=
+     */
+    @GetMapping("/adjustments")
+    public ResponseEntity<ApiResponse<PagedModel<ManualAdjustmentRecordResponse>>> getManualAdjustments(
+            @RequestParam(required = false) String userId, Pageable pageable) {
+        PagedModel<ManualAdjustmentRecordResponse> body =
+                new PagedModel<>(adminWalletService.getManualAdjustments(userId, pageable));
+        return ResponseEntity.ok(ApiResponse.success("Manual adjustments retrieved", body));
     }
 
     // ==================== TRANSACTIONS ====================
@@ -132,19 +160,6 @@ public class AdminWalletController {
 
     // ==================== B2B (BUSINESS TO BUSINESS) ====================
 
-    /**
-     * Triggers an M-Pesa B2B payment from Premisave's shortcode to another
-     * paybill/till (e.g. settling with a vendor or partner business, or
-     * BusinessBuyGoods to pay a till/store number — set via request.commandId).
-     * Restricted to ADMIN/FINANCE/OPERATIONS via the class-level @PreAuthorize.
-     * B2B is a permissioned Safaricom API — must be enabled for the shortcode.
-     *
-     * Set request.verifyRecipient=true to run a "B2B Hakikisha" (Query Org
-     * Info) check against receiverShortcode first — the payment is aborted
-     * before Safaricom's B2B endpoint is ever called if the org name can't
-     * be confirmed. See POST /mpesa/b2b/query-org-info to check ad-hoc
-     * without committing to a payment.
-     */
     @PostMapping("/b2b/pay")
     public ResponseEntity<ApiResponse<DisbursementResponse>> payB2B(
             @Valid @RequestBody MpesaB2BRequest request,
@@ -153,13 +168,6 @@ public class AdminWalletController {
                 adminWalletService.processB2BPayment(auth.getName(), request)));
     }
 
-    /**
-     * Ad-hoc "B2B Hakikisha" (Query Org Info) lookup — confirms the
-     * registered name and tariff/charge profile for a shortcode/till without
-     * committing to a payment. Useful for reviewing a recipient before
-     * deciding whether to pay them at all.
-     * See https://developer.safaricom.co.ke/apis/QueryOrgInfo
-     */
     @PostMapping("/b2b/query-org-info")
     public ResponseEntity<ApiResponse<QueryOrgInfoResponse>> queryOrgInfo(
             @Valid @RequestBody QueryOrgInfoRequest request) {
@@ -169,13 +177,6 @@ public class AdminWalletController {
 
     // ==================== B2C ACCOUNT TOP UP ====================
 
-    /**
-     * Tops up a B2C shortcode's utility account from Premisave's working
-     * account (CommandID BusinessPayToBulk) — internal float management so
-     * disbursements don't run dry. Restricted to ADMIN/FINANCE/OPERATIONS
-     * via the class-level @PreAuthorize.
-     * See https://developer.safaricom.co.ke/apis/B2CAccountTopUp
-     */
     @PostMapping("/b2c/top-up")
     public ResponseEntity<ApiResponse<DisbursementResponse>> topUpB2CAccount(
             @Valid @RequestBody B2CTopUpRequest request,
@@ -186,12 +187,6 @@ public class AdminWalletController {
 
     // ==================== B2POCHI (BUSINESS TO POCHI LA BIASHARA) ====================
 
-    /**
-     * Disburses from our B2C shortcode straight into a customer's Pochi la
-     * Biashara business wallet. Restricted to ADMIN/FINANCE/OPERATIONS via
-     * the class-level @PreAuthorize.
-     * See https://developer.safaricom.co.ke/apis/BusinessToPochi
-     */
     @PostMapping("/mpesa/b2pochi/pay")
     public ResponseEntity<ApiResponse<DisbursementResponse>> payB2Pochi(
             @Valid @RequestBody B2PochiRequest request,
@@ -202,13 +197,6 @@ public class AdminWalletController {
 
     // ==================== M-PESA ACCOUNT BALANCE ====================
 
-    /**
-     * Triggers a real-time Account Balance query against our own shortcode's
-     * Working/Utility/Charges Paid accounts. The actual balances arrive
-     * asynchronously via ResultURL — poll GET /mpesa/operations/{conversationId}
-     * once the callback has had time to land.
-     * See https://developer.safaricom.co.ke/apis/AccountBalance
-     */
     @PostMapping("/mpesa/balance/query")
     public ResponseEntity<ApiResponse<MpesaAsyncResponse>> queryAccountBalance(Authentication auth) {
         return ResponseEntity.ok(ApiResponse.success("Account balance query submitted",
@@ -217,12 +205,6 @@ public class AdminWalletController {
 
     // ==================== M-PESA TRANSACTION STATUS ====================
 
-    /**
-     * Secondary reconciliation mechanism for a C2B/B2B/B2C/Reversal
-     * transaction whose ResultURL callback never arrived. Requires either
-     * transactionId (M-Pesa receipt) or originatorConversationId in the body.
-     * See https://developer.safaricom.co.ke/apis/TransactionStatus
-     */
     @PostMapping("/mpesa/transaction-status/query")
     public ResponseEntity<ApiResponse<MpesaAsyncResponse>> queryTransactionStatus(
             @RequestBody TransactionStatusRequest request,
@@ -233,14 +215,6 @@ public class AdminWalletController {
 
     // ==================== M-PESA REVERSAL ====================
 
-    /**
-     * Reverses a completed C2B transaction (refunds the customer, debits our
-     * shortcode). If the transactionId matches a completed deposit Transaction
-     * on file, that wallet is automatically debited once the reversal
-     * succeeds — see MpesaOperationsService.completeOperation.
-     * NOTE: B2C payouts cannot be reversed via this API (Safaricom portal only).
-     * See https://developer.safaricom.co.ke/apis/Reversal
-     */
     @PostMapping("/mpesa/reversal")
     public ResponseEntity<ApiResponse<MpesaAsyncResponse>> reverseTransaction(
             @Valid @RequestBody MpesaReversalRequest request,
@@ -251,11 +225,6 @@ public class AdminWalletController {
 
     // ==================== M-PESA OPERATIONS LOOKUP ====================
 
-    /**
-     * Polls the stored result of a previously submitted Account Balance,
-     * Transaction Status, or Reversal request by the ConversationID returned
-     * at submission time.
-     */
     @GetMapping("/mpesa/operations/{conversationId}")
     public ResponseEntity<ApiResponse<MpesaOperation>> getMpesaOperation(@PathVariable String conversationId) {
         MpesaOperation operation = mpesaOperationsService.getOperation(conversationId);
@@ -268,24 +237,12 @@ public class AdminWalletController {
 
     // ==================== M-PESA PULL TRANSACTIONS (C2B RECONCILIATION) ====================
 
-    /**
-     * One-time registration of our shortcode for the Pull Transactions API.
-     * Safe to call more than once — Safaricom returns ResponseStatus 1001
-     * ("already registered") rather than erroring, which is treated as success.
-     * See https://developer.safaricom.co.ke/apis/PullTransaction
-     */
     @PostMapping("/mpesa/pull/register")
     public ResponseEntity<ApiResponse<PullTransactionResponse>> registerPullTransactions() {
         return ResponseEntity.ok(ApiResponse.success("Pull Transactions registration submitted",
                 pullTransactionService.register()));
     }
 
-    /**
-     * Pulls C2B transactions for the given window (or the last 24h if
-     * startDate/endDate are omitted — Safaricom retains up to 48h) and
-     * reconciles each one against local Transaction records, crediting any
-     * wallet whose missed C2B confirmation is recovered this way.
-     */
     @PostMapping("/mpesa/pull/query")
     public ResponseEntity<ApiResponse<PullTransactionResponse>> queryPullTransactions(
             @RequestBody(required = false) PullTransactionQueryRequest request) {

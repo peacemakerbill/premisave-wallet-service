@@ -2,15 +2,18 @@ package com.premisave.wallet.service;
 
 import com.premisave.wallet.dto.*;
 import com.premisave.wallet.entity.Disbursement;
+import com.premisave.wallet.entity.ManualAdjustment;
 import com.premisave.wallet.entity.Transaction;
 import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.enums.DisbursementStatus;
+import com.premisave.wallet.enums.ManualAdjustmentType;
 import com.premisave.wallet.enums.TransactionStatus;
 import com.premisave.wallet.enums.TransactionType;
 import com.premisave.wallet.exception.InsufficientFundsException;
 import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.DisbursementRepository;
+import com.premisave.wallet.repository.ManualAdjustmentRepository;
 import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +29,7 @@ import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -36,6 +40,7 @@ public class AdminWalletService {
     private final WalletRepository walletRepository;
     private final TransactionRepository transactionRepository;
     private final DisbursementRepository disbursementRepository;
+    private final ManualAdjustmentRepository manualAdjustmentRepository;
     private final WalletService walletService;
     private final DisbursementService disbursementService;
 
@@ -65,24 +70,64 @@ public class AdminWalletService {
         return walletService.unfreezeWallet(userId);
     }
 
+    /**
+     * Now creates a dedicated ManualAdjustment record — mirrors Deposit/
+     * Disbursement/Transfer/Payment: a real entity instead of only the
+     * bare Transaction row this used to create directly, with
+     * balanceBefore/balanceAfter captured explicitly (unique to this
+     * entity — a manual adjustment is a human unilaterally overriding a
+     * balance, not a normal transactional event, so an unambiguous
+     * before/after record matters more here than anywhere else).
+     *
+     * reference is ALWAYS server-generated now ("ADJ-" + a random UUID),
+     * regardless of what request.getReference() holds — see
+     * ManualAdjustmentRequest's javadoc for why. The same generated
+     * reference is used on both the ManualAdjustment record and the
+     * Transaction row, so the two stay cross-referenceable.
+     *
+     * performedBy is new — resolved from the calling admin's own JWT by
+     * AdminWalletController (auth.getName()), never taken from the
+     * request body. The credit/debit controller methods previously took
+     * no Authentication parameter at all, so there was no way to
+     * attribute WHICH admin performed a given adjustment.
+     */
     @Transactional
-    public PaymentResponse creditWallet(String userId, ManualAdjustmentRequest request) {
+    public PaymentResponse creditWallet(String userId, ManualAdjustmentRequest request, String performedBy) {
         Wallet wallet = walletRepository.findByUserId(userId)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found"));
 
-        wallet.setBalance(wallet.getBalance().add(request.getAmount()));
+        BigDecimal balanceBefore = wallet.getBalance();
+        BigDecimal balanceAfter = balanceBefore.add(request.getAmount());
+        wallet.setBalance(balanceAfter);
         walletRepository.save(wallet);
 
+        String reference = "ADJ-" + UUID.randomUUID();
+
+        ManualAdjustment adjustment = new ManualAdjustment();
+        adjustment.setUserId(userId);
+        adjustment.setWalletId(wallet.getId());
+        adjustment.setType(ManualAdjustmentType.CREDIT);
+        adjustment.setAmount(request.getAmount());
+        adjustment.setCurrency(Currency.KES);
+        adjustment.setBalanceBefore(balanceBefore);
+        adjustment.setBalanceAfter(balanceAfter);
+        adjustment.setReason(request.getReason());
+        adjustment.setReference(reference);
+        adjustment.setPerformedBy(performedBy);
+        manualAdjustmentRepository.save(adjustment);
+
         Transaction tx = createAdjustmentTransaction(wallet, TransactionType.DEPOSIT, request.getAmount(),
-                "Admin Credit: " + request.getReason(), request.getReference());
+                "Admin Credit: " + request.getReason(), reference);
         transactionRepository.save(tx);
 
-        log.info("Admin credited wallet {} with {} - Reason: {}", userId, request.getAmount(), request.getReason());
+        log.info("Admin credited wallet {} with {} - Reason: {} - PerformedBy: {} - Ref: {}",
+                userId, request.getAmount(), request.getReason(), performedBy, reference);
         return new PaymentResponse(true, tx.getId(), "Credit successful");
     }
 
+    /** Same migration as creditWallet above — see its javadoc for full reasoning. */
     @Transactional
-    public PaymentResponse debitWallet(String userId, ManualAdjustmentRequest request) {
+    public PaymentResponse debitWallet(String userId, ManualAdjustmentRequest request, String performedBy) {
         Wallet wallet = walletRepository.findByUserId(userId)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found"));
 
@@ -90,15 +135,62 @@ public class AdminWalletService {
             throw new InsufficientFundsException("Insufficient balance for debit");
         }
 
-        wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
+        BigDecimal balanceBefore = wallet.getBalance();
+        BigDecimal balanceAfter = balanceBefore.subtract(request.getAmount());
+        wallet.setBalance(balanceAfter);
         walletRepository.save(wallet);
 
+        String reference = "ADJ-" + UUID.randomUUID();
+
+        ManualAdjustment adjustment = new ManualAdjustment();
+        adjustment.setUserId(userId);
+        adjustment.setWalletId(wallet.getId());
+        adjustment.setType(ManualAdjustmentType.DEBIT);
+        adjustment.setAmount(request.getAmount());
+        adjustment.setCurrency(Currency.KES);
+        adjustment.setBalanceBefore(balanceBefore);
+        adjustment.setBalanceAfter(balanceAfter);
+        adjustment.setReason(request.getReason());
+        adjustment.setReference(reference);
+        adjustment.setPerformedBy(performedBy);
+        manualAdjustmentRepository.save(adjustment);
+
         Transaction tx = createAdjustmentTransaction(wallet, TransactionType.WITHDRAWAL, request.getAmount().negate(),
-                "Admin Debit: " + request.getReason(), request.getReference());
+                "Admin Debit: " + request.getReason(), reference);
         transactionRepository.save(tx);
 
-        log.info("Admin debited wallet {} with {} - Reason: {}", userId, request.getAmount(), request.getReason());
+        log.info("Admin debited wallet {} with {} - Reason: {} - PerformedBy: {} - Ref: {}",
+                userId, request.getAmount(), request.getReason(), performedBy, reference);
         return new PaymentResponse(true, tx.getId(), "Debit successful");
+    }
+
+    /**
+     * GET /admin/wallet/adjustments — every manual adjustment, optionally
+     * filtered to one user. userId is a query param, not a path segment,
+     * matching how getAllTransactions above already takes it (optional,
+     * flat) rather than nesting under /wallets/{userId}/.
+     */
+    public Page<ManualAdjustmentRecordResponse> getManualAdjustments(String userId, Pageable pageable) {
+        Page<ManualAdjustment> page = (userId != null && !userId.isBlank())
+                ? manualAdjustmentRepository.findByUserId(userId, pageable)
+                : manualAdjustmentRepository.findAll(pageable);
+        return page.map(AdminWalletService::toAdjustmentRecordResponse);
+    }
+
+    private static ManualAdjustmentRecordResponse toAdjustmentRecordResponse(ManualAdjustment a) {
+        ManualAdjustmentRecordResponse r = new ManualAdjustmentRecordResponse();
+        r.setId(a.getId());
+        r.setUserId(a.getUserId());
+        r.setType(a.getType());
+        r.setAmount(a.getAmount());
+        r.setCurrency(a.getCurrency());
+        r.setBalanceBefore(a.getBalanceBefore());
+        r.setBalanceAfter(a.getBalanceAfter());
+        r.setReason(a.getReason());
+        r.setReference(a.getReference());
+        r.setPerformedBy(a.getPerformedBy());
+        r.setCreatedAt(a.getCreatedAt());
+        return r;
     }
 
     /**
@@ -217,7 +309,7 @@ public class AdminWalletService {
         tx.setAmount(amount);
         tx.setCurrency(Currency.KES);
         tx.setDescription(description);
-        tx.setReference(reference != null ? reference : "ADMIN-ADJ-" + System.currentTimeMillis());
+        tx.setReference(reference);
         return tx;
     }
 
