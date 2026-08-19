@@ -7,9 +7,10 @@ import lombok.Data;
 import java.util.List;
 
 /**
- * Matches Safaricom's real B2C / B2B / B2Pochi "Result" callback envelope
- * (ResultURL). Distinct from the STK callback shape (Body.stkCallback) —
- * this one is a top-level "Result" object.
+ * Matches Safaricom's real B2C / B2B / B2Pochi / Account Balance /
+ * Transaction Status / Reversal "Result" callback envelope (ResultURL).
+ * Distinct from the STK callback shape (Body.stkCallback) — this one is
+ * a top-level "Result" object.
  *
  * @JsonIgnoreProperties(ignoreUnknown = true) is applied on every nested
  * class here (not just the root) — Jackson's ignoreUnknown setting is
@@ -24,11 +25,24 @@ import java.util.List;
  * indefinitely on a non-200, which is what caused the repeated callback
  * attempts visible in the zrok tunnel logs.
  *
+ * resultCode is a String, NOT an int/Integer — confirmed both from a real
+ * captured sandbox callback ("ResultCode":"TP40153", an Account Balance
+ * permission-denied error) AND directly from Safaricom's own Account
+ * Balance API documentation's parameter table: "Result Code ... Max
+ * length is 10 ... Type: String ... Sample Values: 0". A previous version
+ * of this field was typed as int, which crashed with
+ * HttpMessageNotReadableException the first time Safaricom ever sent an
+ * alphanumeric code rather than "0" — every prior callback in testing
+ * happened to succeed with a plain "0", which is why this went
+ * undetected until now. resultType, by contrast, genuinely IS documented
+ * as Integer ("0: completed, 1: waiting for further messages") and is
+ * correctly typed as-is.
+ *
  * Success example:
  * {
  *   "Result": {
  *     "ResultType": 0,
- *     "ResultCode": 0,
+ *     "ResultCode": "0",
  *     "ResultDesc": "The service request is processed successfully.",
  *     "OriginatorConversationID": "...",
  *     "ConversationID": "AG_20191219_...",
@@ -62,8 +76,13 @@ public class MpesaResultCallbackRequest {
         @JsonProperty("ResultType")
         private int resultType;
 
+        /**
+         * Deliberately String, not int — see class javadoc. A whole-number
+         * success code ("0") and an alphanumeric error code ("TP40153")
+         * both need to fit here; only String can hold both.
+         */
         @JsonProperty("ResultCode")
-        private int resultCode;
+        private String resultCode;
 
         @JsonProperty("ResultDesc")
         private String resultDesc;

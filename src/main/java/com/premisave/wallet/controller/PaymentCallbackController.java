@@ -59,6 +59,14 @@ import java.util.Map;
  * earlier B2C/B2Pochi ResultURL incident — a mismatched result-url env value
  * produced exactly this failure mode, invisible everywhere except the
  * provider's own retry logs).
+ *
+ * MpesaResultCallbackRequest.Result.resultCode is a String (see that class's
+ * own javadoc for why — Safaricom sends both plain numeric success codes
+ * ("0") and alphanumeric error codes ("TP40153"), and only String can hold
+ * both). Every success-check below against it is therefore a string
+ * comparison ("0".equals(...)), not an int comparison — a prior version of
+ * this file used result.getResultCode() == 0, which stopped compiling the
+ * moment that field's type was corrected.
  */
 @Slf4j
 @RestController
@@ -101,6 +109,11 @@ public class PaymentCallbackController {
 	 * paid amount, receipt number, and phone are inside CallbackMetadata.Item;
 	 * there is no account number or email in this payload, so the transaction is
 	 * matched back to a wallet via CheckoutRequestID (see DepositService).
+	 *
+	 * NOTE: this uses MpesaStkCallbackRequest, a DIFFERENT DTO from
+	 * MpesaResultCallbackRequest — its own ResultCode field/type is
+	 * unaffected by the resultCode type fix described in the class javadoc
+	 * above, and stk.getResultCode() != 0 below is unchanged.
 	 */
 	@PostMapping("/stk-callback")
 	public ResponseEntity<ApiResponse<Void>> handleMpesaCallback(@RequestBody MpesaStkCallbackRequest callback) {
@@ -147,7 +160,7 @@ public class PaymentCallbackController {
 				result.getResultCode(), result.getResultDesc());
 
 		try {
-			boolean success = result.getResultCode() == 0;
+			boolean success = "0".equals(result.getResultCode());
 			mpesaDisbursementService.completeMpesaDisbursement(result.getConversationID(), success, result.getResultDesc(),
 					result.getTransactionID());
 		} catch (Exception e) {
@@ -178,7 +191,7 @@ public class PaymentCallbackController {
 				result.getResultCode(), result.getResultDesc());
 
 		try {
-			boolean success = result.getResultCode() == 0;
+			boolean success = "0".equals(result.getResultCode());
 			mpesaDisbursementService.completeMpesaDisbursement(result.getConversationID(), success, result.getResultDesc(),
 					result.getTransactionID());
 		} catch (Exception e) {
@@ -229,9 +242,9 @@ public class PaymentCallbackController {
 				result.getConversationID(), result.getResultCode(), result.getResultDesc());
 
 		try {
-			boolean success = result.getResultCode() == 0;
+			boolean success = "0".equals(result.getResultCode());
 			mpesaOperationsService.completeOperation(result.getConversationID(), success,
-					String.valueOf(result.getResultCode()), result.getResultDesc(), extractResultParameters(result));
+					result.getResultCode(), result.getResultDesc(), extractResultParameters(result));
 		} catch (Exception e) {
 			log.error("Failed to process Account Balance result: conversationId={}", result.getConversationID(), e);
 		}
@@ -260,9 +273,9 @@ public class PaymentCallbackController {
 				result.getConversationID(), result.getResultCode(), result.getResultDesc());
 
 		try {
-			boolean success = result.getResultCode() == 0;
+			boolean success = "0".equals(result.getResultCode());
 			mpesaOperationsService.completeOperation(result.getConversationID(), success,
-					String.valueOf(result.getResultCode()), result.getResultDesc(), extractResultParameters(result));
+					result.getResultCode(), result.getResultDesc(), extractResultParameters(result));
 		} catch (Exception e) {
 			log.error("Failed to process Transaction Status result: conversationId={}", result.getConversationID(), e);
 		}
@@ -291,9 +304,9 @@ public class PaymentCallbackController {
 				result.getResultCode(), result.getResultDesc());
 
 		try {
-			boolean success = result.getResultCode() == 0;
+			boolean success = "0".equals(result.getResultCode());
 			mpesaOperationsService.completeOperation(result.getConversationID(), success,
-					String.valueOf(result.getResultCode()), result.getResultDesc(), extractResultParameters(result));
+					result.getResultCode(), result.getResultDesc(), extractResultParameters(result));
 		} catch (Exception e) {
 			log.error("Failed to process Reversal result: conversationId={}", result.getConversationID(), e);
 		}
@@ -322,7 +335,7 @@ public class PaymentCallbackController {
 				result.getResultCode(), result.getResultDesc());
 
 		try {
-			boolean success = result.getResultCode() == 0;
+			boolean success = "0".equals(result.getResultCode());
 			mpesaDisbursementService.completeMpesaDisbursement(result.getConversationID(), success, result.getResultDesc(),
 					result.getTransactionID());
 		} catch (Exception e) {
