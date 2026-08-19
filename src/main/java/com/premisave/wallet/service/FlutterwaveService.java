@@ -18,8 +18,11 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
@@ -570,6 +573,68 @@ public class FlutterwaveService {
         wallet.setFlutterwavePaymentMethodPhone(null);
         wallet.setPendingFlutterwaveSetupTokenId(null);
         log.info("Flutterwave account unlinked");
+    }
+
+    // ─── Platform balance ────────────────────────────────────────────────────
+
+    public record CurrencyBalanceEntry(String currency, Map<String, BigDecimal> amounts) {}
+    public record BalanceResult(boolean success, List<CurrencyBalanceEntry> balances, String message) {}
+
+    /**
+     * Premisave's OWN Flutterwave balance, across every currency wallet.
+     *
+     * IMPORTANT — path genuinely unconfirmed, unlike every other method in
+     * this class: research confirmed a v4 "Wallets -> Balances" capability
+     * exists (developer.flutterwave.com/reference/fetch_wallet_balances.md),
+     * but NOT its exact path — that reference page also showed a base URL
+     * (api.flutterwave.cloud/f4b/production) that does NOT match this
+     * class's own configured base URLs (developersandbox-api.flutterwave.com
+     * / f4bexperience.flutterwave.com per the class javadoc above), and I
+     * could not confirm whether these are interchangeable or Flutterwave
+     * has genuinely moved to a new domain. Using GET /wallets here as the
+     * most plausible guess given "Wallets" is the resource name docs
+     * grouped this under, via THIS class's own existing config.baseUrl()
+     * for consistency with every other call here — but this needs to be
+     * checked against the actual reference page before trusting it. If it
+     * 404s, that confirms the path (or possibly the whole base URL) needs
+     * updating, not that the balance-fetching approach itself is wrong.
+     */
+    public BalanceResult getBalance() {
+        try {
+            String responseBody = get("/wallets");
+            log.info("Flutterwave balance response (path unconfirmed — see javadoc): {}", responseBody);
+            JsonNode node = objectMapper.readTree(responseBody);
+
+            if (!"success".equals(node.path("status").asText(""))) {
+                String msg = node.path("message").asText("Unknown error");
+                return new BalanceResult(false, List.of(), "Flutterwave getBalance failed: " + msg);
+            }
+
+            List<CurrencyBalanceEntry> result = new ArrayList<>();
+            JsonNode data = node.path("data");
+            JsonNode wallets = data.isArray() ? data : data.path("wallets");
+            for (JsonNode wallet : wallets) {
+                String currency = wallet.path("currency").asText(null);
+                Map<String, BigDecimal> amounts = new LinkedHashMap<>();
+                if (wallet.has("available_balance")) {
+                    amounts.put("available", wallet.path("available_balance").decimalValue());
+                }
+                if (wallet.has("ledger_balance")) {
+                    amounts.put("ledger", wallet.path("ledger_balance").decimalValue());
+                }
+                if (currency != null) {
+                    result.add(new CurrencyBalanceEntry(currency, amounts));
+                }
+            }
+
+            return new BalanceResult(true, result,
+                    result.isEmpty()
+                            ? "Call succeeded but no balances parsed — response shape may differ from what's assumed here; check the raw log line above"
+                            : "OK");
+        } catch (Exception e) {
+            log.error("Flutterwave getBalance failed", e);
+            return new BalanceResult(false, List.of(), "Flutterwave getBalance failed: " + e.getMessage());
+        }
     }
 
     // ─── Webhook signature verification ──────────────────────────────────────

@@ -426,6 +426,51 @@ public class StripeService {
         }
     }
 
+    // ─── Platform balance ────────────────────────────────────────────────────
+
+    public record CurrencyBalanceEntry(String currency, java.util.Map<String, BigDecimal> amounts) {}
+    public record BalanceResult(boolean success, java.util.List<CurrencyBalanceEntry> balances, String message) {}
+
+    /**
+     * GET /v1/balance — Premisave's OWN Stripe balance (not any
+     * customer's), broken down by currency with separate available and
+     * pending figures. Simple, synchronous, real-time — the most
+     * straightforward of the five providers' balance checks; no async
+     * webhook round-trip the way M-Pesa's Account Balance API needs, and
+     * no reporting-lag caveat the way PayPal's does.
+     *
+     * stripeClient.v1().balance() matches the same resource-per-method
+     * convention every other call in this file already follows
+     * (customers(), setupIntents(), paymentIntents(), payouts(),
+     * accounts()) — Balance is a singleton resource in Stripe's API
+     * (exactly one per account), so retrieve() takes no id.
+     */
+    public BalanceResult getBalance() {
+        try {
+            com.stripe.model.Balance balance = stripeClient.v1().balance().retrieve();
+            java.util.Map<String, java.util.Map<String, BigDecimal>> byCurrency = new java.util.LinkedHashMap<>();
+
+            for (var entry : balance.getAvailable()) {
+                byCurrency.computeIfAbsent(entry.getCurrency().toUpperCase(), k -> new java.util.LinkedHashMap<>())
+                        .put("available", BigDecimal.valueOf(entry.getAmount()).divide(BigDecimal.valueOf(100)));
+            }
+            for (var entry : balance.getPending()) {
+                byCurrency.computeIfAbsent(entry.getCurrency().toUpperCase(), k -> new java.util.LinkedHashMap<>())
+                        .put("pending", BigDecimal.valueOf(entry.getAmount()).divide(BigDecimal.valueOf(100)));
+            }
+
+            java.util.List<CurrencyBalanceEntry> result = byCurrency.entrySet().stream()
+                    .map(e -> new CurrencyBalanceEntry(e.getKey(), e.getValue()))
+                    .toList();
+
+            log.info("Stripe balance retrieved: {} currencies", result.size());
+            return new BalanceResult(true, result, "OK");
+        } catch (StripeException e) {
+            log.error("Stripe getBalance failed", e);
+            return new BalanceResult(false, java.util.List.of(), "Stripe getBalance failed: " + e.getMessage());
+        }
+    }
+
     // ─── Webhook signature verification ──────────────────────────────────────
     // Used for BOTH the platform webhook (/payments/stripe/webhook) and the
     // Connect webhook (/payments/stripe/connect/webhook) — verification

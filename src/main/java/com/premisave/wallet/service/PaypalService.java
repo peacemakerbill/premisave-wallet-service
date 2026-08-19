@@ -12,8 +12,10 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -541,6 +543,80 @@ public class PaypalService {
             }
         } catch (Exception e) {
             throw new RuntimeException("PayPal payout failed: " + e.getMessage(), e);
+        }
+    }
+
+    // ─── Platform balance ────────────────────────────────────────────────────
+
+    public record CurrencyBalanceEntry(String currency, Map<String, BigDecimal> amounts) {}
+    public record BalanceResult(boolean success, List<CurrencyBalanceEntry> balances, String message) {}
+
+    /**
+     * GET /v1/reporting/balances — Premisave's OWN PayPal balance.
+     * Confirmed real and current directly from PayPal's docs — genuinely
+     * different from every other provider here in two ways:
+     *
+     *  1. NOT real-time. PayPal's own documentation: "It takes a maximum
+     *     of three hours for balances to appear in the list balances
+     *     call." This is a periodically-refreshed reporting figure, not
+     *     a live snapshot the way Stripe's GET /v1/balance is.
+     *  2. Requires the "Transaction Search" permission enabled
+     *     separately on this REST app in the PayPal developer dashboard
+     *     (Apps & Credentials -> this app -> Transaction Search). If
+     *     that was never turned on, this call fails with a permissions
+     *     error — that's an account configuration gap, not a bug here.
+     *     Per PayPal's docs, enabling it can take up to 9 hours to
+     *     actually activate for a fresh access token.
+     *
+     * Response shape confirmed from PayPal's docs: {"balances":
+     * [{"currency", "total_balance", "available_balance",
+     * "withheld_balance"}], "account_id", "as_of_time",
+     * "last_refresh_time"} — three distinct figures per currency, not
+     * the available/pending pair Stripe uses, so all three are surfaced
+     * under their own keys rather than forced into Stripe's shape.
+     */
+    public BalanceResult getBalance() {
+        String token = getAccessToken();
+
+        Request request = new Request.Builder()
+                .url(baseUrl() + "/v1/reporting/balances")
+                .addHeader("Authorization", "Bearer " + token)
+                .get()
+                .build();
+
+        try (Response response = http.newCall(request).execute()) {
+            String responseBody = response.body().string();
+            JsonNode node = objectMapper.readTree(responseBody);
+
+            if (!response.isSuccessful()) {
+                log.warn("PayPal getBalance failed: status={} body={}", response.code(), responseBody);
+                return new BalanceResult(false, List.of(),
+                        "PayPal getBalance failed (" + response.code() + "): " + responseBody);
+            }
+
+            List<CurrencyBalanceEntry> result = new ArrayList<>();
+            for (JsonNode balanceNode : node.path("balances")) {
+                String currency = balanceNode.path("currency").asText(null);
+                Map<String, BigDecimal> amounts = new LinkedHashMap<>();
+                if (balanceNode.has("total_balance")) {
+                    amounts.put("total", new BigDecimal(balanceNode.path("total_balance").path("value").asText("0")));
+                }
+                if (balanceNode.has("available_balance")) {
+                    amounts.put("available", new BigDecimal(balanceNode.path("available_balance").path("value").asText("0")));
+                }
+                if (balanceNode.has("withheld_balance")) {
+                    amounts.put("withheld", new BigDecimal(balanceNode.path("withheld_balance").path("value").asText("0")));
+                }
+                result.add(new CurrencyBalanceEntry(currency, amounts));
+            }
+
+            log.info("PayPal balance retrieved: {} currencies asOfTime={}",
+                    result.size(), node.path("as_of_time").asText(null));
+            return new BalanceResult(true, result,
+                    "OK — data may be up to 3 hours old (PayPal reporting limitation, not a bug here)");
+        } catch (Exception e) {
+            log.error("PayPal getBalance failed", e);
+            return new BalanceResult(false, List.of(), "PayPal getBalance failed: " + e.getMessage());
         }
     }
 

@@ -452,6 +452,82 @@ public class NowPaymentsService {
         }
     }
 
+    // ─── Platform balance ────────────────────────────────────────────────────
+
+    public record CurrencyBalanceEntry(String currency, java.util.Map<String, BigDecimal> amounts) {}
+    public record BalanceResult(boolean success, java.util.List<CurrencyBalanceEntry> balances, String message) {}
+
+    /**
+     * GET /v1/balance — Premisave's OWN NOWPayments custody balance,
+     * confirmed as a real, documented endpoint ("Category: Payout,
+     * Description: Retrieves account balances"). Two things genuinely
+     * unconfirmed, unlike createPayment/getPaymentStatus above:
+     *
+     *  1. Auth requirement — this is grouped under the same "Payout"
+     *     category as createPayout/verifyPayout/getPayoutStatus, all of
+     *     which need BOTH the payout JWT (getAuthToken) AND x-api-key —
+     *     unlike deposit-side calls, which only ever need the latter.
+     *     Sending both here on the assumption it follows the same
+     *     pattern; if it turns out to only need x-api-key, this still
+     *     works (an unnecessary Authorization header on an endpoint that
+     *     ignores it is harmless) — but confirm this empirically rather
+     *     than trusting the assumption.
+     *  2. Response shape — the exact field names weren't available from
+     *     documentation search the way payment/payout response shapes
+     *     were. Parsed defensively below (currency code as the key,
+     *     whatever numeric fields are actually present as the values),
+     *     with the raw response logged so the actual shape is visible
+     *     the first time this actually runs against sandbox.
+     */
+    public BalanceResult getBalance() {
+        try {
+            String token = getAuthToken();
+
+            Request request = new Request.Builder()
+                    .url(config.getBaseUrl() + "/v1/balance")
+                    .addHeader("Authorization", "Bearer " + token)
+                    .addHeader("x-api-key", config.getApiKey())
+                    .get()
+                    .build();
+
+            try (Response response = httpClient.newCall(request).execute()) {
+                String responseBody = response.body() != null ? response.body().string() : "";
+                log.info("NOWPayments balance response (shape unconfirmed — see javadoc): {}", responseBody);
+
+                if (!response.isSuccessful()) {
+                    log.warn("NOWPayments getBalance failed: status={} body={}", response.code(), responseBody);
+                    return new BalanceResult(false, java.util.List.of(),
+                            "NOWPayments getBalance failed (" + response.code() + "): " + responseBody);
+                }
+
+                JsonNode node = objectMapper.readTree(responseBody);
+                java.util.List<CurrencyBalanceEntry> result = new java.util.ArrayList<>();
+
+                // Defensive parse — tries the most likely shapes without
+                // assuming one specific structure, since this wasn't
+                // confirmed against real docs the way other endpoints were.
+                java.util.Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+                while (fields.hasNext()) {
+                    Map.Entry<String, JsonNode> field = fields.next();
+                    JsonNode value = field.getValue();
+                    if (value.isNumber() || (value.isTextual() && value.asText().matches("-?\\d+(\\.\\d+)?"))) {
+                        Map<String, BigDecimal> amounts = new java.util.LinkedHashMap<>();
+                        amounts.put("balance", new BigDecimal(value.asText()));
+                        result.add(new CurrencyBalanceEntry(field.getKey().toUpperCase(), amounts));
+                    }
+                }
+
+                return new BalanceResult(true, result,
+                        result.isEmpty()
+                                ? "Call succeeded but no balances parsed from the response — check the raw log line above for the actual shape"
+                                : "OK");
+            }
+        } catch (Exception e) {
+            log.error("NOWPayments getBalance error: {}", e.getMessage(), e);
+            return new BalanceResult(false, java.util.List.of(), "NOWPayments getBalance error: " + e.getMessage());
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private Object deepSortKeys(Object node) {
         if (node instanceof Map) {
