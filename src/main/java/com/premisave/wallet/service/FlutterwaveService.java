@@ -583,54 +583,56 @@ public class FlutterwaveService {
     /**
      * Premisave's OWN Flutterwave balance, across every currency wallet.
      *
-     * IMPORTANT — path genuinely unconfirmed, unlike every other method in
-     * this class: research confirmed a v4 "Wallets -> Balances" capability
-     * exists (developer.flutterwave.com/reference/fetch_wallet_balances.md),
-     * but NOT its exact path — that reference page also showed a base URL
-     * (api.flutterwave.cloud/f4b/production) that does NOT match this
-     * class's own configured base URLs (developersandbox-api.flutterwave.com
-     * / f4bexperience.flutterwave.com per the class javadoc above), and I
-     * could not confirm whether these are interchangeable or Flutterwave
-     * has genuinely moved to a new domain. Using GET /wallets here as the
-     * most plausible guess given "Wallets" is the resource name docs
-     * grouped this under, via THIS class's own existing config.baseUrl()
-     * for consistency with every other call here — but this needs to be
-     * checked against the actual reference page before trusting it. If it
-     * 404s, that confirms the path (or possibly the whole base URL) needs
-     * updating, not that the balance-fetching approach itself is wrong.
+     * GET /wallets/balances — CONFIRMED against Flutterwave's own official
+     * OpenAPI spec (developer.flutterwave.com/reference/fetch_wallet_balances.md),
+     * not a guess. An earlier version of this method used GET /wallets,
+     * which real testing confirmed returns 404 RESOURCE_NOT_FOUND — this
+     * is the actual documented path.
+     *
+     * Response shape per the spec: {"status", "message", "data": [{"currency",
+     * "available_balance"}]} — data is a FLAT array, not nested under a
+     * "wallets" key, and there is no "ledger_balance" field at all — an
+     * earlier version of this method assumed both incorrectly.
+     *
+     * Error shape (400/401/403, and the 404 seen in real testing follows
+     * the same pattern): {"status":"failed","error":{"type","code","message"}}
+     * — the real message is ALWAYS under error.message, never top-level
+     * message. An earlier version of this method only checked top-level
+     * message, which is why a real "Resource not found" error surfaced
+     * here as a generic "Unknown error" instead.
+     *
+     * The spec's server entry (developersandbox-api.flutterwave.com)
+     * confirms this class's existing base URL configuration was already
+     * correct — only the path itself was wrong.
      */
     public BalanceResult getBalance() {
         try {
-            String responseBody = get("/wallets");
-            log.info("Flutterwave balance response (path unconfirmed — see javadoc): {}", responseBody);
+            String responseBody = get("/wallets/balances");
+            log.info("Flutterwave balance response: {}", responseBody);
             JsonNode node = objectMapper.readTree(responseBody);
 
             if (!"success".equals(node.path("status").asText(""))) {
-                String msg = node.path("message").asText("Unknown error");
+                String msg = node.path("error").path("message").asText(null);
+                if (msg == null || msg.isBlank()) {
+                    msg = node.path("message").asText("Unknown error");
+                }
                 return new BalanceResult(false, List.of(), "Flutterwave getBalance failed: " + msg);
             }
 
             List<CurrencyBalanceEntry> result = new ArrayList<>();
-            JsonNode data = node.path("data");
-            JsonNode wallets = data.isArray() ? data : data.path("wallets");
-            for (JsonNode wallet : wallets) {
+            for (JsonNode wallet : node.path("data")) {
                 String currency = wallet.path("currency").asText(null);
+                if (currency == null) {
+                    continue;
+                }
                 Map<String, BigDecimal> amounts = new LinkedHashMap<>();
                 if (wallet.has("available_balance")) {
                     amounts.put("available", wallet.path("available_balance").decimalValue());
                 }
-                if (wallet.has("ledger_balance")) {
-                    amounts.put("ledger", wallet.path("ledger_balance").decimalValue());
-                }
-                if (currency != null) {
-                    result.add(new CurrencyBalanceEntry(currency, amounts));
-                }
+                result.add(new CurrencyBalanceEntry(currency, amounts));
             }
 
-            return new BalanceResult(true, result,
-                    result.isEmpty()
-                            ? "Call succeeded but no balances parsed — response shape may differ from what's assumed here; check the raw log line above"
-                            : "OK");
+            return new BalanceResult(true, result, "OK");
         } catch (Exception e) {
             log.error("Flutterwave getBalance failed", e);
             return new BalanceResult(false, List.of(), "Flutterwave getBalance failed: " + e.getMessage());
