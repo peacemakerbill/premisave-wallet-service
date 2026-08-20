@@ -1,5 +1,6 @@
 package com.premisave.wallet.service;
 
+import com.premisave.wallet.dto.MpesaAsyncResponse;
 import com.premisave.wallet.dto.ProviderBalanceResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -76,15 +77,14 @@ public class ProviderBalanceService {
      * it — and returns PENDING_ASYNC honestly, rather than pretending a
      * number comes back synchronously the way the other four do.
      *
-     * Deliberately doesn't inspect the returned MpesaAsyncResponse's own
-     * fields (e.g. its conversationId) — that class's real structure
-     * wasn't available when this was written, and guessing at getter
-     * names risked a compile-time mismatch against an unverified class.
-     * The admin can get the actual conversationId from the same place
-     * they already do for every other M-Pesa async operation tonight —
-     * application logs, or by calling the existing
-     * POST /admin/wallet/mpesa/balance/query directly, which already
-     * returns it in its own response.
+     * Reads the returned MpesaAsyncResponse's getOriginatorConversationId/
+     * getConversationId/isSuccess/getMessage — confirmed real getters,
+     * verified directly from MpesaOperationsService's own usage of this
+     * exact class (saveOperation calls all four). An earlier version of
+     * this method discarded the return value entirely rather than guess
+     * at that class's interface without having seen it — now confirmed,
+     * so the admin can see the actual conversationId directly in this
+     * response instead of having to dig through application logs.
      */
     public ProviderBalanceResponse getMpesaBalance(String initiatedBy) {
         ProviderBalanceResponse response = new ProviderBalanceResponse();
@@ -92,13 +92,23 @@ public class ProviderBalanceService {
         response.setFetchedAt(LocalDateTime.now());
         response.setBalances(List.of());
         try {
-            mpesaOperationsService.queryAccountBalance(initiatedBy);
-            response.setStatus("PENDING_ASYNC");
-            response.setMessage("Account Balance query submitted to Safaricom");
-            response.setPollNote("M-Pesa has no synchronous balance check — Safaricom delivers the real "
-                    + "balance asynchronously via webhook. Check application logs for the conversationId this "
-                    + "query was assigned, then poll GET /admin/wallet/mpesa/operations/{conversationId} in "
-                    + "roughly 30-60 seconds once Safaricom's callback has had time to land.");
+            MpesaAsyncResponse submission = mpesaOperationsService.queryAccountBalance(initiatedBy);
+            response.setConversationId(submission.getConversationId());
+            response.setOriginatorConversationId(submission.getOriginatorConversationId());
+
+            if (submission.isSuccess()) {
+                response.setStatus("PENDING_ASYNC");
+                response.setMessage(submission.getMessage() != null
+                        ? submission.getMessage() : "Account Balance query submitted to Safaricom");
+                response.setPollNote("M-Pesa has no synchronous balance check — Safaricom delivers the real "
+                        + "balance asynchronously via webhook. Poll GET /admin/wallet/mpesa/operations/"
+                        + submission.getConversationId() + " in roughly 30-60 seconds once Safaricom's callback "
+                        + "has had time to land.");
+            } else {
+                response.setStatus("ERROR");
+                response.setMessage(submission.getMessage() != null
+                        ? submission.getMessage() : "Safaricom rejected the Account Balance query submission");
+            }
         } catch (Exception e) {
             log.error("M-Pesa balance query submission failed", e);
             response.setStatus("ERROR");

@@ -41,6 +41,17 @@ public class ProviderBalanceResponse {
     /** Set only for status=PENDING_ASYNC (M-Pesa) — how to actually retrieve the result once it arrives. */
     private String pollNote;
 
+    /**
+     * Safaricom's ConversationID for this specific submission (M-Pesa only)
+     * — the exact value to poll GET /admin/wallet/mpesa/operations/{conversationId}
+     * with. Previously only visible in application logs; the admin had no
+     * way to see it directly in this response.
+     */
+    private String conversationId;
+
+    /** Safaricom's OriginatorConversationID for this submission (M-Pesa only) — included alongside conversationId for completeness. */
+    private String originatorConversationId;
+
     private LocalDateTime fetchedAt;
 
     @Data
