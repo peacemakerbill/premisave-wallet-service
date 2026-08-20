@@ -458,34 +458,33 @@ public class NowPaymentsService {
     public record BalanceResult(boolean success, java.util.List<CurrencyBalanceEntry> balances, String message) {}
 
     /**
-     * GET /v1/balance — Premisave's OWN NOWPayments custody balance,
-     * confirmed as a real, documented endpoint ("Category: Payout,
-     * Description: Retrieves account balances"). Two things genuinely
-     * unconfirmed, unlike createPayment/getPaymentStatus above:
+     * GET /v1/balance — Premisave's OWN NOWPayments custody balance.
      *
-     *  1. Auth requirement — this is grouped under the same "Payout"
-     *     category as createPayout/verifyPayout/getPayoutStatus, all of
-     *     which need BOTH the payout JWT (getAuthToken) AND x-api-key —
-     *     unlike deposit-side calls, which only ever need the latter.
-     *     Sending both here on the assumption it follows the same
-     *     pattern; if it turns out to only need x-api-key, this still
-     *     works (an unnecessary Authorization header on an endpoint that
-     *     ignores it is harmless) — but confirm this empirically rather
-     *     than trusting the assumption.
-     *  2. Response shape — the exact field names weren't available from
-     *     documentation search the way payment/payout response shapes
-     *     were. Parsed defensively below (currency code as the key,
-     *     whatever numeric fields are actually present as the values),
-     *     with the raw response logged so the actual shape is visible
-     *     the first time this actually runs against sandbox.
+     * Auth CONFIRMED via NOWPayments' own official onboarding
+     * documentation, not assumed: only x-api-key is sent, no JWT/
+     * Authorization header at all — the same simpler auth tier as the
+     * deposit-side calls (createPayment, getPaymentStatus,
+     * getEstimatedAmount), NOT the payout tier (createPayout,
+     * verifyPayout, getPayoutStatus). An earlier version of this method
+     * assumed the payout tier's auth (both the JWT via getAuthToken() AND
+     * x-api-key) purely because this endpoint is grouped under NOWPayments'
+     * own "Payout" category alongside those — that assumption was wrong,
+     * confirmed by real testing: the JWT auth call itself failed with 403
+     * ACCESS_DENIED (likely because the payout email/password credentials
+     * were never configured, since the payout flow itself was never
+     * tested), which blocked this balance check entirely even though
+     * /v1/balance itself never needed that token in the first place.
+     *
+     * Response shape genuinely still unconfirmed, unlike the auth
+     * mechanism above — parsed defensively below (currency code as the
+     * key, whatever numeric fields are actually present as the values),
+     * with the raw response logged so the actual shape is visible the
+     * first time this actually runs against sandbox.
      */
     public BalanceResult getBalance() {
         try {
-            String token = getAuthToken();
-
             Request request = new Request.Builder()
                     .url(config.getBaseUrl() + "/v1/balance")
-                    .addHeader("Authorization", "Bearer " + token)
                     .addHeader("x-api-key", config.getApiKey())
                     .get()
                     .build();
