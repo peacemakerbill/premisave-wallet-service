@@ -52,6 +52,9 @@ public class ProviderBalanceResponse {
     /** Safaricom's OriginatorConversationID for this submission (M-Pesa only) — included alongside conversationId for completeness. */
     private String originatorConversationId;
 
+    /** Which admin triggered this check — resolved from the caller's own JWT, same pattern as ManualAdjustment.performedBy. */
+    private String checkedBy;
+
     private LocalDateTime fetchedAt;
 
     @Data
