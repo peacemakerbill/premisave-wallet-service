@@ -3,6 +3,7 @@ package com.premisave.wallet.service;
 import com.premisave.wallet.dto.MpesaAsyncResponse;
 import com.premisave.wallet.dto.MpesaReversalRequest;
 import com.premisave.wallet.dto.TransactionStatusRequest;
+import com.premisave.wallet.entity.GatewayBalanceSnapshot;
 import com.premisave.wallet.entity.MpesaOperation;
 import com.premisave.wallet.entity.Transaction;
 import com.premisave.wallet.entity.Wallet;
@@ -22,7 +23,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -37,6 +40,7 @@ public class MpesaOperationsService {
     private final TransactionRepository transactionRepository;
     private final MpesaService mpesaService;
     private final IdempotencyService idempotencyService;
+    private final GatewayBalanceSnapshotService gatewayBalanceSnapshotService;
 
     // ─── Account Balance ─────────────────────────────────────────────────────
 
@@ -139,6 +143,99 @@ public class MpesaOperationsService {
         if (op.getType() == MpesaOperationType.REVERSAL && op.getRelatedTransactionId() != null) {
             applyReversalToWallet(op, resultParameters);
         }
+
+        if (op.getType() == MpesaOperationType.ACCOUNT_BALANCE) {
+            saveRealAccountBalanceSnapshot(op, resultDesc, resultParameters);
+        }
+    }
+
+    /**
+     * Saves the REAL M-Pesa account balance data that arrives here via the
+     * ResultURL webhook — genuinely different from the submission
+     * acknowledgment ProviderBalanceService.getMpesaBalance saves
+     * synchronously (PENDING_ASYNC, no real numbers). This is where the
+     * actual figures Safaricom reports finally get persisted.
+     *
+     * Parses the "AccountBalance" ResultParameter — format confirmed
+     * directly from a real captured sandbox callback plus Safaricom's own
+     * Account Balance API documentation: pipe-delimited fields per
+     * account, ampersand-separated between accounts, e.g. "Working
+     * Account|KES|7.00|7.00|0.00|0.00&Utility Account|KES|2047.99|
+     * 2047.99|0.00|0.00&...".
+     *
+     * Per Safaricom's own docs, the third field (index 2) is confirmed as
+     * the account's available balance. The docs also reference "Uncleared
+     * Funds" and "Reserved Funds" concepts, but the real sample shows
+     * FOUR trailing numeric fields per account, not three, and the exact
+     * field-by-field mapping beyond "available" isn't confirmed — those
+     * are stored under generic sequential keys (value2, value3...) so the
+     * raw data isn't lost, without asserting a specific meaning for each
+     * one that isn't actually confirmed.
+     *
+     * "currency" on each saved entry holds the ACCOUNT NAME (e.g.
+     * "Working Account"), not an ISO currency code — a deliberate
+     * reinterpretation of that field for M-Pesa specifically, since
+     * M-Pesa's own breakdown is genuinely by ACCOUNT (Working/Utility/
+     * Charges Paid/Merchant/Organization Settlement), not by currency the
+     * way the other four providers' balances are. All of them happen to
+     * be KES in practice, so grouping by currency the way Stripe/PayPal/
+     * Flutterwave/NOWPayments do would collapse every M-Pesa account into
+     * a single meaningless KES bucket.
+     */
+    private void saveRealAccountBalanceSnapshot(MpesaOperation op, String resultDesc, Map<String, Object> resultParameters) {
+        if (resultParameters == null) {
+            return;
+        }
+        Object rawBalance = resultParameters.get("AccountBalance");
+        if (rawBalance == null) {
+            log.warn("M-Pesa Account Balance callback succeeded but had no 'AccountBalance' result parameter " +
+                    "— nothing to save, conversationId={}", op.getConversationId());
+            return;
+        }
+
+        List<GatewayBalanceSnapshot.CurrencyBalanceEntry> balances = parseMpesaAccountBalanceString(String.valueOf(rawBalance));
+        gatewayBalanceSnapshotService.save("MPESA", "AVAILABLE", balances, resultDesc,
+                op.getConversationId(), op.getOriginatorConversationId(), op.getInitiatedBy());
+
+        log.info("M-Pesa real account balance saved: conversationId={} accounts={}",
+                op.getConversationId(), balances.size());
+    }
+
+    private List<GatewayBalanceSnapshot.CurrencyBalanceEntry> parseMpesaAccountBalanceString(String raw) {
+        List<GatewayBalanceSnapshot.CurrencyBalanceEntry> entries = new ArrayList<>();
+        if (raw == null || raw.isBlank()) {
+            return entries;
+        }
+
+        for (String accountBlock : raw.split("&")) {
+            String[] fields = accountBlock.split("\\|");
+            if (fields.length < 3) {
+                continue;
+            }
+
+            String accountName = fields[0].trim();
+            String currencyCode = fields[1].trim();
+
+            GatewayBalanceSnapshot.CurrencyBalanceEntry entry = new GatewayBalanceSnapshot.CurrencyBalanceEntry();
+            entry.setCurrency(accountName + " (" + currencyCode + ")");
+
+            Map<String, BigDecimal> amounts = new LinkedHashMap<>();
+            try {
+                amounts.put("available", new BigDecimal(fields[2].trim()));
+            } catch (NumberFormatException e) {
+                log.warn("M-Pesa AccountBalance field not parseable as a number: account={} value={}", accountName, fields[2]);
+            }
+            for (int i = 3; i < fields.length; i++) {
+                try {
+                    amounts.put("value" + (i - 1), new BigDecimal(fields[i].trim()));
+                } catch (NumberFormatException ignored) {
+                    // Not every trailing field is guaranteed numeric or present — skip rather than fail the whole entry.
+                }
+            }
+            entry.setAmounts(amounts);
+            entries.add(entry);
+        }
+        return entries;
     }
 
     private void applyReversalToWallet(MpesaOperation op, Map<String, Object> resultParameters) {

@@ -3,7 +3,6 @@ package com.premisave.wallet.service;
 import com.premisave.wallet.dto.GatewayBalanceSnapshotResponse;
 import com.premisave.wallet.dto.ProviderBalanceResponse;
 import com.premisave.wallet.entity.GatewayBalanceSnapshot;
-import com.premisave.wallet.repository.GatewayBalanceSnapshotRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -12,7 +11,6 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -27,25 +25,22 @@ import java.util.Map;
  * actual work — this class just calls all five and maps results into
  * one consistent response shape.
  *
- * Also persists every check via GatewayBalanceSnapshotRepository — never
- * overwritten, same history-preserving pattern as every entity built
- * tonight. Hooked into ONE place (toResponse, shared by four of the five
- * providers) plus getMpesaBalance, rather than duplicated five times.
+ * Persistence itself lives in GatewayBalanceSnapshotService, not here —
+ * see that class's javadoc for why (avoiding a circular dependency with
+ * MpesaOperationsService, which also needs to save data but can't depend
+ * on this class).
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ProviderBalanceService {
 
-    /** The five known providers — used by getLatestSavedBalances to know what to look for. */
-    private static final List<String> KNOWN_PROVIDERS = List.of("STRIPE", "PAYPAL", "FLUTTERWAVE", "NOWPAYMENTS", "MPESA");
-
     private final StripeService stripeService;
     private final PaypalService paypalService;
     private final FlutterwaveService flutterwaveService;
     private final NowPaymentsService nowPaymentsService;
     private final MpesaOperationsService mpesaOperationsService;
-    private final GatewayBalanceSnapshotRepository gatewayBalanceSnapshotRepository;
+    private final GatewayBalanceSnapshotService gatewayBalanceSnapshotService;
 
     public List<ProviderBalanceResponse> getAllBalances(String checkedBy) {
         return List.of(
@@ -91,15 +86,12 @@ public class ProviderBalanceService {
      * it — and returns PENDING_ASYNC honestly, rather than pretending a
      * number comes back synchronously the way the other four do.
      *
-     * Reads the returned MpesaAsyncResponse's getOriginatorConversationId/
-     * getConversationId/isSuccess/getMessage — confirmed real getters,
-     * verified directly from MpesaOperationsService's own usage of this
-     * exact class (saveOperation calls all four).
-     *
-     * Doesn't route through toResponse (M-Pesa's response shape genuinely
-     * differs — conversationId/originatorConversationId/pollNote only
-     * apply here), so this saves its own snapshot directly rather than
-     * sharing toResponse's save call.
+     * The snapshot saved HERE is only ever the submission acknowledgment
+     * — never real balance numbers. The REAL data, once Safaricom's
+     * webhook actually delivers it, is saved separately by
+     * MpesaOperationsService.saveRealAccountBalanceSnapshot — a
+     * completely different code path, since this method returns long
+     * before that webhook ever arrives.
      */
     public ProviderBalanceResponse getMpesaBalance(String checkedBy) {
         ProviderBalanceResponse response = new ProviderBalanceResponse();
@@ -136,80 +128,29 @@ public class ProviderBalanceService {
 
     // ─── Saved-balance views (from the database, not a live gateway call) ───
 
-    /**
-     * Latest saved snapshot for each of the five providers — the "what do
-     * we currently believe our balance is, and when did we last actually
-     * check" view. A provider never checked yet is simply omitted rather
-     * than returning a placeholder row.
-     */
     public List<GatewayBalanceSnapshotResponse> getLatestSavedBalances() {
-        List<GatewayBalanceSnapshotResponse> result = new ArrayList<>();
-        for (String provider : KNOWN_PROVIDERS) {
-            gatewayBalanceSnapshotRepository.findFirstByProviderOrderByCreatedAtDesc(provider)
-                    .ifPresent(snapshot -> result.add(toSnapshotResponse(snapshot)));
-        }
-        return result;
+        return gatewayBalanceSnapshotService.getLatestSavedBalances();
     }
 
-    /** Full paginated history of every check ever performed for one provider — for trend/reconciliation review, not just "the current number." */
     public Page<GatewayBalanceSnapshotResponse> getSavedBalanceHistory(String provider, Pageable pageable) {
-        return gatewayBalanceSnapshotRepository
-                .findByProviderOrderByCreatedAtDesc(provider.toUpperCase(), pageable)
-                .map(ProviderBalanceService::toSnapshotResponse);
+        return gatewayBalanceSnapshotService.getSavedBalanceHistory(provider, pageable);
     }
 
-    private static GatewayBalanceSnapshotResponse toSnapshotResponse(GatewayBalanceSnapshot snapshot) {
-        GatewayBalanceSnapshotResponse r = new GatewayBalanceSnapshotResponse();
-        r.setProvider(snapshot.getProvider());
-        r.setStatus(snapshot.getStatus());
-        r.setMessage(snapshot.getMessage());
-        r.setConversationId(snapshot.getConversationId());
-        r.setOriginatorConversationId(snapshot.getOriginatorConversationId());
-        r.setCheckedBy(snapshot.getCheckedBy());
-        r.setLastUpdated(snapshot.getCreatedAt());
+    // ─── Helpers ─────────────────────────────────────────────────────────────
 
-        List<ProviderBalanceResponse.CurrencyBalance> balances = snapshot.getBalances() == null
-                ? List.of()
-                : snapshot.getBalances().stream().map(b -> {
-                    ProviderBalanceResponse.CurrencyBalance cb = new ProviderBalanceResponse.CurrencyBalance();
-                    cb.setCurrency(b.getCurrency());
-                    cb.setAmounts(b.getAmounts());
-                    return cb;
-                }).toList();
-        r.setBalances(balances);
-        return r;
-    }
-
-    // ─── Persistence ─────────────────────────────────────────────────────────
-
-    /** Persists every check — never overwritten, same pattern as every other entity built tonight. */
     private void saveSnapshot(ProviderBalanceResponse response) {
-        try {
-            GatewayBalanceSnapshot snapshot = new GatewayBalanceSnapshot();
-            snapshot.setProvider(response.getProvider());
-            snapshot.setStatus(response.getStatus());
-            snapshot.setMessage(response.getMessage());
-            snapshot.setConversationId(response.getConversationId());
-            snapshot.setOriginatorConversationId(response.getOriginatorConversationId());
-            snapshot.setCheckedBy(response.getCheckedBy());
+        List<GatewayBalanceSnapshot.CurrencyBalanceEntry> balances = response.getBalances() == null
+                ? List.of()
+                : response.getBalances().stream().map(b -> {
+                    GatewayBalanceSnapshot.CurrencyBalanceEntry entry = new GatewayBalanceSnapshot.CurrencyBalanceEntry();
+                    entry.setCurrency(b.getCurrency());
+                    entry.setAmounts(b.getAmounts());
+                    return entry;
+                }).toList();
 
-            List<GatewayBalanceSnapshot.CurrencyBalanceEntry> balances = response.getBalances() == null
-                    ? List.of()
-                    : response.getBalances().stream().map(b -> {
-                        GatewayBalanceSnapshot.CurrencyBalanceEntry entry = new GatewayBalanceSnapshot.CurrencyBalanceEntry();
-                        entry.setCurrency(b.getCurrency());
-                        entry.setAmounts(b.getAmounts());
-                        return entry;
-                    }).toList();
-            snapshot.setBalances(balances);
-
-            gatewayBalanceSnapshotRepository.save(snapshot);
-        } catch (Exception e) {
-            // A failed save shouldn't fail the balance check itself — the
-            // live response the caller is waiting on is already built and
-            // correct regardless of whether persistence succeeds.
-            log.error("Failed to save gateway balance snapshot for provider={}", response.getProvider(), e);
-        }
+        gatewayBalanceSnapshotService.save(response.getProvider(), response.getStatus(), balances,
+                response.getMessage(), response.getConversationId(), response.getOriginatorConversationId(),
+                response.getCheckedBy());
     }
 
     private List<ProviderBalanceResponse.CurrencyBalance> mapBalances(
