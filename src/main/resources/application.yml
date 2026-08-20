@@ -188,10 +188,10 @@ mpesa:
       shortcode: ${MPESA_PULL_SHORTCODE}
       # The Safaricom MSISDN tied to this shortcode's KYC — found on the
       # M-PESA portal, NOT something you choose arbitrarily.
-      nominated-number: ${MPESA_PULL_NOMINATED_NUMBER:254722000000}
+      nominated-number: ${MPESA_PULL_NOMINATED_NUMBER}
       callback-url: ${MPESA_PULL_CALLBACK_URL}
       # Default lookback window (days) when a query doesn't specify dates. Max 2 (48h retention).
-      pull-days: ${MPESA_PULL_DAYS:1}
+      pull-days: ${MPESA_PULL_DAYS}
       offset-value: ${MPESA_PULL_OFFSET:0}
 
 # ─── Stripe ───────────────────────────────────────────────────────────────────

@@ -454,6 +454,29 @@ public class MpesaService {
 
     // ─── Pull Transactions (C2B reconciliation) ─────────────────────────────
 
+    /**
+     * Register Pull — one-time setup per shortcode.
+     *
+     * Safaricom's registration response genuinely uses a DIFFERENT key
+     * naming convention from every other M-Pesa API in this file — literal
+     * spaces in the keys ("Response Status", "Response Description"),
+     * confirmed directly from a real captured sandbox response:
+     * {"ResponseRefID":"...","Response Status":"1001","ShortCode":"...",
+     * "Response Description":"Shortcode already Registered!"}.
+     *
+     * A prior version of this method only checked the no-space variant
+     * ("ResponseStatus"/"ResponseDescription", matching every other M-Pesa
+     * API's convention) — those never matched, so success/message were
+     * ALWAYS wrong here (empty status -> success=false; missing
+     * description -> "Unknown"), even on a genuinely successful (or
+     * already-registered) response. ResponseRefID and ShortCode have no
+     * spaces in the real payload, which is why those two fields were
+     * always correct while only message/success were silently broken.
+     *
+     * firstNonBlank/firstNonBlankOrDefault below check both the space and
+     * no-space variants defensively, rather than assuming one is
+     * definitely correct going forward.
+     */
     public PullTransactionResponse registerPullTransactions() {
         MpesaConfig.PullTransactions cfg = config.getPullTransactions();
         String token = getAccessToken();
@@ -469,9 +492,9 @@ public class MpesaService {
             log.info("Pull Transactions registration response: {}", respBody);
             JsonNode node = objectMapper.readTree(respBody);
 
-            String status = node.path("ResponseStatus").asText("");
+            String status = firstNonBlank(node, "ResponseStatus", "Response Status");
             boolean success = "1000".equals(status) || "1001".equals(status);
-            String message = node.path("ResponseDescription").asText("Unknown");
+            String message = firstNonBlankOrDefault(node, "Unknown", "ResponseDescription", "Response Description");
             String refId = node.path("ResponseRefID").asText("");
             String shortCode = node.path("ShortCode").asText("");
 
@@ -505,12 +528,24 @@ public class MpesaService {
         }
     }
 
+    /**
+     * Also checks the space-variant keys ("Response Status"/"Response
+     * Description") alongside the original no-space fallbacks, applying
+     * the same fix as registerPullTransactions above — same API family,
+     * so the same key-naming inconsistency is plausible here too. Unlike
+     * registration, this specific method's exact response shape was NOT
+     * independently confirmed against a real captured Query response at
+     * the time of this fix — only Register's shape was actually captured
+     * and verified. Worth confirming against a real Query response the
+     * next time this runs, rather than assuming this fix definitely
+     * applies here too.
+     */
     public PullTransactionResponse parsePullTransactionsResponse(String respBody) throws Exception {
         JsonNode node = objectMapper.readTree(respBody);
 
-        String responseCode = node.path("ResponseCode").asText(node.path("ResponseStatus").asText(""));
+        String responseCode = firstNonBlank(node, "ResponseCode", "ResponseStatus", "Response Status");
         boolean success = "0".equals(responseCode) || "1000".equals(responseCode);
-        String message = node.path("ResponseMessage").asText(node.path("ResponseDescription").asText("Unknown"));
+        String message = firstNonBlankOrDefault(node, "Unknown", "ResponseMessage", "ResponseDescription", "Response Description");
         String refId = node.path("ResponseRefID").asText("");
 
         List<PullTransactionRecord> records = new ArrayList<>();
@@ -621,5 +656,22 @@ public class MpesaService {
         if (phone.startsWith("0"))    return "254" + phone.substring(1);
         if (phone.startsWith("7") || phone.startsWith("1")) return "254" + phone;
         return phone;
+    }
+
+    /** Returns the first non-blank value found across the given keys, checked in order, or "" if none match. */
+    private String firstNonBlank(JsonNode node, String... keys) {
+        for (String key : keys) {
+            String value = node.path(key).asText("");
+            if (!value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    /** Same as firstNonBlank, but returns defaultValue instead of "" when nothing matches. */
+    private String firstNonBlankOrDefault(JsonNode node, String defaultValue, String... keys) {
+        String value = firstNonBlank(node, keys);
+        return value.isBlank() ? defaultValue : value;
     }
 }
