@@ -65,48 +65,55 @@ public class ReconciliationService {
 
         for (Deposit d : depositRepository.findAll()) {
             if (d.getStatus() == DepositStatus.PENDING) {
-                items.add(toItem("DEPOSIT", d.getId(), d.getUserId(), d.getAmount(), d.getProvider(),
-                        d.getReference(), d.getCreatedAt(), true,
-                        "POST /admin/reconciliation/deposits/{id}/approve or /reject"));
+                items.add(toItem("DEPOSIT", providerLabel(d.getProvider()) + " Deposit", d.getId(), d.getUserId(),
+                        d.getAmount(), d.getProvider(), d.getReference(), d.getCreatedAt(), true,
+                        "APPROVE_REJECT_DEPOSIT",
+                        "This deposit hasn't been confirmed yet. If the payment actually came through, "
+                                + "approve it to credit the customer's wallet. If it didn't, reject it."));
             }
         }
 
         for (Disbursement d : disbursementRepository.findAll()) {
             if (d.getStatus() == DisbursementStatus.PENDING) {
-                items.add(toItem("DISBURSEMENT", d.getId(), d.getUserId(), d.getAmount(), d.getProvider(),
-                        d.getReference(), d.getCreatedAt(), true,
-                        "POST /admin/reconciliation/disbursements/{id}/approve or /reject"));
+                items.add(toItem("DISBURSEMENT", providerLabel(d.getProvider()) + " Payout", d.getId(), d.getUserId(),
+                        d.getAmount(), d.getProvider(), d.getReference(), d.getCreatedAt(), true,
+                        "APPROVE_REJECT_DISBURSEMENT",
+                        "This payout hasn't been confirmed yet. If the money actually went out, approve it. "
+                                + "If it didn't, reject it."));
             }
         }
 
         for (Transfer t : transferRepository.findAll()) {
             if (t.getStatus() == TransferStatus.PENDING) {
-                items.add(toItem("TRANSFER", t.getId(), t.getSenderId(), t.getAmount(), null,
-                        t.getReference(), t.getCreatedAt(), false,
-                        "No safe resolution endpoint exists yet — TransferService.java hasn't been reviewed to "
-                                + "confirm what a safe reject would need to do (e.g. whether the sender was "
-                                + "already debited before this became PENDING)."));
+                items.add(toItem("TRANSFER", "Wallet Transfer", t.getId(), t.getSenderId(), t.getAmount(), null,
+                        t.getReference(), t.getCreatedAt(), false, "NEEDS_MANUAL_REVIEW",
+                        "This transfer needs to be looked at by the support team before it can be resolved here."));
             }
         }
 
         for (Payment p : paymentRepository.findAll()) {
             if (p.getStatus() == PaymentStatus.PENDING) {
-                items.add(toItem("PAYMENT", p.getId(), p.getUserId(), p.getAmount(), null,
-                        p.getReference(), p.getCreatedAt(), false,
-                        "No safe resolution endpoint exists yet — same reasoning as Transfer above."));
+                items.add(toItem("PAYMENT", "Payment", p.getId(), p.getUserId(), p.getAmount(), null,
+                        p.getReference(), p.getCreatedAt(), false, "NEEDS_MANUAL_REVIEW",
+                        "This payment needs to be looked at by the support team before it can be resolved here."));
             }
         }
 
         for (MpesaOperation op : mpesaOperationRepository.findAll()) {
             if (op.getStatus() == DisbursementStatus.PENDING) {
                 boolean isReversal = op.getType() == MpesaOperationType.REVERSAL;
-                items.add(toItem("MPESA_" + op.getType(), op.getId(), null, null, "MPESA",
-                        op.getConversationId(), op.getCreatedAt(), true,
-                        isReversal
-                                ? "POST /admin/reconciliation/mpesa-operations/{id}/approve-reversal or /reject-reversal"
-                                : "POST /admin/reconciliation/mpesa-operations/{id}/close — no wallet-affecting "
-                                        + "outcome for this type (pure query), so this just stops the recurring "
-                                        + "stuck-operation log warning rather than approving/rejecting anything."));
+                String summary = isReversal ? "M-Pesa Refund"
+                        : op.getType() == MpesaOperationType.ACCOUNT_BALANCE ? "M-Pesa Balance Check"
+                        : "M-Pesa Status Check";
+                String actionCode = isReversal ? "APPROVE_REJECT_REVERSAL" : "CLOSE_OPERATION";
+                String message = isReversal
+                        ? "This refund hasn't been confirmed yet. If it actually went through, approve it. "
+                                + "If it didn't, reject it."
+                        : "This was just a check that never got a response back — no money was involved. "
+                                + "You can mark it as resolved to clear it from this list.";
+
+                items.add(toItem("MPESA_" + op.getType(), summary, op.getId(), null, null, "MPESA",
+                        op.getConversationId(), op.getCreatedAt(), true, actionCode, message));
             }
         }
 
@@ -114,11 +121,28 @@ public class ReconciliationService {
         return items;
     }
 
-    private PendingReconciliationItem toItem(String entityType, String id, String userId, BigDecimal amount,
-                                              String provider, String reference, LocalDateTime createdAt,
-                                              boolean resolvableViaApi, String resolutionHint) {
+    /** "MPESA" -> "M-Pesa", "STRIPE" -> "Stripe", etc. — plain provider names for displaySummary, not the raw uppercase enum-style string. */
+    private String providerLabel(String provider) {
+        if (provider == null) {
+            return "";
+        }
+        return switch (provider.toUpperCase()) {
+            case "MPESA" -> "M-Pesa";
+            case "STRIPE" -> "Stripe";
+            case "PAYPAL" -> "PayPal";
+            case "FLUTTERWAVE" -> "Flutterwave";
+            case "NOWPAYMENTS" -> "NOWPayments";
+            default -> provider;
+        };
+    }
+
+    private PendingReconciliationItem toItem(String entityType, String displaySummary, String id, String userId,
+                                              BigDecimal amount, String provider, String reference,
+                                              LocalDateTime createdAt, boolean resolvableViaApi, String actionCode,
+                                              String resolutionMessage) {
         PendingReconciliationItem item = new PendingReconciliationItem();
         item.setEntityType(entityType);
+        item.setDisplaySummary(displaySummary);
         item.setId(id);
         item.setUserId(userId);
         item.setAmount(amount);
@@ -127,7 +151,8 @@ public class ReconciliationService {
         item.setCreatedAt(createdAt);
         item.setMinutesPending(Duration.between(createdAt, LocalDateTime.now()).toMinutes());
         item.setResolvableViaApi(resolvableViaApi);
-        item.setResolutionHint(resolutionHint);
+        item.setActionCode(actionCode);
+        item.setResolutionMessage(resolutionMessage);
         return item;
     }
 }
