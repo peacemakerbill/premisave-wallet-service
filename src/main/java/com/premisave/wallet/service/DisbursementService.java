@@ -76,6 +76,7 @@ public class DisbursementService {
     private final FlutterwaveDisbursementService flutterwaveDisbursementService;
     private final NowPaymentsDisbursementService nowPaymentsDisbursementService;
     private final CommissionService commissionService;
+    private final DisbursementTransactionRecorder disbursementTransactionRecorder;
 
     // ─── User-facing disbursement (phone / PayPal / Stripe / Flutterwave / NOWPayments) ───
 
@@ -415,6 +416,18 @@ public class DisbursementService {
         wallet.setBalance(wallet.getBalance().subtract(debitAmount));
         walletRepository.save(wallet);
 
+        // Negative — a disbursement is always money leaving the wallet,
+        // matching the established sign convention used for every other
+        // debit-effect Transaction row in this codebase (Reversal's own
+        // refund debit, Transfer's debit side) — recorded as negative,
+        // credit-side effects as positive. Not independently confirmed
+        // against a real provider-specific completeXDisbursement method's
+        // own call to this same recorder (none was available when this
+        // was written) — worth checking that one matches this convention
+        // too, rather than assuming this is definitely consistent with it.
+        disbursementTransactionRecorder.record(disbursement.getUserId(), wallet.getId(), debitAmount.negate(),
+                disbursement, disbursement.getReference());
+
         disbursement.setStatus(DisbursementStatus.SUCCESS);
         disbursementRepository.save(disbursement);
 
@@ -488,7 +501,42 @@ public class DisbursementService {
 
     /** Admin-only: every disbursement across every user, paginated — see AdminFinanceController. */
     public Page<DisbursementRecordResponse> getAllDisbursements(Pageable pageable) {
-        return disbursementRepository.findAll(pageable).map(DisbursementService::toRecordResponse);
+        return getAllDisbursements(null, null, null, null, null, pageable);
+    }
+
+    /**
+     * Filtered version — userId/status/provider/date-range all optional.
+     * Same dynamic-Criteria approach as getDisbursementHistory above, but
+     * admin-scoped (no forced userId restriction — starts from an empty
+     * Criteria(), same pattern already proven working in
+     * AdminReportService.getDailyReport) and genuinely paginated (a real
+     * Page<T> with accurate total count via a separate mongoTemplate.count
+     * call, not just this page's own content size) rather than a flat List.
+     * With every filter left null, produces the identical result set the
+     * unfiltered overload above always has.
+     */
+    public Page<DisbursementRecordResponse> getAllDisbursements(String userId, DisbursementStatus status,
+                                                                  String provider, LocalDate fromDate, LocalDate toDate,
+                                                                  Pageable pageable) {
+        Criteria criteria = new Criteria();
+        if (userId != null && !userId.isBlank()) {
+            criteria = criteria.and("userId").is(userId);
+        }
+        if (status != null) {
+            criteria = criteria.and("status").is(status);
+        }
+        if (provider != null && !provider.isBlank()) {
+            criteria = criteria.and("provider").is(provider.toUpperCase());
+        }
+        criteria = DateRangeCriteriaUtil.applyDateRange(criteria, "createdAt", fromDate, toDate);
+
+        long total = mongoTemplate.count(new Query(criteria), Disbursement.class);
+        Query pagedQuery = new Query(criteria).with(pageable);
+        List<DisbursementRecordResponse> content = mongoTemplate.find(pagedQuery, Disbursement.class).stream()
+                .map(DisbursementService::toRecordResponse)
+                .toList();
+
+        return new org.springframework.data.domain.PageImpl<>(content, pageable, total);
     }
 
     private static DisbursementRecordResponse toRecordResponse(Disbursement d) {

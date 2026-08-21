@@ -40,10 +40,11 @@ public class AdminWalletController {
 
     // ==================== WALLET MANAGEMENT ====================
 
+    /** Wrapped in PagedModel explicitly — same PageImpl serialization fix confirmed necessary in AdminFinanceController; this endpoint just never got it applied. */
     @GetMapping("/wallets")
-    public ResponseEntity<ApiResponse<Page<WalletResponse>>> getAllWallets(Pageable pageable) {
-        return ResponseEntity.ok(ApiResponse.success("Wallets retrieved successfully", 
-                adminWalletService.getAllWallets(pageable)));
+    public ResponseEntity<ApiResponse<PagedModel<WalletResponse>>> getAllWallets(Pageable pageable) {
+        PagedModel<WalletResponse> body = new PagedModel<>(adminWalletService.getAllWallets(pageable));
+        return ResponseEntity.ok(ApiResponse.success("Wallets retrieved successfully", body));
     }
 
     @GetMapping("/wallets/search")

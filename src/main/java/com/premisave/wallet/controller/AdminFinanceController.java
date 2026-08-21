@@ -9,6 +9,7 @@ import com.premisave.wallet.dto.DisbursementRecordResponse;
 import com.premisave.wallet.dto.PaymentRecordResponse;
 import com.premisave.wallet.dto.TransferRecordResponse;
 import com.premisave.wallet.entity.CompanyLedgerEntry;
+import com.premisave.wallet.enums.DisbursementStatus;
 import com.premisave.wallet.service.AdminReportService;
 import com.premisave.wallet.service.CommissionService;
 import com.premisave.wallet.service.DepositService;
@@ -130,9 +131,22 @@ public class AdminFinanceController {
         return ResponseEntity.ok(ApiResponse.success("Deposits retrieved", body));
     }
 
+    /**
+     * userId/status/provider/fromDate/toDate all optional — omitting all
+     * of them returns the same full, unfiltered result as before this
+     * filtering was added.
+     * GET /admin/finance/disbursements?status=FAILED&provider=MPESA&fromDate=2026-08-01&toDate=2026-08-21
+     */
     @GetMapping("/disbursements")
-    public ResponseEntity<ApiResponse<PagedModel<DisbursementRecordResponse>>> getAllDisbursements(Pageable pageable) {
-        PagedModel<DisbursementRecordResponse> body = new PagedModel<>(disbursementService.getAllDisbursements(pageable));
+    public ResponseEntity<ApiResponse<PagedModel<DisbursementRecordResponse>>> getAllDisbursements(
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) DisbursementStatus status,
+            @RequestParam(required = false) String provider,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            Pageable pageable) {
+        PagedModel<DisbursementRecordResponse> body = new PagedModel<>(
+                disbursementService.getAllDisbursements(userId, status, provider, fromDate, toDate, pageable));
         return ResponseEntity.ok(ApiResponse.success("Disbursements retrieved", body));
     }
 
