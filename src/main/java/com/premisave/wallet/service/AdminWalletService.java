@@ -242,15 +242,22 @@ public class AdminWalletService {
                 .toList();
     }
 
+    /**
+     * Delegates the actual approve logic to DisbursementService, which owns
+     * DisbursementRepository/WalletRepository and the disbursement domain
+     * — see its adminApproveDisbursement javadoc for the full reasoning
+     * (why this debits the wallet now, why it's PENDING-only). Previously
+     * a stub that logged a message and returned a hardcoded "SUCCESS" for
+     * any ID at all, real or not — never touched the database.
+     */
     @Transactional
-    public DisbursementResponse approveDisbursement(String disbursementId) {
-        log.info("Disbursement {} approved by admin", disbursementId);
-        return new DisbursementResponse(disbursementId, "SUCCESS", "Approved by admin");
+    public DisbursementResponse approveDisbursement(String disbursementId, String approvedBy) {
+        return disbursementService.adminApproveDisbursement(disbursementId, approvedBy);
     }
 
-    public DisbursementResponse rejectDisbursement(String disbursementId, String reason) {
-        log.info("Disbursement {} rejected. Reason: {}", disbursementId, reason);
-        return new DisbursementResponse(disbursementId, "FAILED", "Rejected: " + reason);
+    /** Same delegation as approveDisbursement above — see DisbursementService.adminRejectDisbursement. */
+    public DisbursementResponse rejectDisbursement(String disbursementId, String reason, String rejectedBy) {
+        return disbursementService.adminRejectDisbursement(disbursementId, reason, rejectedBy);
     }
 
     // ==================== B2B ====================

@@ -144,18 +144,28 @@ public class AdminWalletController {
                 adminWalletService.getPendingDisbursements()));
     }
 
+    /**
+     * Now takes Authentication (previously didn't at all, so there was no
+     * way to record which admin resolved a stuck disbursement). Real
+     * logic now lives in DisbursementService.adminApproveDisbursement —
+     * this used to be a stub that logged a message and returned a
+     * hardcoded "SUCCESS" for any ID at all, real or not.
+     */
     @PostMapping("/disbursements/{disbursementId}/approve")
-    public ResponseEntity<ApiResponse<DisbursementResponse>> approveDisbursement(@PathVariable String disbursementId) {
+    public ResponseEntity<ApiResponse<DisbursementResponse>> approveDisbursement(
+            @PathVariable String disbursementId, Authentication auth) {
         return ResponseEntity.ok(ApiResponse.success("Disbursement approved", 
-                adminWalletService.approveDisbursement(disbursementId)));
+                adminWalletService.approveDisbursement(disbursementId, auth.getName())));
     }
 
+    /** Same change as approveDisbursement above. */
     @PostMapping("/disbursements/{disbursementId}/reject")
     public ResponseEntity<ApiResponse<DisbursementResponse>> rejectDisbursement(
             @PathVariable String disbursementId,
-            @RequestParam String reason) {
+            @RequestParam String reason,
+            Authentication auth) {
         return ResponseEntity.ok(ApiResponse.success("Disbursement rejected", 
-                adminWalletService.rejectDisbursement(disbursementId, reason)));
+                adminWalletService.rejectDisbursement(disbursementId, reason, auth.getName())));
     }
 
     // ==================== B2B (BUSINESS TO BUSINESS) ====================

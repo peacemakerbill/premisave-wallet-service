@@ -332,6 +332,87 @@ public class DisbursementService {
         }
     }
 
+    // ─── Admin manual resolution of a stuck disbursement ────────────────────
+    // Both only valid on a PENDING disbursement — approving/rejecting an
+    // already-resolved one (SUCCESS or FAILED) risks either double-debiting
+    // the wallet or incorrectly flipping a genuine outcome, so both reject
+    // outright rather than silently allowing it. IllegalArgumentException
+    // used for the guard, matching the exception type already used
+    // pervasively throughout processDisbursement above for user-facing
+    // validation failures in this same file.
+
+    /**
+     * Manually resolves a disbursement stuck in PENDING as SUCCESS — for
+     * when an admin has independently confirmed via the provider's own
+     * dashboard/portal that the payout genuinely went through, but the
+     * webhook that would normally trigger this automatically never
+     * arrived (a missed callback, not a built-in "awaiting admin sign-off"
+     * step — every provider resolves via webhook with no approval gate in
+     * the normal flow).
+     *
+     * Debits the wallet HERE, for the first time — see
+     * processDisbursement's own javadoc: every provider debits the wallet
+     * ONLY on confirmed callback, never at initiation, so a PENDING
+     * disbursement has not yet touched the wallet at all. Uses
+     * totalDebited (falling back to amount for legacy records missing it),
+     * matching the same debit amount every provider's own automatic
+     * completeXDisbursement method already uses.
+     */
+    @Transactional
+    public DisbursementResponse adminApproveDisbursement(String disbursementId, String approvedBy) {
+        Disbursement disbursement = disbursementRepository.findById(disbursementId)
+                .orElseThrow(() -> new RuntimeException("Disbursement not found: " + disbursementId));
+
+        if (disbursement.getStatus() != DisbursementStatus.PENDING) {
+            throw new IllegalArgumentException(
+                    "Only a PENDING disbursement can be approved — this one is already " + disbursement.getStatus());
+        }
+
+        Wallet wallet = walletRepository.findById(disbursement.getWalletId())
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + disbursement.getWalletId()));
+
+        BigDecimal debitAmount = disbursement.getTotalDebited() != null
+                ? disbursement.getTotalDebited() : disbursement.getAmount();
+        wallet.setBalance(wallet.getBalance().subtract(debitAmount));
+        walletRepository.save(wallet);
+
+        disbursement.setStatus(DisbursementStatus.SUCCESS);
+        disbursementRepository.save(disbursement);
+
+        log.info("Disbursement {} manually approved by admin={} — wallet {} debited {}",
+                disbursementId, approvedBy, wallet.getId(), debitAmount);
+
+        return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
+                "Disbursement manually approved");
+    }
+
+    /**
+     * Manually resolves a disbursement stuck in PENDING as FAILED. No
+     * wallet refund is needed or performed — see
+     * adminApproveDisbursement's javadoc above: a PENDING disbursement
+     * was never debited in the first place, so there's nothing to
+     * reverse.
+     */
+    @Transactional
+    public DisbursementResponse adminRejectDisbursement(String disbursementId, String reason, String rejectedBy) {
+        Disbursement disbursement = disbursementRepository.findById(disbursementId)
+                .orElseThrow(() -> new RuntimeException("Disbursement not found: " + disbursementId));
+
+        if (disbursement.getStatus() != DisbursementStatus.PENDING) {
+            throw new IllegalArgumentException(
+                    "Only a PENDING disbursement can be rejected — this one is already " + disbursement.getStatus());
+        }
+
+        disbursement.setStatus(DisbursementStatus.FAILED);
+        disbursement.setFailureReason("Rejected by admin (" + rejectedBy + "): " + reason);
+        disbursementRepository.save(disbursement);
+
+        log.info("Disbursement {} manually rejected by admin={} reason={}", disbursementId, rejectedBy, reason);
+
+        return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
+                "Disbursement rejected: " + reason);
+    }
+
     // ─── User-facing history ──────────────────────────────────────────────────
 
     /** GET /disbursements/history — every disbursement for this user, across all five providers, newest first. */
