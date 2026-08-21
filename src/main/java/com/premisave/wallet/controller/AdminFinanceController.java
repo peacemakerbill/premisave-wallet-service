@@ -9,6 +9,7 @@ import com.premisave.wallet.dto.DisbursementRecordResponse;
 import com.premisave.wallet.dto.PaymentRecordResponse;
 import com.premisave.wallet.dto.TransferRecordResponse;
 import com.premisave.wallet.entity.CompanyLedgerEntry;
+import com.premisave.wallet.enums.DepositStatus;
 import com.premisave.wallet.enums.DisbursementStatus;
 import com.premisave.wallet.service.AdminReportService;
 import com.premisave.wallet.service.CommissionService;
@@ -125,9 +126,22 @@ public class AdminFinanceController {
         return ResponseEntity.ok(ApiResponse.success("System summary retrieved", summary));
     }
 
+    /**
+     * userId/status/provider/fromDate/toDate all optional — omitting all
+     * of them returns the same full, unfiltered result as before this
+     * filtering was added.
+     * GET /admin/finance/deposits?status=SUCCESS&provider=STRIPE&fromDate=2026-08-01&toDate=2026-08-21
+     */
     @GetMapping("/deposits")
-    public ResponseEntity<ApiResponse<PagedModel<DepositRecordResponse>>> getAllDeposits(Pageable pageable) {
-        PagedModel<DepositRecordResponse> body = new PagedModel<>(depositService.getAllDeposits(pageable));
+    public ResponseEntity<ApiResponse<PagedModel<DepositRecordResponse>>> getAllDeposits(
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) DepositStatus status,
+            @RequestParam(required = false) String provider,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            Pageable pageable) {
+        PagedModel<DepositRecordResponse> body = new PagedModel<>(
+                depositService.getAllDeposits(userId, status, provider, fromDate, toDate, pageable));
         return ResponseEntity.ok(ApiResponse.success("Deposits retrieved", body));
     }
 
@@ -166,10 +180,21 @@ public class AdminFinanceController {
      * The company profit/loss ledger — every commission entry recorded
      * from transfers and gateway disbursements since this system existed,
      * previously visible only via direct MongoDB query.
+     *
+     * userId/type/fromDate/toDate all optional — omitting all of them
+     * returns the same full, unfiltered result as before this filtering
+     * was added.
+     * GET /admin/finance/ledger?type=COMPANY_DISBURSEMENT&fromDate=2026-08-01&toDate=2026-08-21
      */
     @GetMapping("/ledger")
-    public ResponseEntity<ApiResponse<PagedModel<CompanyLedgerEntry>>> getLedger(Pageable pageable) {
-        PagedModel<CompanyLedgerEntry> body = new PagedModel<>(commissionService.getAllLedgerEntries(pageable));
+    public ResponseEntity<ApiResponse<PagedModel<CompanyLedgerEntry>>> getLedger(
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            Pageable pageable) {
+        PagedModel<CompanyLedgerEntry> body = new PagedModel<>(
+                commissionService.getAllLedgerEntries(userId, type, fromDate, toDate, pageable));
         return ResponseEntity.ok(ApiResponse.success("Company ledger retrieved", body));
     }
 }

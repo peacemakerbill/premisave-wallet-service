@@ -5,13 +5,20 @@ import com.premisave.wallet.entity.CompanyLedgerEntry;
 import com.premisave.wallet.entity.Disbursement;
 import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.repository.CompanyLedgerRepository;
+import com.premisave.wallet.util.DateRangeCriteriaUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.util.List;
 
 /**
  * Computes and records commission the company takes as a cut of user
@@ -40,6 +47,7 @@ public class CommissionService {
 
     private final CommissionConfig commissionConfig;
     private final CompanyLedgerRepository companyLedgerRepository;
+    private final MongoTemplate mongoTemplate;
 
     public BigDecimal getInternalTransferRate() {
         return commissionConfig.getInternalTransferRate();
@@ -122,6 +130,36 @@ public class CommissionService {
      * all before this.
      */
     public Page<CompanyLedgerEntry> getAllLedgerEntries(Pageable pageable) {
-        return companyLedgerRepository.findAll(pageable);
+        return getAllLedgerEntries(null, null, null, null, pageable);
+    }
+
+    /**
+     * Filtered version — userId/type/date-range all optional. Same
+     * dynamic-Criteria approach as DepositService/DisbursementService's
+     * own admin filtering: starts from an empty Criteria(), genuinely
+     * paginated with an accurate total count via a separate
+     * mongoTemplate.count call. type is the ledger's primary
+     * categorization dimension (COMMISSION_TRANSFER,
+     * COMMISSION_DISBURSEMENT, COMPANY_DISBURSEMENT, etc.) — the natural
+     * equivalent of "status" on the other admin-filtered endpoints. With
+     * every filter left null, produces the identical result set the
+     * unfiltered overload above always has.
+     */
+    public Page<CompanyLedgerEntry> getAllLedgerEntries(String userId, String type, LocalDate fromDate,
+                                                         LocalDate toDate, Pageable pageable) {
+        Criteria criteria = new Criteria();
+        if (userId != null && !userId.isBlank()) {
+            criteria = criteria.and("userId").is(userId);
+        }
+        if (type != null && !type.isBlank()) {
+            criteria = criteria.and("type").is(type.toUpperCase());
+        }
+        criteria = DateRangeCriteriaUtil.applyDateRange(criteria, "createdAt", fromDate, toDate);
+
+        long total = mongoTemplate.count(new Query(criteria), CompanyLedgerEntry.class);
+        Query pagedQuery = new Query(criteria).with(pageable);
+        List<CompanyLedgerEntry> content = mongoTemplate.find(pagedQuery, CompanyLedgerEntry.class);
+
+        return new PageImpl<>(content, pageable, total);
     }
 }

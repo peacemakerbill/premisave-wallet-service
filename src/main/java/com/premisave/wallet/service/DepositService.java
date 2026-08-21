@@ -8,7 +8,6 @@ import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.enums.DepositStatus;
 import com.premisave.wallet.exception.WalletFrozenException;
 import com.premisave.wallet.exception.WalletNotFoundException;
-import com.premisave.wallet.repository.DepositRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import com.premisave.wallet.util.DateRangeCriteriaUtil;
 import lombok.RequiredArgsConstructor;
@@ -43,7 +42,6 @@ import java.util.UUID;
 public class DepositService {
 
     private final WalletRepository walletRepository;
-    private final DepositRepository depositRepository;
     private final MongoTemplate mongoTemplate;
     private final MpesaDepositService mpesaDepositService;
     private final StripeDepositService stripeDepositService;
@@ -106,7 +104,40 @@ public class DepositService {
 
     /** Admin-only: every deposit across every user, paginated — see AdminFinanceController. */
     public Page<DepositRecordResponse> getAllDeposits(Pageable pageable) {
-        return depositRepository.findAll(pageable).map(DepositService::toRecordResponse);
+        return getAllDeposits(null, null, null, null, null, pageable);
+    }
+
+    /**
+     * Filtered version — userId/status/provider/date-range all optional.
+     * Same dynamic-Criteria approach as DisbursementService's own
+     * getAllDisbursements filtering, mirrored here: starts from an empty
+     * Criteria() (same proven pattern from AdminReportService.
+     * getDailyReport), genuinely paginated with an accurate total count
+     * via a separate mongoTemplate.count call rather than just this
+     * page's own content size. With every filter left null, produces the
+     * identical result set the unfiltered overload above always has.
+     */
+    public Page<DepositRecordResponse> getAllDeposits(String userId, DepositStatus status, String provider,
+                                                       LocalDate fromDate, LocalDate toDate, Pageable pageable) {
+        Criteria criteria = new Criteria();
+        if (userId != null && !userId.isBlank()) {
+            criteria = criteria.and("userId").is(userId);
+        }
+        if (status != null) {
+            criteria = criteria.and("status").is(status);
+        }
+        if (provider != null && !provider.isBlank()) {
+            criteria = criteria.and("provider").is(provider.toUpperCase());
+        }
+        criteria = DateRangeCriteriaUtil.applyDateRange(criteria, "createdAt", fromDate, toDate);
+
+        long total = mongoTemplate.count(new Query(criteria), Deposit.class);
+        Query pagedQuery = new Query(criteria).with(pageable);
+        List<DepositRecordResponse> content = mongoTemplate.find(pagedQuery, Deposit.class).stream()
+                .map(DepositService::toRecordResponse)
+                .toList();
+
+        return new org.springframework.data.domain.PageImpl<>(content, pageable, total);
     }
 
     private static DepositRecordResponse toRecordResponse(Deposit d) {
