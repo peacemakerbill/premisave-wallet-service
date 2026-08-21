@@ -532,13 +532,21 @@ public class MpesaService {
      * Also checks the space-variant keys ("Response Status"/"Response
      * Description") alongside the original no-space fallbacks, applying
      * the same fix as registerPullTransactions above — same API family,
-     * so the same key-naming inconsistency is plausible here too. Unlike
-     * registration, this specific method's exact response shape was NOT
-     * independently confirmed against a real captured Query response at
-     * the time of this fix — only Register's shape was actually captured
-     * and verified. Worth confirming against a real Query response the
-     * next time this runs, rather than assuming this fix definitely
-     * applies here too.
+     * so the same key-naming inconsistency is plausible here too. This
+     * part IS now confirmed against a real captured Query response
+     * (ResponseCode/ResponseMessage matched cleanly there, no space
+     * variant needed for THIS specific response) — success/message now
+     * come through correctly.
+     *
+     * Transaction extraction fixed separately, also from that same real
+     * response: the actual key is "Response", not "Transaction"/
+     * "transactions" (neither ever existed in the real payload, so this
+     * always returned zero records regardless of query success). The
+     * real shape is ALSO a doubly-nested array — "Response":[[tx1, tx2]]
+     * — an outer array containing exactly one inner array of transaction
+     * objects, not a flat array of objects. Handles both that confirmed
+     * shape and a plain flat array defensively, since a nested response
+     * for a query returning more pages/records is unconfirmed.
      */
     public PullTransactionResponse parsePullTransactionsResponse(String respBody) throws Exception {
         JsonNode node = objectMapper.readTree(respBody);
@@ -549,11 +557,21 @@ public class MpesaService {
         String refId = node.path("ResponseRefID").asText("");
 
         List<PullTransactionRecord> records = new ArrayList<>();
-        JsonNode txArray = node.has("Transaction") ? node.path("Transaction") : node.path("transactions");
+        JsonNode txArray = node.path("Response");
         if (txArray.isArray()) {
-            for (JsonNode txNode : txArray) {
-                if (txNode.isObject()) {
-                    records.add(objectMapper.treeToValue(txNode, PullTransactionRecord.class));
+            for (JsonNode entry : txArray) {
+                if (entry.isArray()) {
+                    // Confirmed real shape: Response -> [ [tx1, tx2, ...] ]
+                    for (JsonNode txNode : entry) {
+                        if (txNode.isObject()) {
+                            records.add(objectMapper.treeToValue(txNode, PullTransactionRecord.class));
+                        }
+                    }
+                } else if (entry.isObject()) {
+                    // Defensive fallback in case a differently-shaped
+                    // response (e.g. a different page count) is flat
+                    // instead of nested.
+                    records.add(objectMapper.treeToValue(entry, PullTransactionRecord.class));
                 }
             }
         }

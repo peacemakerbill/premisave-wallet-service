@@ -1,5 +1,6 @@
 package com.premisave.wallet.dto;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
@@ -109,7 +110,29 @@ public class MpesaResultCallbackRequest {
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ResultParameters {
+        /**
+         * @JsonFormat(with = ACCEPT_SINGLE_VALUE_AS_ARRAY) confirmed
+         * necessary from a real captured B2B failure callback
+         * ("The balance is insufficient for the transaction."), where
+         * Safaricom sent ResultParameter as a single bare JSON OBJECT
+         * rather than a one-element array — every other captured
+         * callback tonight with result parameters had multiple entries,
+         * always wrapped in [...]. Without this, Jackson rejected the
+         * whole request with HttpMessageNotReadableException (400)
+         * before PaymentCallbackController's handler ever ran, meaning
+         * this exact real failure ("balance insufficient") was NEVER
+         * actually recorded — the disbursement was left stuck in
+         * PENDING with no failureReason, since the code that would have
+         * marked it FAILED never got to execute at all.
+         *
+         * Scoped to just this one field via @JsonFormat rather than a
+         * global Jackson config change (e.g.
+         * spring.jackson.deserialization.accept-single-value-as-array),
+         * which would have silently changed array-tolerance behavior
+         * for every other JSON deserialization in the whole app.
+         */
         @JsonProperty("ResultParameter")
+        @JsonFormat(with = JsonFormat.Feature.ACCEPT_SINGLE_VALUE_AS_ARRAY)
         private List<ResultParameter> resultParameter;
     }
 
