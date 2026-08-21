@@ -350,16 +350,37 @@ public class DisbursementService {
      * step — every provider resolves via webhook with no approval gate in
      * the normal flow).
      *
-     * Debits the wallet HERE, for the first time — see
-     * processDisbursement's own javadoc: every provider debits the wallet
-     * ONLY on confirmed callback, never at initiation, so a PENDING
-     * disbursement has not yet touched the wallet at all. Uses
-     * totalDebited (falling back to amount for legacy records missing it),
-     * matching the same debit amount every provider's own automatic
-     * completeXDisbursement method already uses.
+     * Branches on whether walletId is present — NOT just a null-safety
+     * guard, but the actual signal for which of two genuinely different
+     * kinds of disbursement this is:
+     *  - walletId present: a real customer withdrawal (B2C, Stripe/
+     *    PayPal/Flutterwave/NOWPayments payouts). Debits that wallet HERE
+     *    for the first time — see processDisbursement's own javadoc:
+     *    every provider debits the wallet ONLY on confirmed callback,
+     *    never at initiation, so a PENDING disbursement hasn't touched
+     *    the wallet at all yet. Uses totalDebited (falling back to
+     *    amount for legacy records), matching what every provider's own
+     *    automatic completeXDisbursement already uses.
+     *  - walletId absent: a company-initiated disbursement (B2B, likely
+     *    B2C Account Top Up too) — money moving directly out of
+     *    Premisave's OWN M-Pesa shortcode, never a customer wallet in the
+     *    first place. Confirmed from a real record: userId was
+     *    "admin@premisave.com", no walletId anywhere. Approving this
+     *    records a NEGATIVE CompanyLedgerEntry (a real loss/expense, per
+     *    that entity's own signed-amount convention) via
+     *    CommissionService.recordCommission — reused for its actual
+     *    generic behavior (build + save a CompanyLedgerEntry) despite the
+     *    method's commission-focused name; CompanyLedgerEntry's own
+     *    javadoc is explicit that it's "deliberately NOT commission-only."
+     *    rate/grossAmount passed null, matching how direct revenue
+     *    entries (no percentage applied) already do the same.
      */
     @Transactional
     public DisbursementResponse adminApproveDisbursement(String disbursementId, String approvedBy) {
+        if (disbursementId == null || disbursementId.isBlank()) {
+            throw new IllegalArgumentException("disbursementId is required");
+        }
+
         Disbursement disbursement = disbursementRepository.findById(disbursementId)
                 .orElseThrow(() -> new RuntimeException("Disbursement not found: " + disbursementId));
 
@@ -368,11 +389,29 @@ public class DisbursementService {
                     "Only a PENDING disbursement can be approved — this one is already " + disbursement.getStatus());
         }
 
+        BigDecimal debitAmount = disbursement.getTotalDebited() != null
+                ? disbursement.getTotalDebited() : disbursement.getAmount();
+
+        if (disbursement.getWalletId() == null || disbursement.getWalletId().isBlank()) {
+            commissionService.recordCommission("COMPANY_DISBURSEMENT", debitAmount.negate(), null, null,
+                    "DISBURSEMENT", disbursement.getId(), disbursement.getReference(), disbursement.getUserId(),
+                    "Company-initiated " + disbursement.getProvider() + " " + disbursement.getChannel()
+                            + " disbursement to " + disbursement.getDestination()
+                            + " — manually approved by admin " + approvedBy);
+
+            disbursement.setStatus(DisbursementStatus.SUCCESS);
+            disbursementRepository.save(disbursement);
+
+            log.info("Company disbursement {} manually approved by admin={} — recorded {} as a company expense "
+                    + "on the ledger (no customer wallet involved)", disbursementId, approvedBy, debitAmount);
+
+            return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(),
+                    "Disbursement manually approved — recorded as a company expense (no customer wallet involved)");
+        }
+
         Wallet wallet = walletRepository.findById(disbursement.getWalletId())
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + disbursement.getWalletId()));
 
-        BigDecimal debitAmount = disbursement.getTotalDebited() != null
-                ? disbursement.getTotalDebited() : disbursement.getAmount();
         wallet.setBalance(wallet.getBalance().subtract(debitAmount));
         walletRepository.save(wallet);
 
@@ -395,6 +434,10 @@ public class DisbursementService {
      */
     @Transactional
     public DisbursementResponse adminRejectDisbursement(String disbursementId, String reason, String rejectedBy) {
+        if (disbursementId == null || disbursementId.isBlank()) {
+            throw new IllegalArgumentException("disbursementId is required");
+        }
+
         Disbursement disbursement = disbursementRepository.findById(disbursementId)
                 .orElseThrow(() -> new RuntimeException("Disbursement not found: " + disbursementId));
 
