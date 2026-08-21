@@ -4,10 +4,15 @@ import com.premisave.wallet.dto.DepositRecordResponse;
 import com.premisave.wallet.dto.DepositRequest;
 import com.premisave.wallet.dto.PaymentResponse;
 import com.premisave.wallet.entity.Deposit;
+import com.premisave.wallet.entity.Transaction;
 import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.enums.DepositStatus;
+import com.premisave.wallet.enums.TransactionStatus;
+import com.premisave.wallet.enums.TransactionType;
 import com.premisave.wallet.exception.WalletFrozenException;
 import com.premisave.wallet.exception.WalletNotFoundException;
+import com.premisave.wallet.repository.DepositRepository;
+import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import com.premisave.wallet.util.DateRangeCriteriaUtil;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +24,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -42,6 +48,8 @@ import java.util.UUID;
 public class DepositService {
 
     private final WalletRepository walletRepository;
+    private final DepositRepository depositRepository;
+    private final TransactionRepository transactionRepository;
     private final MongoTemplate mongoTemplate;
     private final MpesaDepositService mpesaDepositService;
     private final StripeDepositService stripeDepositService;
@@ -138,6 +146,96 @@ public class DepositService {
                 .toList();
 
         return new org.springframework.data.domain.PageImpl<>(content, pageable, total);
+    }
+
+    // ─── Admin manual resolution of a stuck deposit ──────────────────────────
+    // Mirrors DisbursementService.adminApproveDisbursement/
+    // adminRejectDisbursement — the mirror-image scenario: a deposit whose
+    // provider (M-Pesa STK, Stripe PaymentIntent, etc.) actually succeeded,
+    // but whose confirmation webhook never arrived. Genuinely simpler than
+    // Disbursement's version: a Deposit always has a real walletId — money
+    // ALWAYS comes into a customer's wallet specifically, there's no
+    // "company deposit" concept analogous to Disbursement's B2B/B2C-top-up
+    // branch — so no walletId-presence branching is needed here at all.
+
+    /**
+     * Manually resolves a deposit stuck in PENDING as SUCCESS — for when
+     * an admin has independently confirmed via the provider's own
+     * dashboard/portal that the payment genuinely landed, but the webhook
+     * that would normally trigger this automatically never arrived.
+     * Credits the wallet and creates a Transaction row directly here
+     * (inline, not via a shared recorder class) — same effect as
+     * DisbursementTransactionRecorder's own purpose, built inline rather
+     * than guessing at an equivalent Deposit-side recorder's exact method
+     * signature without having seen it.
+     */
+    @Transactional
+    public DepositRecordResponse adminApproveDeposit(String depositId, String approvedBy) {
+        if (depositId == null || depositId.isBlank()) {
+            throw new IllegalArgumentException("depositId is required");
+        }
+
+        Deposit deposit = depositRepository.findById(depositId)
+                .orElseThrow(() -> new RuntimeException("Deposit not found: " + depositId));
+
+        if (deposit.getStatus() != DepositStatus.PENDING) {
+            throw new IllegalArgumentException(
+                    "Only a PENDING deposit can be approved — this one is already " + deposit.getStatus());
+        }
+
+        Wallet wallet = walletRepository.findById(deposit.getWalletId())
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + deposit.getWalletId()));
+
+        wallet.setBalance(wallet.getBalance().add(deposit.getAmount()));
+        walletRepository.save(wallet);
+
+        Transaction tx = new Transaction();
+        tx.setUserId(deposit.getUserId());
+        tx.setWalletId(wallet.getId());
+        tx.setType(TransactionType.DEPOSIT);
+        tx.setStatus(TransactionStatus.COMPLETED);
+        tx.setAmount(deposit.getAmount());
+        tx.setCurrency(deposit.getCurrency());
+        tx.setDescription("Deposit via " + deposit.getProvider() + " — manually approved by admin " + approvedBy);
+        tx.setReference(deposit.getReference());
+        tx.setProviderReference(deposit.getProviderReference());
+        transactionRepository.save(tx);
+
+        deposit.setStatus(DepositStatus.SUCCESS);
+        depositRepository.save(deposit);
+
+        log.info("Deposit {} manually approved by admin={} — wallet {} credited {}",
+                depositId, approvedBy, wallet.getId(), deposit.getAmount());
+
+        return toRecordResponse(deposit);
+    }
+
+    /**
+     * Manually resolves a deposit stuck in PENDING as FAILED. No wallet
+     * impact — nothing was credited yet, same reasoning as
+     * DisbursementService.adminRejectDisbursement.
+     */
+    @Transactional
+    public DepositRecordResponse adminRejectDeposit(String depositId, String reason, String rejectedBy) {
+        if (depositId == null || depositId.isBlank()) {
+            throw new IllegalArgumentException("depositId is required");
+        }
+
+        Deposit deposit = depositRepository.findById(depositId)
+                .orElseThrow(() -> new RuntimeException("Deposit not found: " + depositId));
+
+        if (deposit.getStatus() != DepositStatus.PENDING) {
+            throw new IllegalArgumentException(
+                    "Only a PENDING deposit can be rejected — this one is already " + deposit.getStatus());
+        }
+
+        deposit.setStatus(DepositStatus.FAILED);
+        deposit.setFailureReason("Rejected by admin (" + rejectedBy + "): " + reason);
+        depositRepository.save(deposit);
+
+        log.info("Deposit {} manually rejected by admin={} reason={}", depositId, rejectedBy, reason);
+
+        return toRecordResponse(deposit);
     }
 
     private static DepositRecordResponse toRecordResponse(Deposit d) {

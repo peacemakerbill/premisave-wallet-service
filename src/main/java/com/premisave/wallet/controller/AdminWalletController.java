@@ -12,7 +12,6 @@ import com.premisave.wallet.service.MpesaService;
 import com.premisave.wallet.service.PullTransactionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PagedModel;
 import org.springframework.http.HttpStatus;
@@ -118,8 +117,9 @@ public class AdminWalletController {
 
     // ==================== TRANSACTIONS ====================
 
+    /** Same fix as getAllWallets above. */
     @GetMapping("/transactions")
-    public ResponseEntity<ApiResponse<Page<TransactionResponse>>> getAllTransactions(
+    public ResponseEntity<ApiResponse<PagedModel<TransactionResponse>>> getAllTransactions(
             @RequestParam(required = false) String userId,
             @RequestParam(required = false) TransactionType type,
             @RequestParam(required = false) TransactionStatus status,
@@ -127,8 +127,9 @@ public class AdminWalletController {
             @RequestParam(required = false) LocalDate toDate,
             Pageable pageable) {
         
-        return ResponseEntity.ok(ApiResponse.success("Transactions retrieved", 
-                adminWalletService.getAllTransactions(userId, type, status, fromDate, toDate, pageable)));
+        PagedModel<TransactionResponse> body = new PagedModel<>(
+                adminWalletService.getAllTransactions(userId, type, status, fromDate, toDate, pageable));
+        return ResponseEntity.ok(ApiResponse.success("Transactions retrieved", body));
     }
 
     @GetMapping("/transactions/{transactionId}")
@@ -143,30 +144,6 @@ public class AdminWalletController {
     public ResponseEntity<ApiResponse<List<Disbursement>>> getPendingDisbursements() {
         return ResponseEntity.ok(ApiResponse.success("Pending disbursements retrieved", 
                 adminWalletService.getPendingDisbursements()));
-    }
-
-    /**
-     * Now takes Authentication (previously didn't at all, so there was no
-     * way to record which admin resolved a stuck disbursement). Real
-     * logic now lives in DisbursementService.adminApproveDisbursement —
-     * this used to be a stub that logged a message and returned a
-     * hardcoded "SUCCESS" for any ID at all, real or not.
-     */
-    @PostMapping("/disbursements/{disbursementId}/approve")
-    public ResponseEntity<ApiResponse<DisbursementResponse>> approveDisbursement(
-            @PathVariable String disbursementId, Authentication auth) {
-        return ResponseEntity.ok(ApiResponse.success("Disbursement approved", 
-                adminWalletService.approveDisbursement(disbursementId, auth.getName())));
-    }
-
-    /** Same change as approveDisbursement above. */
-    @PostMapping("/disbursements/{disbursementId}/reject")
-    public ResponseEntity<ApiResponse<DisbursementResponse>> rejectDisbursement(
-            @PathVariable String disbursementId,
-            @RequestParam String reason,
-            Authentication auth) {
-        return ResponseEntity.ok(ApiResponse.success("Disbursement rejected", 
-                adminWalletService.rejectDisbursement(disbursementId, reason, auth.getName())));
     }
 
     // ==================== B2B (BUSINESS TO BUSINESS) ====================

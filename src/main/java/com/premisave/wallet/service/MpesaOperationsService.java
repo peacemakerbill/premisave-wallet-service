@@ -281,6 +281,134 @@ public class MpesaOperationsService {
                 wallet.getId(), amount, original.getId());
     }
 
+    // ─── Admin manual resolution of a stuck Reversal ─────────────────────────
+    // Only REVERSAL genuinely has a wallet-affecting outcome among M-Pesa
+    // operation types — Account Balance and Transaction Status are pure
+    // queries with nothing to approve/reject at all, so no equivalent
+    // methods exist for those, deliberately.
+
+    /**
+     * Manually resolves a stuck Reversal operation as SUCCESS — for when
+     * an admin has independently confirmed via the M-Pesa portal that the
+     * reversal genuinely went through, but the ResultURL callback that
+     * would normally trigger this automatically never arrived. Reuses
+     * applyReversalToWallet directly — the exact same wallet-debit logic
+     * the automatic webhook path already runs — passing null for
+     * resultParameters (there's no real callback payload for a manually
+     * confirmed resolution); applyReversalToWallet already handles a null
+     * resultParameters gracefully, just without a specific M-Pesa
+     * transaction ID recorded on the resulting refund's providerReference.
+     */
+    @Transactional
+    public MpesaOperation adminCompleteReversal(String operationId, String approvedBy) {
+        if (operationId == null || operationId.isBlank()) {
+            throw new IllegalArgumentException("operationId is required");
+        }
+
+        MpesaOperation op = operationRepository.findById(operationId)
+                .orElseThrow(() -> new RuntimeException("M-Pesa operation not found: " + operationId));
+
+        if (op.getType() != MpesaOperationType.REVERSAL) {
+            throw new IllegalArgumentException(
+                    "Only a REVERSAL operation can be manually completed this way — this one is " + op.getType());
+        }
+        if (op.getStatus() != DisbursementStatus.PENDING) {
+            throw new IllegalArgumentException(
+                    "Only a PENDING operation can be manually completed — this one is already " + op.getStatus());
+        }
+
+        op.setStatus(DisbursementStatus.SUCCESS);
+        op.setResultDesc("Manually completed by admin " + approvedBy);
+        operationRepository.save(op);
+
+        if (op.getRelatedTransactionId() != null) {
+            applyReversalToWallet(op, null);
+        }
+
+        log.info("M-Pesa Reversal operation {} manually completed by admin={}", operationId, approvedBy);
+        return op;
+    }
+
+    /**
+     * Manually resolves a stuck Reversal operation as FAILED. No wallet
+     * impact — nothing was debited/credited yet for a PENDING reversal,
+     * same reasoning as every other admin manual-resolution method
+     * tonight.
+     */
+    @Transactional
+    public MpesaOperation adminRejectReversal(String operationId, String reason, String rejectedBy) {
+        if (operationId == null || operationId.isBlank()) {
+            throw new IllegalArgumentException("operationId is required");
+        }
+
+        MpesaOperation op = operationRepository.findById(operationId)
+                .orElseThrow(() -> new RuntimeException("M-Pesa operation not found: " + operationId));
+
+        if (op.getType() != MpesaOperationType.REVERSAL) {
+            throw new IllegalArgumentException(
+                    "Only a REVERSAL operation can be manually rejected this way — this one is " + op.getType());
+        }
+        if (op.getStatus() != DisbursementStatus.PENDING) {
+            throw new IllegalArgumentException(
+                    "Only a PENDING operation can be manually rejected — this one is already " + op.getStatus());
+        }
+
+        op.setStatus(DisbursementStatus.FAILED);
+        op.setResultDesc("Rejected by admin (" + rejectedBy + "): " + reason);
+        operationRepository.save(op);
+
+        log.info("M-Pesa Reversal operation {} manually rejected by admin={} reason={}",
+                operationId, rejectedBy, reason);
+        return op;
+    }
+
+    /**
+     * Manually closes out a stuck non-Reversal operation (Account
+     * Balance, Transaction Status) — these are pure queries with no
+     * wallet-affecting outcome regardless of what actually happened, so
+     * there's no meaningful approve-vs-reject distinction the way there
+     * is for Reversal. This exists purely so an admin who's already
+     * investigated a stuck operation (checked the M-Pesa portal directly,
+     * confirmed there's nothing further to learn) can stop
+     * flagStuckOperations' repeated 15-minute WARNING log spam for it —
+     * that sweeper only re-flags operations still in PENDING, so closing
+     * one here (marked FAILED — DisbursementStatus has no dedicated
+     * "closed" value, and this reads correctly as "never got a real
+     * result") removes it from future sweeps.
+     *
+     * Deliberately rejects REVERSAL here — that type genuinely does
+     * affect a wallet and must go through adminCompleteReversal/
+     * adminRejectReversal instead, not this generic, no-money-movement
+     * close action.
+     */
+    @Transactional
+    public MpesaOperation adminCloseOperation(String operationId, String note, String closedBy) {
+        if (operationId == null || operationId.isBlank()) {
+            throw new IllegalArgumentException("operationId is required");
+        }
+
+        MpesaOperation op = operationRepository.findById(operationId)
+                .orElseThrow(() -> new RuntimeException("M-Pesa operation not found: " + operationId));
+
+        if (op.getType() == MpesaOperationType.REVERSAL) {
+            throw new IllegalArgumentException(
+                    "REVERSAL operations affect a wallet and must be resolved via approve-reversal/reject-reversal, "
+                            + "not this generic close action.");
+        }
+        if (op.getStatus() != DisbursementStatus.PENDING) {
+            throw new IllegalArgumentException(
+                    "Only a PENDING operation can be closed — this one is already " + op.getStatus());
+        }
+
+        op.setStatus(DisbursementStatus.FAILED);
+        op.setResultDesc("Manually closed by admin " + closedBy
+                + (note != null && !note.isBlank() ? ": " + note : " — no result ever received"));
+        operationRepository.save(op);
+
+        log.info("M-Pesa {} operation {} manually closed by admin={}", op.getType(), operationId, closedBy);
+        return op;
+    }
+
     public void markOperationTimedOut(String conversationId) {
         operationRepository.findByConversationId(conversationId).ifPresentOrElse(op ->
                 log.warn("M-Pesa {} operation queue timeout: id={} conversationId={} — awaiting eventual result or manual reconciliation",
