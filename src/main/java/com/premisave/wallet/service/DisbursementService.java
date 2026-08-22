@@ -8,6 +8,7 @@ import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.enums.DisbursementStatus;
 import com.premisave.wallet.exception.InsufficientFundsException;
+import com.premisave.wallet.exception.ResourceNotFoundException;
 import com.premisave.wallet.exception.WalletFrozenException;
 import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.DisbursementRepository;
@@ -383,7 +384,7 @@ public class DisbursementService {
         }
 
         Disbursement disbursement = disbursementRepository.findById(disbursementId)
-                .orElseThrow(() -> new RuntimeException("Disbursement not found: " + disbursementId));
+                .orElseThrow(() -> new ResourceNotFoundException("Disbursement not found: " + disbursementId));
 
         if (disbursement.getStatus() != DisbursementStatus.PENDING) {
             throw new IllegalArgumentException(
@@ -452,7 +453,7 @@ public class DisbursementService {
         }
 
         Disbursement disbursement = disbursementRepository.findById(disbursementId)
-                .orElseThrow(() -> new RuntimeException("Disbursement not found: " + disbursementId));
+                .orElseThrow(() -> new ResourceNotFoundException("Disbursement not found: " + disbursementId));
 
         if (disbursement.getStatus() != DisbursementStatus.PENDING) {
             throw new IllegalArgumentException(

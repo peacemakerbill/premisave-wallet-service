@@ -9,6 +9,7 @@ import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.enums.DepositStatus;
 import com.premisave.wallet.enums.TransactionStatus;
 import com.premisave.wallet.enums.TransactionType;
+import com.premisave.wallet.exception.ResourceNotFoundException;
 import com.premisave.wallet.exception.WalletFrozenException;
 import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.DepositRepository;
@@ -176,7 +177,7 @@ public class DepositService {
         }
 
         Deposit deposit = depositRepository.findById(depositId)
-                .orElseThrow(() -> new RuntimeException("Deposit not found: " + depositId));
+                .orElseThrow(() -> new ResourceNotFoundException("Deposit not found: " + depositId));
 
         if (deposit.getStatus() != DepositStatus.PENDING) {
             throw new IllegalArgumentException(
@@ -222,7 +223,7 @@ public class DepositService {
         }
 
         Deposit deposit = depositRepository.findById(depositId)
-                .orElseThrow(() -> new RuntimeException("Deposit not found: " + depositId));
+                .orElseThrow(() -> new ResourceNotFoundException("Deposit not found: " + depositId));
 
         if (deposit.getStatus() != DepositStatus.PENDING) {
             throw new IllegalArgumentException(

@@ -25,6 +25,20 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ex.getMessage()));
     }
 
+    /**
+     * Generic "id doesn't exist" case, used across the reconciliation
+     * feature (and any future lookup-by-id) — a clean 404 with the real
+     * message instead of falling through to the generic Exception
+     * handler below, which is what produced a raw "An unexpected error
+     * occurred" 500 for what is genuinely just a wrong/made-up id.
+     */
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleResourceNotFound(ResourceNotFoundException ex) {
+        log.warn("Resource not found: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
     @ExceptionHandler(InsufficientFundsException.class)
     public ResponseEntity<ApiResponse<Void>> handleInsufficientFunds(InsufficientFundsException ex) {
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)

@@ -12,6 +12,7 @@ import com.premisave.wallet.enums.DisbursementStatus;
 import com.premisave.wallet.enums.MpesaOperationType;
 import com.premisave.wallet.enums.TransactionStatus;
 import com.premisave.wallet.enums.TransactionType;
+import com.premisave.wallet.exception.ResourceNotFoundException;
 import com.premisave.wallet.repository.MpesaOperationRepository;
 import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
@@ -306,7 +307,7 @@ public class MpesaOperationsService {
         }
 
         MpesaOperation op = operationRepository.findById(operationId)
-                .orElseThrow(() -> new RuntimeException("M-Pesa operation not found: " + operationId));
+                .orElseThrow(() -> new ResourceNotFoundException("M-Pesa operation not found: " + operationId));
 
         if (op.getType() != MpesaOperationType.REVERSAL) {
             throw new IllegalArgumentException(
@@ -342,7 +343,7 @@ public class MpesaOperationsService {
         }
 
         MpesaOperation op = operationRepository.findById(operationId)
-                .orElseThrow(() -> new RuntimeException("M-Pesa operation not found: " + operationId));
+                .orElseThrow(() -> new ResourceNotFoundException("M-Pesa operation not found: " + operationId));
 
         if (op.getType() != MpesaOperationType.REVERSAL) {
             throw new IllegalArgumentException(
@@ -388,7 +389,7 @@ public class MpesaOperationsService {
         }
 
         MpesaOperation op = operationRepository.findById(operationId)
-                .orElseThrow(() -> new RuntimeException("M-Pesa operation not found: " + operationId));
+                .orElseThrow(() -> new ResourceNotFoundException("M-Pesa operation not found: " + operationId));
 
         if (op.getType() == MpesaOperationType.REVERSAL) {
             throw new IllegalArgumentException(
