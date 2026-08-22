@@ -1,6 +1,5 @@
 package com.premisave.wallet.service;
 
-import com.premisave.wallet.dto.B2BExpressCheckoutResponse;
 import com.premisave.wallet.dto.DepositRequest;
 import com.premisave.wallet.dto.MpesaStkPushRequest;
 import com.premisave.wallet.dto.PaymentResponse;
@@ -17,7 +16,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.util.UUID;
 
 /**
  * M-Pesa deposit business logic — STK Push and B2B Express Checkout (USSD
@@ -25,6 +23,12 @@ import java.util.UUID;
  * the former all-providers DepositService — mirrors how MpesaService already
  * sits alone at the API-integration layer; this is the same split applied
  * one layer up, at business logic/orchestration.
+ *
+ * Migrated to the Deposit entity (Stage 3) — same pattern
+ * NowPaymentsDepositService pioneered (Stage 2): a dedicated Deposit
+ * record instead of a generic Transaction row with detail packed into a
+ * free-text description, plus DepositTransactionRecorder creating the
+ * matching Transaction row on confirmation for the unified history feed.
  *
  * Called from DepositService.initiateDeposit (dispatcher) for initiation,
  * and directly from PaymentCallbackController for the STK/Express Checkout
@@ -77,30 +81,6 @@ public class MpesaDepositService {
         return new PaymentResponse(true, result.checkoutRequestId(), message);
     }
 
-    // ─── M-Pesa B2B Express Checkout (USSD Push to Till) ────────────────────
-
-    public PaymentResponse initiateExpressCheckoutDeposit(String userId, DepositRequest request, Wallet wallet) {
-        if (request.getPayerTillNumber() == null || request.getPayerTillNumber().isBlank()) {
-            throw new IllegalArgumentException("payerTillNumber is required for MPESA_TILL deposits");
-        }
-
-        String requestRefId = UUID.randomUUID().toString();
-        String paymentRef = "PREMISAVE-" + userId;
-
-        B2BExpressCheckoutResponse result = mpesaService.initiateExpressCheckout(
-                request.getPayerTillNumber(), request.getAmount(), paymentRef, requestRefId);
-
-        if (!result.isSuccess()) {
-            return new PaymentResponse(false, requestRefId, result.getMessage());
-        }
-
-        savePendingDeposit(userId, wallet.getId(), request.getAmount(), "MPESA_TILL",
-                request.getPayerTillNumber(), requestRefId);
-
-        return new PaymentResponse(true, requestRefId,
-                "USSD push sent to your till. Approve on your phone to complete the deposit.");
-    }
-
     // ─── Callbacks ───────────────────────────────────────────────────────────
 
     @Transactional
@@ -142,45 +122,6 @@ public class MpesaDepositService {
             depositRepository.save(deposit);
             log.warn("STK push failed: checkoutRequestId={} reason={}", checkoutRequestId, resultDesc);
         }, () -> log.warn("STK failure callback for unknown CheckoutRequestID={}: {}", checkoutRequestId, resultDesc));
-    }
-
-    @Transactional
-    public void creditWalletFromExpressCheckout(String requestRefId, BigDecimal amount,
-                                                 String transactionId, String resultDesc, boolean success) {
-        Deposit deposit = depositRepository.findByReference(requestRefId)
-                .orElseThrow(() -> new IllegalStateException(
-                        "No pending deposit found for RequestRefID=" + requestRefId));
-
-        if (deposit.getStatus() == DepositStatus.SUCCESS) {
-            log.warn("Express Checkout callback already processed for RequestRefID={} — skipping duplicate credit",
-                    requestRefId);
-            return;
-        }
-
-        if (!success) {
-            deposit.setStatus(DepositStatus.FAILED);
-            deposit.setFailureReason(resultDesc);
-            depositRepository.save(deposit);
-            log.warn("Express Checkout deposit failed: requestRefId={} reason={}", requestRefId, resultDesc);
-            return;
-        }
-
-        Wallet wallet = walletRepository.findById(deposit.getWalletId())
-                .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + deposit.getWalletId()));
-
-        wallet.setBalance(wallet.getBalance().add(amount));
-        walletRepository.save(wallet);
-
-        deposit.setStatus(DepositStatus.SUCCESS);
-        deposit.setAmount(amount);
-        deposit.setProviderReference(transactionId);
-        depositRepository.save(deposit);
-
-        depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), amount,
-                deposit, deposit.getReference());
-
-        log.info("Wallet credited via B2B Express Checkout: requestRefId={} amount={} receipt={}",
-                requestRefId, amount, transactionId);
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────

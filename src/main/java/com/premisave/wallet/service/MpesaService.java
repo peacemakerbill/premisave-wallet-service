@@ -3,7 +3,6 @@ package com.premisave.wallet.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.premisave.wallet.config.MpesaConfig;
-import com.premisave.wallet.dto.B2BExpressCheckoutResponse;
 import com.premisave.wallet.dto.B2PochiRequest;
 import com.premisave.wallet.dto.MpesaAsyncResponse;
 import com.premisave.wallet.dto.MpesaB2BRequest;
@@ -223,39 +222,6 @@ public class MpesaService {
         } catch (Exception e) {
             log.error("B2B initiation failed", e);
             return new MpesaB2BResponse(false, "B2B initiation failed: " + e.getMessage(), null, null);
-        }
-    }
-
-    // ─── B2B Express Checkout (USSD Push to Till) ───────────────────────────
-
-    public B2BExpressCheckoutResponse initiateExpressCheckout(String payerTillNumber, BigDecimal amount,
-                                                                String paymentRef, String requestRefId) {
-        String token = getAccessToken();
-        MpesaConfig.ExpressCheckout ec = config.getExpressCheckout();
-
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("primaryShortCode", payerTillNumber);
-        body.put("receiverShortCode", ec.getReceiverShortCode());
-        body.put("amount", amount.toPlainString());
-        body.put("paymentRef", paymentRef);
-        body.put("callbackUrl", ec.getCallbackUrl());
-        body.put("partnerName", ec.getPartnerName());
-        body.put("RequestRefID", requestRefId);
-
-        try {
-            String respBody = post(config.baseUrl() + "/v1/ussdpush/get-msisdn", token, body);
-            log.info("B2B Express Checkout response: {}", respBody);
-            JsonNode node = objectMapper.readTree(respBody);
-
-            String code = node.path("code").asText("");
-            String status = node.path("status").asText("Unknown");
-            boolean accepted = "0".equals(code);
-
-            return new B2BExpressCheckoutResponse(accepted, requestRefId, status);
-        } catch (Exception e) {
-            log.error("B2B Express Checkout initiation failed", e);
-            return new B2BExpressCheckoutResponse(false, requestRefId,
-                    "Express Checkout initiation failed: " + e.getMessage());
         }
     }
 

@@ -114,13 +114,6 @@ mpesa:
       validation-url: ${MPESA_C2B_VALIDATION_URL}
       confirmation-url: ${MPESA_C2B_CONFIRMATION_URL}
 
-    # ── B2B Express Checkout (USSD Push to Till) ──
-    # bearer token. See https://developer.safaricom.co.ke/apis/B2BExpressCheckout
-    express-checkout:
-      receiver-shortcode: ${MPESA_EXPRESS_CHECKOUT_RECEIVER_SHORTCODE}
-      partner-name: ${MPESA_EXPRESS_CHECKOUT_PARTNER_NAME:Premisave}
-      callback-url: ${MPESA_EXPRESS_CHECKOUT_CALLBACK_URL}
-
     # ── Transaction Status API ──
     # Secondary reconciliation mechanism for C2B/B2B/B2C/Reversal transactions
     # whose ResultURL callback never arrived. See MpesaOperationsService.

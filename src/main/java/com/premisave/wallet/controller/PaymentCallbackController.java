@@ -3,7 +3,6 @@ package com.premisave.wallet.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.premisave.wallet.dto.ApiResponse;
-import com.premisave.wallet.dto.B2BExpressCheckoutCallbackRequest;
 import com.premisave.wallet.dto.FlutterwaveWebhookRequest;
 import com.premisave.wallet.dto.MpesaResultCallbackRequest;
 import com.premisave.wallet.dto.MpesaStkCallbackRequest;
@@ -210,26 +209,6 @@ public class PaymentCallbackController {
 		} catch (Exception e) {
 			log.error("Failed to process M-Pesa B2B timeout: conversationId={}", conversationId, e);
 		}
-		return ResponseEntity.ok().build();
-	}
-
-	// ─── M-Pesa B2B Express Checkout Result ─────────────────────────────────
-
-	@PostMapping("/mpesa/b2b/express-checkout/result")
-	public ResponseEntity<Void> mpesaB2BExpressCheckoutResult(@RequestBody B2BExpressCheckoutCallbackRequest callback) {
-		String requestId = callback.getRequestId();
-		boolean success = "0".equals(callback.getResultCode());
-		log.info("B2B Express Checkout result: requestId={} resultCode={} status={}", requestId,
-				callback.getResultCode(), callback.getStatus());
-
-		try {
-			BigDecimal amount = callback.getAmount() != null ? new BigDecimal(callback.getAmount()) : BigDecimal.ZERO;
-			mpesaDepositService.creditWalletFromExpressCheckout(requestId, amount, callback.getTransactionId(),
-					callback.getResultDesc(), success);
-		} catch (Exception e) {
-			log.error("Failed to process B2B Express Checkout callback: requestId={}", requestId, e);
-		}
-
 		return ResponseEntity.ok().build();
 	}
 

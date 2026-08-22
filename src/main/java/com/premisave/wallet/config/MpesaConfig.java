@@ -27,8 +27,6 @@ public class MpesaConfig {
     private final C2b c2b = new C2b();
     private final B2c b2c = new B2c();
     private final B2b b2b = new B2b();
-    private final ExpressCheckout expressCheckout = new ExpressCheckout();
-    private final AccountTopUp accountTopUp = new AccountTopUp();
     private final TransactionStatus transactionStatus = new TransactionStatus();
     private final AccountBalance accountBalance = new AccountBalance();
     private final Reversal reversal = new Reversal();
@@ -77,9 +75,6 @@ public class MpesaConfig {
      * BusinessTransferFromUtilityToMMF, MerchantToMerchantTransfer,
      * MerchantTransferFromMerchantToWorking, MerchantServicesMMFAccountTransfer,
      * AgencyFloatAdvance.
-     * ("BusinessPayToBulk" is a separate concern — see AccountTopUp below;
-     * despite living on the same endpoint, Safaricom treats it as a distinct
-     * product: B2C Account Top Up, not a generic B2B payment.)
      */
     @Data
     public static class B2b {
@@ -94,42 +89,6 @@ public class MpesaConfig {
 
         private java.math.BigDecimal minAmount = new java.math.BigDecimal("10");
         private java.math.BigDecimal maxAmount = new java.math.BigDecimal("150000");
-    }
-
-    /**
-     * B2B Express Checkout (USSD Push to Till) — prompts a merchant
-     * (identified by their own till number) to pay one of our shortcodes
-     * directly from their till via a USSD PIN prompt, instead of STK Push.
-     * See https://developer.safaricom.co.ke/apis/B2BExpressCheckout
-     *
-     * No initiator/security credential needed here — auth happens at the
-     * Daraja/Apigee layer via the normal OAuth bearer token (see
-     * MpesaService.getAccessToken()).
-     */
-    @Data
-    public static class ExpressCheckout {
-        /** Our paybill/shortcode receiving the funds — the API's "receiverShortCode". */
-        private String receiverShortCode;
-        /** Our organization's friendly name, shown to the paying merchant in the USSD prompt. */
-        private String partnerName;
-        private String callbackUrl;
-    }
-
-    /**
-     * B2C Account Top Up — loads funds from Premisave's working/MMF account
-     * into a B2C shortcode's utility account, so disbursements (B2C payouts)
-     * don't run dry. Uses CommandID "BusinessPayToBulk" — despite the name,
-     * this is NOT a bulk-payment operation, it's the official top-up mechanism.
-     * See https://developer.safaricom.co.ke/apis/B2CAccountTopUp
-     */
-    @Data
-    public static class AccountTopUp {
-        private String initiatorName;
-        private String initiatorPassword;
-        /** The funding shortcode — money moves FROM here (our working/MMF account). */
-        private String partyA;
-        private String queueTimeoutUrl;
-        private String resultUrl;
     }
 
     /**
@@ -233,7 +192,7 @@ public class MpesaConfig {
      * "B2B Hakikisha" (Query Org Info) — returns an organization's registered
      * name and tariff/charge profile for a given shortcode/till, so a B2B
      * payment's recipient can be confirmed before money moves. Synchronous
-     * (no ResultURL/QueueTimeOutURL — response comes back immediately) and
+     * (no ResultURL/QueueTimeoutURL — response comes back immediately) and
      * needs no initiator/SecurityCredential, just the OAuth bearer token.
      *
      * Unlike the rest of this config, there's no per-environment sub-block:
@@ -246,6 +205,6 @@ public class MpesaConfig {
         return baseUrl() + "/sfcverify/v1/query/info";
     }
 
-    // TODO: registration of PullTransactions is a one-time step per shortcode —
+    // Registration of PullTransactions is a one-time step per shortcode —
     // see MpesaService.registerPullTransactions() / PullTransactionService.
 }
