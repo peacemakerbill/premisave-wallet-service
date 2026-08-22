@@ -4,6 +4,7 @@ import com.premisave.wallet.dto.MpesaAsyncResponse;
 import com.premisave.wallet.dto.MpesaReversalRequest;
 import com.premisave.wallet.dto.TransactionStatusRequest;
 import com.premisave.wallet.entity.GatewayBalanceSnapshot;
+import com.premisave.wallet.exception.ResourceNotFoundException;
 import com.premisave.wallet.entity.MpesaOperation;
 import com.premisave.wallet.entity.Transaction;
 import com.premisave.wallet.entity.Wallet;
@@ -12,7 +13,6 @@ import com.premisave.wallet.enums.DisbursementStatus;
 import com.premisave.wallet.enums.MpesaOperationType;
 import com.premisave.wallet.enums.TransactionStatus;
 import com.premisave.wallet.enums.TransactionType;
-import com.premisave.wallet.exception.ResourceNotFoundException;
 import com.premisave.wallet.repository.MpesaOperationRepository;
 import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
@@ -311,11 +311,11 @@ public class MpesaOperationsService {
 
         if (op.getType() != MpesaOperationType.REVERSAL) {
             throw new IllegalArgumentException(
-                    "Only a REVERSAL operation can be manually completed this way — this one is " + op.getType());
+                    "Only a REVERSAL operation can be manually completed this way — this operation is " + op.getType());
         }
         if (op.getStatus() != DisbursementStatus.PENDING) {
             throw new IllegalArgumentException(
-                    "Only a PENDING operation can be manually completed — this one is already " + op.getStatus());
+                    "Only a PENDING operation can be manually completed — this operation is already " + op.getStatus());
         }
 
         op.setStatus(DisbursementStatus.SUCCESS);
@@ -347,11 +347,11 @@ public class MpesaOperationsService {
 
         if (op.getType() != MpesaOperationType.REVERSAL) {
             throw new IllegalArgumentException(
-                    "Only a REVERSAL operation can be manually rejected this way — this one is " + op.getType());
+                    "Only a REVERSAL operation can be manually rejected this way — this operation is " + op.getType());
         }
         if (op.getStatus() != DisbursementStatus.PENDING) {
             throw new IllegalArgumentException(
-                    "Only a PENDING operation can be manually rejected — this one is already " + op.getStatus());
+                    "Only a PENDING operation can be manually rejected — this operation is already " + op.getStatus());
         }
 
         op.setStatus(DisbursementStatus.FAILED);
@@ -398,7 +398,7 @@ public class MpesaOperationsService {
         }
         if (op.getStatus() != DisbursementStatus.PENDING) {
             throw new IllegalArgumentException(
-                    "Only a PENDING operation can be closed — this one is already " + op.getStatus());
+                    "Only a PENDING operation can be closed — this operation is already " + op.getStatus());
         }
 
         op.setStatus(DisbursementStatus.FAILED);

@@ -181,7 +181,7 @@ public class DepositService {
 
         if (deposit.getStatus() != DepositStatus.PENDING) {
             throw new IllegalArgumentException(
-                    "Only a PENDING deposit can be approved — this one is already " + deposit.getStatus());
+                    "Only a PENDING deposit can be approved — this deposit is already " + deposit.getStatus());
         }
 
         Wallet wallet = walletRepository.findById(deposit.getWalletId())
@@ -227,7 +227,7 @@ public class DepositService {
 
         if (deposit.getStatus() != DepositStatus.PENDING) {
             throw new IllegalArgumentException(
-                    "Only a PENDING deposit can be rejected — this one is already " + deposit.getStatus());
+                    "Only a PENDING deposit can be rejected — this deposit is already " + deposit.getStatus());
         }
 
         deposit.setStatus(DepositStatus.FAILED);

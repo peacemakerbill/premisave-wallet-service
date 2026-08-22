@@ -388,7 +388,7 @@ public class DisbursementService {
 
         if (disbursement.getStatus() != DisbursementStatus.PENDING) {
             throw new IllegalArgumentException(
-                    "Only a PENDING disbursement can be approved — this one is already " + disbursement.getStatus());
+                    "Only a PENDING disbursement can be approved — this disbursement is already " + disbursement.getStatus());
         }
 
         BigDecimal debitAmount = disbursement.getTotalDebited() != null
@@ -457,7 +457,7 @@ public class DisbursementService {
 
         if (disbursement.getStatus() != DisbursementStatus.PENDING) {
             throw new IllegalArgumentException(
-                    "Only a PENDING disbursement can be rejected — this one is already " + disbursement.getStatus());
+                    "Only a PENDING disbursement can be rejected — this disbursement is already " + disbursement.getStatus());
         }
 
         disbursement.setStatus(DisbursementStatus.FAILED);
