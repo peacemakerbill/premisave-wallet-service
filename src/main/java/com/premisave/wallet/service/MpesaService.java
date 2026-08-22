@@ -259,58 +259,6 @@ public class MpesaService {
         }
     }
 
-    // ─── B2C Account Top Up ──────────────────────────────────────────────────
-
-    public MpesaB2BResponse topUpB2CAccount(BigDecimal amount, String receivingShortcode,
-                                              String requester, String accountReference, String remarks) {
-        MpesaConfig.AccountTopUp topUp = config.getAccountTopUp();
-        String token = getAccessToken();
-        String securityCredential = securityCredentialService.encrypt(
-                topUp.getInitiatorPassword(), config.getCertificatePath());
-
-        String targetShortcode = receivingShortcode != null ? receivingShortcode : config.getB2c().getShortcode();
-
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("Initiator", topUp.getInitiatorName());
-        body.put("SecurityCredential", securityCredential);
-        body.put("CommandID", "BusinessPayToBulk");
-        body.put("SenderIdentifierType", "4");
-        body.put("RecieverIdentifierType", "4");
-        body.put("Amount", amount.intValue());
-        body.put("PartyA", topUp.getPartyA());
-        body.put("PartyB", targetShortcode);
-        body.put("AccountReference", accountReference != null ? accountReference : "B2C-TOPUP");
-        if (requester != null && !requester.isBlank()) {
-            body.put("Requester", requester);
-        }
-        body.put("Remarks", remarks != null ? remarks : "B2C account top-up");
-        body.put("QueueTimeOutURL", topUp.getQueueTimeoutUrl());
-        body.put("ResultURL", topUp.getResultUrl());
-
-        try {
-            String respBody = post(config.baseUrl() + "/mpesa/b2b/v1/paymentrequest", token, body);
-            log.info("B2C Account Top Up response: {}", respBody);
-            JsonNode node = objectMapper.readTree(respBody);
-
-            String errorCode = node.path("errorCode").asText(null);
-            if (errorCode != null && !errorCode.isBlank()) {
-                String errorMessage = node.path("errorMessage").asText("Unknown B2C Account Top Up error");
-                log.warn("B2C Account Top Up rejected by Safaricom: errorCode={} errorMessage={}", errorCode, errorMessage);
-                return new MpesaB2BResponse(false, errorCode + ": " + errorMessage, null, null);
-            }
-
-            boolean accepted = "0".equals(node.path("ResponseCode").asText("1"));
-            String conversationId = node.path("ConversationID").asText("");
-            String originatorId   = node.path("OriginatorConversationID").asText("");
-            String message        = node.path("ResponseDescription").asText("Unknown");
-
-            return new MpesaB2BResponse(accepted, message, conversationId, originatorId);
-        } catch (Exception e) {
-            log.error("B2C Account Top Up failed", e);
-            return new MpesaB2BResponse(false, "B2C Account Top Up failed: " + e.getMessage(), null, null);
-        }
-    }
-
     // ─── Account Balance ─────────────────────────────────────────────────────
 
     public MpesaAsyncResponse queryAccountBalance() {

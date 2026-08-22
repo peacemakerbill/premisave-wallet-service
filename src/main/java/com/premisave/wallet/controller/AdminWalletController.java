@@ -163,16 +163,6 @@ public class AdminWalletController {
                 mpesaService.queryOrgInfo(request)));
     }
 
-    // ==================== B2C ACCOUNT TOP UP ====================
-
-    @PostMapping("/b2c/top-up")
-    public ResponseEntity<ApiResponse<DisbursementResponse>> topUpB2CAccount(
-            @Valid @RequestBody B2CTopUpRequest request,
-            Authentication auth) {
-        return ResponseEntity.ok(ApiResponse.success("B2C top-up initiated",
-                adminWalletService.processB2CTopUp(auth.getName(), request)));
-    }
-
     // ==================== B2POCHI (BUSINESS TO POCHI LA BIASHARA) ====================
 
     @PostMapping("/mpesa/b2pochi/pay")

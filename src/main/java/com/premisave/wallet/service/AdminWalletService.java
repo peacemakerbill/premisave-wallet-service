@@ -197,7 +197,7 @@ public class AdminWalletService {
     }
 
     /**
-     * Proper filtered pagination with Spring Data Pageable
+     * FIXED: Proper filtered pagination with Spring Data Pageable
      */
     public Page<TransactionResponse> getAllTransactions(String userId, TransactionType type,
                                                         TransactionStatus status, LocalDate fromDate,
@@ -242,6 +242,14 @@ public class AdminWalletService {
                 .toList();
     }
 
+    /**
+     * approveDisbursement/rejectDisbursement moved to
+     * AdminReconciliationController, calling DisbursementService.
+     * adminApproveDisbursement/adminRejectDisbursement directly —
+     * consolidated alongside Deposit and M-Pesa Reversal's own
+     * reconciliation actions rather than living here separately.
+     */
+
     // ==================== B2B ====================
 
     /**
@@ -250,18 +258,6 @@ public class AdminWalletService {
      */
     public DisbursementResponse processB2BPayment(String initiatedByUserId, MpesaB2BRequest request) {
         return disbursementService.processB2BPayment(initiatedByUserId, request);
-    }
-
-    // ==================== B2C ACCOUNT TOP UP ====================
-
-    /**
-     * Delegates to DisbursementService, which owns the M-Pesa B2C Account
-     * Top Up call (CommandID BusinessPayToBulk), Disbursement record
-     * creation, and async result reconciliation via the existing B2B
-     * result/timeout callbacks.
-     */
-    public DisbursementResponse processB2CTopUp(String initiatedByUserId, B2CTopUpRequest request) {
-        return disbursementService.processB2CTopUp(initiatedByUserId, request);
     }
 
     // ==================== REPORTS ====================

@@ -1,6 +1,5 @@
 package com.premisave.wallet.service;
 
-import com.premisave.wallet.dto.B2CTopUpRequest;
 import com.premisave.wallet.dto.B2PochiRequest;
 import com.premisave.wallet.dto.DisbursementRequest;
 import com.premisave.wallet.dto.DisbursementResponse;
@@ -29,16 +28,17 @@ import java.util.UUID;
 
 /**
  * M-Pesa disbursement logic — split out of DisbursementService, mirroring
- * MpesaDepositService's role on the deposit side. Covers all four M-Pesa
+ * MpesaDepositService's role on the deposit side. Covers three M-Pesa
  * disbursement channels: user-initiated B2C withdrawal (disburseMpesa),
  * user-initiated B2Pochi (processB2PochiPayment), and admin/finance-
- * initiated B2B and B2C top-up (which never touch a customer wallet).
+ * initiated B2B (which never touches a customer wallet). B2C Account Top
+ * Up (processB2CTopUp) removed — was never used, deliberately.
  *
- * All four channels share ONE reconciliation path — completeMpesaDisbursement
+ * All three channels share ONE reconciliation path — completeMpesaDisbursement
  * — since Safaricom's ResultURL callback shape is identical regardless of
  * which channel initiated it; the Disbursement's channel field (B2C,
- * B2C_POCHI, B2B, B2C_TOPUP) is what distinguishes them there, not a
- * separate method per channel.
+ * B2C_POCHI, B2B) is what distinguishes them there, not a separate method
+ * per channel.
  */
 @Slf4j
 @Service
@@ -255,41 +255,8 @@ public class MpesaDisbursementService {
         return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), message);
     }
 
-    // ─── B2C Account Top Up (admin/finance-initiated) ───────────────────────
-    // Never touches a customer wallet (no walletId set).
-
-    @Transactional
-    public DisbursementResponse processB2CTopUp(String initiatedByUserId, B2CTopUpRequest request) {
-        idempotencyService.checkIdempotency(request.getReference());
-        String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
-
-        var result = mpesaService.topUpB2CAccount(request.getAmount(), request.getReceivingShortcode(),
-                request.getRequester(), request.getAccountReference(), request.getRemarks());
-
-        Disbursement disbursement = new Disbursement();
-        disbursement.setUserId(initiatedByUserId);
-        disbursement.setAmount(request.getAmount());
-        disbursement.setCurrency(Currency.KES);
-        disbursement.setDestination(request.getReceivingShortcode() != null
-                ? request.getReceivingShortcode() : "B2C-DEFAULT");
-        disbursement.setProvider("MPESA");
-        disbursement.setChannel("B2C_TOPUP");
-        disbursement.setReference(reference);
-
-        if (result.isSuccess()) {
-            disbursement.setStatus(DisbursementStatus.PENDING);
-            disbursement.setProviderReference(result.getConversationId());
-        } else {
-            disbursement.setStatus(DisbursementStatus.FAILED);
-            disbursement.setFailureReason(result.getMessage());
-        }
-
-        disbursementRepository.save(disbursement);
-        return new DisbursementResponse(disbursement.getId(), disbursement.getStatus().name(), result.getMessage());
-    }
-
     // ─── Reconciliation from Safaricom's ResultURL callback ─────────────────
-    // Shared by all four channels above (B2C, B2C_POCHI, B2B, B2C_TOPUP) —
+    // Shared by all three channels above (B2C, B2C_POCHI, B2B) —
     // Safaricom's callback shape is identical regardless of channel.
 
     @Transactional

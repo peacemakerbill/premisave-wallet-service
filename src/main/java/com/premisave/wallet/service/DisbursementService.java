@@ -302,11 +302,6 @@ public class DisbursementService {
         return mpesaDisbursementService.processB2BPayment(initiatedByUserId, request);
     }
 
-    public DisbursementResponse processB2CTopUp(String initiatedByUserId,
-                                                  com.premisave.wallet.dto.B2CTopUpRequest request) {
-        return mpesaDisbursementService.processB2CTopUp(initiatedByUserId, request);
-    }
-
     // ─── NOWPayments 2FA verification passthrough ────────────────────────────
     // Same reasoning as the passthroughs above — DisbursementController
     // calls this on DisbursementService directly, so kept reachable here

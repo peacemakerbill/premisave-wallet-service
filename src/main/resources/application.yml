@@ -121,15 +121,6 @@ mpesa:
       partner-name: ${MPESA_EXPRESS_CHECKOUT_PARTNER_NAME:Premisave}
       callback-url: ${MPESA_EXPRESS_CHECKOUT_CALLBACK_URL}
 
-    # ── B2C Account Top Up (CommandID BusinessPayToBulk) ──
-    # See https://developer.safaricom.co.ke/apis/B2CAccountTopUp
-    account-top-up:
-      initiator-name: ${MPESA_TOPUP_INITIATOR_NAME}
-      initiator-password: ${MPESA_TOPUP_INITIATOR_PASSWORD}
-      party-a: ${MPESA_TOPUP_PARTY_A}
-      queue-timeout-url: ${MPESA_TOPUP_TIMEOUT_URL}
-      result-url: ${MPESA_TOPUP_RESULT_URL}
-
     # ── Transaction Status API ──
     # Secondary reconciliation mechanism for C2B/B2B/B2C/Reversal transactions
     # whose ResultURL callback never arrived. See MpesaOperationsService.
