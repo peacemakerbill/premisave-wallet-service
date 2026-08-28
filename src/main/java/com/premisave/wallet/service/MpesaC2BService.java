@@ -5,13 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.premisave.wallet.client.AuthServiceClient;
 import com.premisave.wallet.config.MpesaConfig;
 import com.premisave.wallet.dto.MpesaC2BCallbackRequest;
-import com.premisave.wallet.entity.Transaction;
+import com.premisave.wallet.entity.Deposit;
 import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.enums.Currency;
-import com.premisave.wallet.enums.TransactionStatus;
-import com.premisave.wallet.enums.TransactionType;
+import com.premisave.wallet.enums.DepositStatus;
 import com.premisave.wallet.exception.C2BUrlsAlreadyRegisteredException;
 import com.premisave.wallet.exception.WalletNotFoundException;
+import com.premisave.wallet.repository.DepositRepository;
 import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.SocketTimeoutException;
 import java.util.Map;
 import java.util.Optional;
@@ -35,6 +36,10 @@ public class MpesaC2BService {
     private final MpesaService mpesaService;   // reuse getAccessToken() + normalizePhone()
     private final WalletRepository walletRepository;
     private final TransactionRepository transactionRepository;
+    private final DepositRepository depositRepository;
+    private final DepositTransactionRecorder depositTransactionRecorder;
+    private final EmailService emailService;
+    private final ExchangeRateService exchangeRateService;
     private final AuthServiceClient authServiceClient;
 
     /**
@@ -409,12 +414,28 @@ public class MpesaC2BService {
      * Idempotent — skips duplicate TransIDs already in the DB.
      * BillRefNumber is now the wallet's M-Pesa phone number, not email —
      * normalized before lookup, same as validateAccount above.
+     *
+     * C2B has no prior "pending" record the way STK push does — the
+     * customer pays directly from their own M-Pesa menu, with no
+     * initiation step on our side at all — so this confirmation callback
+     * IS the first and only time this transaction is ever known about.
+     * The Deposit record is therefore created directly in SUCCESS state
+     * here, rather than updating an existing PENDING one.
+     *
+     * Previously this method only ever created a generic Transaction row
+     * (never a Deposit), credited the wallet with the raw KES amount
+     * with NO currency conversion at all, and never sent a confirmation
+     * email — this method predated the Deposit-entity migration every
+     * other M-Pesa/Flutterwave deposit path already went through, and
+     * was simply never updated to match. Fixed here to use the same
+     * Deposit + DepositTransactionRecorder + KES->USD conversion + email
+     * pattern as MpesaDepositService.creditWalletFromStkCallback.
      */
     @Transactional
     public void processConfirmation(MpesaC2BCallbackRequest req) {
         String normalizedPhone = mpesaService.normalizePhone(req.getBillRefNumber().trim());
         String transId    = req.getTransID();
-        BigDecimal amount  = new BigDecimal(req.getTransAmount());
+        BigDecimal kesAmount = new BigDecimal(req.getTransAmount());
 
         // Idempotency — skip if we've already processed this M-Pesa transaction
         if (transactionRepository.existsByProviderReference(transId)) {
@@ -426,28 +447,43 @@ public class MpesaC2BService {
                 .orElseThrow(() -> new WalletNotFoundException(
                         "C2B confirmation: no wallet for mpesaPhoneNumber=" + normalizedPhone));
 
-        // Credit the wallet
-        wallet.setBalance(wallet.getBalance().add(amount));
+        // The wallet is USD-denominated; M-Pesa C2B payments are always
+        // KES. Converted here, BEFORE ever touching wallet.balance — same
+        // principle as every other M-Pesa/Flutterwave deposit path in
+        // this codebase. Previously this was added directly with no
+        // conversion at all — a customer paying 1,000 KES would have
+        // added 1,000 straight to a USD balance.
+        BigDecimal rate = exchangeRateService.getRate("KES", "USD");
+        BigDecimal usdAmount = kesAmount.multiply(rate).setScale(2, RoundingMode.HALF_UP);
+
+        wallet.setBalance(wallet.getBalance().add(usdAmount));
         walletRepository.save(wallet);
 
-        // Record the transaction
         String senderName = buildSenderName(req);
-        String description = String.format("M-Pesa C2B deposit from %s (%s)", senderName, req.getMSISDN());
 
-        Transaction tx = new Transaction();
-        tx.setUserId(wallet.getUserId());
-        tx.setWalletId(wallet.getId());
-        tx.setType(TransactionType.DEPOSIT);
-        tx.setStatus(TransactionStatus.COMPLETED);
-        tx.setAmount(amount);
-        tx.setCurrency(Currency.KES);
-        tx.setDescription(description);
-        tx.setProviderReference(transId);     // M-Pesa TransID — also our idempotency key
-        tx.setReference(transId);
-        transactionRepository.save(tx);
+        Deposit deposit = new Deposit();
+        deposit.setUserId(wallet.getUserId());
+        deposit.setWalletId(wallet.getId());
+        deposit.setAmount(usdAmount);
+        deposit.setCurrency(Currency.USD);
+        deposit.setPriceAmount(kesAmount);
+        deposit.setPriceCurrency("kes");
+        deposit.setProvider("MPESA");
+        deposit.setChannel("MPESA_C2B");
+        deposit.setSource(req.getMSISDN());
+        deposit.setStatus(DepositStatus.SUCCESS);
+        deposit.setReference(transId);
+        deposit.setProviderReference(transId);
+        depositRepository.save(deposit);
 
-        log.info("C2B deposit processed: accountNumber={} mpesaPhoneNumber={} amount={} transId={} sender={}",
-                wallet.getAccountNumber(), normalizedPhone, amount, transId, senderName);
+        depositTransactionRecorder.record(wallet.getUserId(), wallet.getId(), usdAmount, deposit, transId);
+
+        emailService.sendDepositConfirmation(wallet.getAccountNumber(), usdAmount.toPlainString(),
+                deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString());
+
+        log.info("C2B deposit processed: accountNumber={} mpesaPhoneNumber={} kesAmount={} usdAmount={} rate={} " +
+                        "transId={} sender={}",
+                wallet.getAccountNumber(), normalizedPhone, kesAmount, usdAmount, rate, transId, senderName);
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
