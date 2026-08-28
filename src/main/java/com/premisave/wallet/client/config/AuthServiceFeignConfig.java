@@ -11,6 +11,16 @@ import org.springframework.context.annotation.Configuration;
  * Injects the X-API-Key header on every outbound request so the
  * auth service's ApiKeyFilter accepts the call.
  *
+ * Reads internal.api-key directly — previously read a separate
+ * auth.service.api-key property (backed by its own AUTH_SERVICE_API_KEY
+ * env var), which has been consolidated away: one shared API key
+ * (INTERNAL_API_KEY) used across every microservice relationship now,
+ * rather than a distinct secret per service-to-service pairing. The
+ * yml's own auth.service block still exists for auth.service.url (a
+ * genuinely different concern — where to send the request, not which
+ * key to send with it), but no longer has its own api-key property at
+ * all.
+ *
  * Wired via the @FeignClient(configuration = ...) attribute —
  * NOT registered as a global @Configuration to avoid applying to
  * other Feign clients if you add more later.
@@ -18,7 +28,7 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class AuthServiceFeignConfig {
 
-    @Value("${auth.service.api-key}")
+    @Value("${internal.api-key}")
     private String apiKey;
 
     @Bean
