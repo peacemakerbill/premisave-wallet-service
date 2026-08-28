@@ -84,7 +84,13 @@ public class WalletService {
         wallet.setUserId(userId);
         wallet.setAccountNumber(email);
         wallet.setBalance(BigDecimal.ZERO);
-        wallet.setCurrency(Currency.KES);
+        // Fixed: this explicit call was overriding Wallet.currency's own
+        // field default (changed to Currency.USD earlier) — a field
+        // default only applies if nothing else sets it afterward, and
+        // this line was doing exactly that on every single wallet
+        // creation, which is why new wallets kept showing KES despite
+        // the entity-level change.
+        wallet.setCurrency(Currency.USD);
         wallet.setFrozen(false);
 
         wallet = walletRepository.save(wallet);
