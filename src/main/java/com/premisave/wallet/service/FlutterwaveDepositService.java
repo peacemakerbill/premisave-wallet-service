@@ -32,15 +32,11 @@ import java.math.RoundingMode;
  * CURRENCY CONVERSION: the wallet is now fixed at USD (see Wallet.currency),
  * so the conversion TARGET changed from KES to USD throughout this file —
  * this used to convert local currency -> KES; it now converts local
- * currency -> USD. getRateToUsd() below tries ExchangeRateService (the
- * Redis/MongoDB-cached layer) first for KES/USD/EUR — the only three
- * values Currency actually has — and falls back to FxRateService's own
- * live call directly for any other local currency (GHS, UGX, etc.), since
- * those genuinely aren't covered by ExchangeRateService's fixed,
- * enum-based pair set. That fallback is less resilient (a live HTTP call
- * inline, no cache, no scheduled refresh) than the cached path, but the
- * alternative would be failing every non-KES/EUR mobile money deposit
- * outright — worth knowing this asymmetry exists rather than hiding it.
+ * currency -> USD via ExchangeRateService (the Redis/MongoDB-cached
+ * layer), which supports any ISO 4217 currency pair Frankfurter itself
+ * covers — not a fixed list — so every local currency (GHS, UGX, KES,
+ * anything else) routes through the same cached, resilient path. See
+ * getRateToUsd() below.
  *
  * Called from DepositService.initiateDeposit (dispatcher) for initiation,
  * and directly from WalletController/PaymentCallbackController for the
@@ -54,7 +50,6 @@ public class FlutterwaveDepositService {
     private final WalletRepository walletRepository;
     private final DepositRepository depositRepository;
     private final FlutterwaveService flutterwaveService;
-    private final FxRateService fxRateService;
     private final ExchangeRateService exchangeRateService;
     private final DepositTransactionRecorder depositTransactionRecorder;
     private final EmailService emailService;
@@ -71,16 +66,16 @@ public class FlutterwaveDepositService {
      * Uganda, etc. — NOT KES, since Kenyan mobile money goes through the
      * direct M-Pesa STK push path instead, see provider=MPESA).
      *
-     * The wallet is fixed at USD, so the live FX rate from the local
-     * currency to USD is used to compute what actually gets credited to
-     * the wallet — see getRateToUsd() below for how KES/USD/EUR route
-     * through the cached ExchangeRateService while any other local
-     * currency falls back to FxRateService's own live call. The rate is
-     * logged for reconciliation against the eventual webhook payout amount.
-     * Stored as Deposit.priceAmount/priceCurrency — same fields
-     * NowPaymentsDepositService populates for its own fiat-pricing case,
-     * reused here since the underlying concept (amount priced in a
-     * non-USD currency, converted once at initiation) is identical.
+     * The wallet is fixed at USD, so the (cached, resilient) FX rate from
+     * the local currency to USD is used to compute what actually gets
+     * credited to the wallet — see getRateToUsd() below, which now routes
+     * ANY local currency through ExchangeRateService rather than a fixed
+     * subset. The rate is logged for reconciliation against the eventual
+     * webhook payout amount. Stored as Deposit.priceAmount/priceCurrency
+     * — same fields NowPaymentsDepositService populates for its own
+     * fiat-pricing case, reused here since the underlying concept (amount
+     * priced in a non-USD currency, converted once at initiation) is
+     * identical.
      *
      * chargeId is stored as Deposit.providerReference immediately — v4
      * only supports verifying a charge by ITS OWN id (GET /charges/{id}),
@@ -270,22 +265,18 @@ public class FlutterwaveDepositService {
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
     /**
-     * KES/EUR route through ExchangeRateService (Redis/MongoDB-cached,
-     * refreshed on a schedule — see that class). Any other local currency
-     * (GHS, UGX, etc. — genuinely possible, Flutterwave covers many
-     * African countries) isn't one of the three Currency enum values that
-     * system covers, so it falls back to FxRateService's own live
-     * Frankfurter call directly — the same uncached path this method
-     * always used before this conversion feature existed, just now
-     * targeting USD instead of KES.
+     * ExchangeRateService now supports ANY ISO 4217 currency pair
+     * Frankfurter itself covers — it saves a genuinely new pair the
+     * first time it's requested rather than being limited to a fixed
+     * list, so the earlier KES/EUR-only special-casing (with a fallback
+     * to FxRateService's live call directly for anything else) is no
+     * longer needed. Every local currency now routes through the same
+     * cached, resilient path.
      */
     private BigDecimal getRateToUsd(String currency) {
         if ("USD".equals(currency)) {
             return BigDecimal.ONE;
         }
-        if ("KES".equals(currency) || "EUR".equals(currency)) {
-            return exchangeRateService.getRate(currency, "USD");
-        }
-        return fxRateService.getRate(currency, "USD");
+        return exchangeRateService.getRate(currency, "USD");
     }
 }

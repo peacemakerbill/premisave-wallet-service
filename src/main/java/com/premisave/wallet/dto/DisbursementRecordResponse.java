@@ -1,6 +1,5 @@
 package com.premisave.wallet.dto;
 
-import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.enums.DisbursementStatus;
 import lombok.Data;
 
@@ -22,7 +21,10 @@ public class DisbursementRecordResponse {
     private BigDecimal amount;
     private BigDecimal totalDebited;
     private BigDecimal commissionRate;
-    private Currency currency;
+
+    /** Plain currency code (e.g. "KES", "USD") — matches Disbursement.currency's own type, not the Currency enum. */
+    private String currency;
+
     private String destination;
     private String provider;
     private String channel;

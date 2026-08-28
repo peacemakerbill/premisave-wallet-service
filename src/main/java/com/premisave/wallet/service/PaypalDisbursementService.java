@@ -99,7 +99,7 @@ public class PaypalDisbursementService {
                 commissionService.recordGatewayCommissionFromDisbursement(d);
 
                 emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
-                        d.getCurrency().name(), d.getDestination(), d.getReference());
+                        d.getCurrency(), d.getDestination(), d.getReference());
             } else {
                 disbursementRepository.save(d);
             }
@@ -117,7 +117,7 @@ public class PaypalDisbursementService {
             if (d.getWalletId() != null) {
                 walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
                         emailService.sendDisbursementFailed(wallet.getAccountNumber(),
-                                d.getAmount().toPlainString(), d.getCurrency().name(), reason));
+                                d.getAmount().toPlainString(), d.getCurrency(), reason));
             }
 
             log.warn("PayPal disbursement failed ({}): id={} payoutBatchId={} reason={}",

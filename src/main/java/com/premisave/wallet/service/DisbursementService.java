@@ -5,7 +5,6 @@ import com.premisave.wallet.dto.DisbursementRecordResponse;
 import com.premisave.wallet.dto.DisbursementResponse;
 import com.premisave.wallet.entity.Disbursement;
 import com.premisave.wallet.entity.Wallet;
-import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.enums.DisbursementStatus;
 import com.premisave.wallet.exception.InsufficientFundsException;
 import com.premisave.wallet.exception.ResourceNotFoundException;
@@ -223,7 +222,12 @@ public class DisbursementService {
         disbursement.setProvider(provider);
         disbursement.setReference(reference);
         disbursement.setStatus(DisbursementStatus.PENDING);
-        disbursement.setCurrency(Currency.KES);
+        // Fixed: this branch ONLY ever reaches STRIPE/PAYPAL/NOWPAYMENTS
+        // (MPESA/FLUTTERWAVE are separate early returns earlier in this
+        // method) — all three are confirmed USD-native, with no
+        // conversion step in their own completeXDisbursement methods, so
+        // "USD" is the real, correct value here, not a hardcoded guess.
+        disbursement.setCurrency("USD");
 
         ProviderResult result = switch (provider) {
             case "STRIPE" -> stripeDisbursementService.disburseStripe(request, destination, reference);

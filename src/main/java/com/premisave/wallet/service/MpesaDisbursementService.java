@@ -10,7 +10,6 @@ import com.premisave.wallet.dto.QueryOrgInfoRequest;
 import com.premisave.wallet.dto.QueryOrgInfoResponse;
 import com.premisave.wallet.entity.Disbursement;
 import com.premisave.wallet.entity.Wallet;
-import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.enums.DisbursementStatus;
 import com.premisave.wallet.exception.InsufficientFundsException;
 import com.premisave.wallet.exception.PhoneNumberUnavailableException;
@@ -95,7 +94,7 @@ public class MpesaDisbursementService {
         disbursement.setChannel("B2C");
         disbursement.setReference(reference);
         disbursement.setStatus(DisbursementStatus.PENDING);
-        disbursement.setCurrency(Currency.KES);
+        disbursement.setCurrency("KES");
 
         MpesaB2CResponse result;
         try {
@@ -171,7 +170,7 @@ public class MpesaDisbursementService {
         disbursement.setAmount(request.getAmount());
         disbursement.setTotalDebited(totalDebit);
         disbursement.setCommissionRate(commissionService.getGatewayRate());
-        disbursement.setCurrency(Currency.KES);
+        disbursement.setCurrency("KES");
         disbursement.setDestination(phoneNumber);
         disbursement.setProvider("MPESA");
         disbursement.setChannel("B2C_POCHI");
@@ -228,7 +227,7 @@ public class MpesaDisbursementService {
                 Disbursement aborted = new Disbursement();
                 aborted.setUserId(initiatedByUserId);
                 aborted.setAmount(request.getAmount());
-                aborted.setCurrency(Currency.KES);
+                aborted.setCurrency("KES");
                 aborted.setDestination(request.getReceiverShortcode());
                 aborted.setProvider("MPESA");
                 aborted.setChannel("B2B");
@@ -252,7 +251,7 @@ public class MpesaDisbursementService {
         Disbursement disbursement = new Disbursement();
         disbursement.setUserId(initiatedByUserId);
         disbursement.setAmount(request.getAmount());
-        disbursement.setCurrency(Currency.KES);
+        disbursement.setCurrency("KES");
         disbursement.setDestination(request.getReceiverShortcode());
         disbursement.setProvider("MPESA");
         disbursement.setChannel("B2B");
@@ -341,7 +340,7 @@ public class MpesaDisbursementService {
                 // the meaningful, externally-verifiable fact for the
                 // customer ("I successfully sent X KES to this phone").
                 emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
-                        d.getCurrency().name(), d.getDestination(), d.getReference());
+                        d.getCurrency(), d.getDestination(), d.getReference());
             } else {
                 disbursementRepository.save(d);
             }
@@ -364,7 +363,7 @@ public class MpesaDisbursementService {
             if (d.getWalletId() != null) {
                 walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
                         emailService.sendDisbursementFailed(wallet.getAccountNumber(),
-                                d.getAmount().toPlainString(), d.getCurrency().name(), resultDesc));
+                                d.getAmount().toPlainString(), d.getCurrency(), resultDesc));
             }
 
             log.warn("M-Pesa {} disbursement failed: id={} conversationId={} reason={}",

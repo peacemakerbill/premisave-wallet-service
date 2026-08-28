@@ -5,7 +5,6 @@ import com.premisave.wallet.dto.DisbursementRequest;
 import com.premisave.wallet.dto.DisbursementResponse;
 import com.premisave.wallet.entity.Disbursement;
 import com.premisave.wallet.entity.Wallet;
-import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.enums.DisbursementStatus;
 import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.DisbursementRepository;
@@ -25,24 +24,16 @@ import java.util.UUID;
  *
  * CURRENCY CONVERSION: same principle as MpesaDisbursementService —
  * disbursement.amount/currency represent the REAL, NATIVE payout Flutterwave
- * actually sent (whatever destinationCurrency was used, defaulting to KES),
- * unchanged from before. The wallet is fixed at USD, so conversion is
- * applied ONLY at the point the wallet is actually debited, inside
- * completeFlutterwaveDisbursement's success branch — via
- * ExchangeRateService, keyed off d.getCurrency() (a typed Currency enum
- * value, always one of KES/USD/EUR, unlike the deposit side's free-text
- * localCurrency string — so no FxRateService fallback is needed here;
- * every possible d.getCurrency() value is already covered by
- * ExchangeRateService's fixed pair set).
- *
- * Worth flagging honestly: disbursement.setCurrency(Currency.KES) below
- * is hardcoded regardless of the actual destinationCurrency the request
- * specifies (which defaults to KES but isn't required to be) — a
- * pre-existing inconsistency in this file that predates this conversion
- * feature and isn't fixed here, since it's a separate concern from
- * currency conversion itself. The wallet-debit conversion below uses
- * d.getCurrency() (whatever was actually persisted) as the best available
- * source of truth, not destinationCurrency directly.
+ * actually sent — destinationCurrency, whatever the request specified
+ * (defaulting to KES). currency is a plain String (matching
+ * Deposit.priceCurrency's own convention), not the Currency enum — a
+ * disbursement's native payout currency can genuinely be anything a
+ * gateway supports, which the fixed three-value enum couldn't represent.
+ * The wallet is fixed at USD, so conversion is applied ONLY at the point
+ * the wallet is actually debited, inside completeFlutterwaveDisbursement's
+ * success branch — via ExchangeRateService, keyed off d.getCurrency(),
+ * which supports any ISO 4217 pair Frankfurter itself covers, not a
+ * fixed list.
  */
 @Slf4j
 @Service
@@ -120,6 +111,14 @@ public class FlutterwaveDisbursementService {
             lastName = parts.length > 1 ? parts[1] : "";
         }
 
+        // destination_currency = what the recipient actually receives in
+        // — computed here, BEFORE disbursement creation, so the real
+        // value can be recorded on it rather than a hardcoded guess.
+        String destinationCurrency = request.getCurrency() != null ? request.getCurrency().toUpperCase() : "KES";
+        // source_currency = the currency your Flutterwave balance actually holds
+        // — see FlutterwaveConfig.Transfer.sourceCurrency javadoc.
+        String sourceCurrency = flutterwaveConfig.getTransfer().getSourceCurrency();
+
         Disbursement disbursement = new Disbursement();
         disbursement.setUserId(userId);
         disbursement.setWalletId(wallet.getId());
@@ -131,13 +130,10 @@ public class FlutterwaveDisbursementService {
         disbursement.setChannel("FLUTTERWAVE_" + transferType);
         disbursement.setReference(reference);
         disbursement.setStatus(DisbursementStatus.PENDING);
-        disbursement.setCurrency(Currency.KES);
-
-        // destination_currency = what the recipient actually receives in.
-        String destinationCurrency = request.getCurrency() != null ? request.getCurrency().toUpperCase() : "KES";
-        // source_currency = the currency your Flutterwave balance actually holds
-        // — see FlutterwaveConfig.Transfer.sourceCurrency javadoc.
-        String sourceCurrency = flutterwaveConfig.getTransfer().getSourceCurrency();
+        // Real fix: previously always "KES" regardless of what
+        // destinationCurrency actually was — now records the real payout
+        // currency, whatever the request specified.
+        disbursement.setCurrency(destinationCurrency);
 
         try {
             FlutterwaveService.TransferResult result;
@@ -216,14 +212,14 @@ public class FlutterwaveDisbursementService {
                 // disbursement created before this field existed.
                 //
                 // d.getCurrency() is whatever was persisted at creation
-                // (hardcoded KES today — see class javadoc) and is
-                // converted to USD here, the ONLY point this disbursement
-                // actually touches the wallet. A typed Currency enum
-                // value, always KES/USD/EUR, so no FxRateService fallback
-                // is needed the way the deposit side's free-text
-                // localCurrency required.
+                // (hardcoded "KES" today — see class javadoc), converted
+                // to USD here, the ONLY point this disbursement actually
+                // touches the wallet. A plain String now (not the
+                // Currency enum) — ExchangeRateService supports any ISO
+                // 4217 pair Frankfurter covers, not a fixed list, so
+                // whatever currency ends up here is handled the same way.
                 BigDecimal debitAmountNative = d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount();
-                String nativeCurrency = d.getCurrency() != null ? d.getCurrency().name() : "KES";
+                String nativeCurrency = d.getCurrency() != null ? d.getCurrency() : "KES";
                 BigDecimal rate = "USD".equals(nativeCurrency)
                         ? BigDecimal.ONE
                         : exchangeRateService.getRate(nativeCurrency, "USD");
@@ -246,7 +242,7 @@ public class FlutterwaveDisbursementService {
                 // not the wallet-side USD debit — the meaningful,
                 // externally-verifiable fact for the customer.
                 emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
-                        d.getCurrency().name(), d.getDestination(), d.getReference());
+                        d.getCurrency(), d.getDestination(), d.getReference());
             } else {
                 disbursementRepository.save(d);
             }
@@ -262,7 +258,7 @@ public class FlutterwaveDisbursementService {
             if (d.getWalletId() != null) {
                 walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
                         emailService.sendDisbursementFailed(wallet.getAccountNumber(),
-                                d.getAmount().toPlainString(), d.getCurrency().name(), statusDesc));
+                                d.getAmount().toPlainString(), d.getCurrency(), statusDesc));
             }
 
             log.warn("Flutterwave disbursement failed: id={} transferId={} reason={}", d.getId(), transferId, statusDesc);

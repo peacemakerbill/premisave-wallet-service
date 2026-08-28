@@ -1,6 +1,5 @@
 package com.premisave.wallet.entity;
 
-import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.enums.DisbursementStatus;
 import lombok.Data;
 import org.springframework.data.annotation.CreatedDate;
@@ -22,7 +21,22 @@ public class Disbursement {
     private String walletId;
 
     private BigDecimal amount;
-    private Currency currency;
+
+    /**
+     * A plain ISO-4217-style code (e.g. "KES", "USD"), NOT the Currency
+     * enum — unlike Wallet/Deposit/Transaction, which stay on the enum
+     * since those represent an internal, always-known value (in
+     * practice, always USD post-conversion). A disbursement's native
+     * payout currency can genuinely be anything a gateway supports
+     * (Flutterwave alone covers many countries/currencies), and the
+     * fixed three-value enum (KES/USD/EUR) can't represent that — this
+     * previously forced incorrect hardcoding (see
+     * FlutterwaveDisbursementService's own history) rather than
+     * accurately recording what was actually paid out. Mirrors
+     * Deposit.priceCurrency, which was already a plain String for the
+     * same underlying reason.
+     */
+    private String currency;
 
     /**
      * What actually gets/got debited from the wallet at confirmation time

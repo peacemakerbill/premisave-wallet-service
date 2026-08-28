@@ -14,6 +14,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * Caching layer IN FRONT OF FxRateService, not a replacement for it.
@@ -25,13 +26,22 @@ import java.util.List;
  * with a real outage turning into a hard failure across every gateway
  * that needs conversion.
  *
- * getRate() below NEVER calls FxRateService directly — it only reads
- * from Redis, then MongoDB. FxRateService is called ONLY from
- * scheduledRefresh(), which runs on its own interval and writes the
- * result into both MongoDB (the durable source of truth) and Redis (the
- * fast read path). If Frankfurter is down, MongoDB and Redis both keep
- * serving the last successfully-fetched rate — genuinely resilient to an
- * FX outage, not just degraded.
+ * SUPPORTS ANY CURRENCY PAIR Frankfurter itself supports — 84 central
+ * banks via its v2 API, per FxRateService's own javadoc — not a fixed,
+ * hand-maintained list. There is deliberately NO hardcoded set of
+ * "supported pairs": getRate() below saves a genuinely new pair the
+ * first time it's ever requested (one unavoidable live fetch for a pair
+ * that's never been seen before), and the scheduled refresh then keeps
+ * refreshing every pair that has EVER been requested/saved. The system
+ * grows organically with actual usage rather than needing a list
+ * expanded by hand every time a new currency comes up — a fixed list,
+ * however large, would still not be "all currencies in the world."
+ *
+ * getRate() NEVER calls FxRateService for a pair that's already been
+ * saved — only scheduledRefresh() and a first-ever request for a brand
+ * new pair do. If Frankfurter is down, MongoDB and Redis both keep
+ * serving the last successfully-fetched rate for every already-known
+ * pair — genuinely resilient to an FX outage, not just degraded.
  */
 @Slf4j
 @Service
@@ -48,25 +58,26 @@ public class ExchangeRateService {
     /** Redis TTL — separate from the refresh interval on purpose: even if a refresh cycle is delayed, cached entries don't expire and silently fall through to a DB read on every single call. */
     private static final Duration CACHE_TTL = Duration.ofMinutes(30);
 
-    /** The full set of directional pairs this system actually needs — fixed since Currency only has KES/USD/EUR. */
-    private static final List<String[]> SUPPORTED_PAIRS = List.of(
-            new String[]{"USD", "KES"},
-            new String[]{"KES", "USD"},
-            new String[]{"USD", "EUR"},
-            new String[]{"EUR", "USD"},
-            new String[]{"KES", "EUR"},
-            new String[]{"EUR", "KES"}
-    );
+    /** Loose sanity check — 3 uppercase letters, matching ISO 4217's own format. Catches an obvious typo (e.g. "KE" or "dollars") before it's saved, WITHOUT maintaining a closed list of "valid" codes — that would defeat the point of supporting any currency. */
+    private static final Pattern CURRENCY_CODE_PATTERN = Pattern.compile("^[A-Z]{3}$");
 
     /**
      * Reads a rate — Redis first, then MongoDB (populating Redis on a DB
-     * hit so the next read is fast). Throws clearly if the pair genuinely
-     * has no saved rate yet (e.g. before the very first refresh has ever
-     * run, or a manual save) — this is a real gap the caller needs to
-     * know about, not something to silently paper over with a made-up
-     * default.
+     * hit so the next read is fast). If this exact pair has genuinely
+     * never been requested or saved before, fetches it live from
+     * FxRateService ONCE, saves it (so every future call — and the next
+     * scheduled refresh — uses the cached/stored value instead of a live
+     * call), and returns it. base==quote (e.g. "USD","USD") short-circuits
+     * to 1 without touching Redis/Mongo/Frankfurter at all.
      */
     public BigDecimal getRate(String base, String quote) {
+        base = validate(base);
+        quote = validate(quote);
+
+        if (base.equals(quote)) {
+            return BigDecimal.ONE;
+        }
+
         String key = cacheKey(base, quote);
 
         Object cached = redisTemplate.opsForValue().get(key);
@@ -74,14 +85,16 @@ public class ExchangeRateService {
             return cached instanceof BigDecimal bd ? bd : new BigDecimal(cached.toString());
         }
 
-        ExchangeRate rate = exchangeRateRepository
-                .findByBaseCurrencyAndQuoteCurrency(base.toUpperCase(), quote.toUpperCase())
-                .orElseThrow(() -> new IllegalStateException(
-                        "No saved exchange rate for " + base + "->" + quote
-                                + " — the refresh job may not have run yet, or this pair was never saved manually."));
+        var saved = exchangeRateRepository.findByBaseCurrencyAndQuoteCurrency(base, quote);
+        if (saved.isPresent()) {
+            redisTemplate.opsForValue().set(key, saved.get().getRate(), CACHE_TTL);
+            return saved.get().getRate();
+        }
 
-        redisTemplate.opsForValue().set(key, rate.getRate(), CACHE_TTL);
-        return rate.getRate();
+        log.info("No saved rate for {}->{} yet — fetching live once and saving for future use", base, quote);
+        BigDecimal rate = fxRateService.getRate(base, quote);
+        saveOrUpdateRates(List.of(new ExchangeRateEntry(base, quote, rate)));
+        return rate;
     }
 
     /**
@@ -90,12 +103,14 @@ public class ExchangeRateService {
      * an existing pair is updated in place, a new one is inserted.
      * Refreshes the Redis cache for each entry immediately, so a manually
      * saved rate is available on the very next read, not just after the
-     * next scheduled refresh cycle.
+     * next scheduled refresh cycle. Any currency code is accepted here —
+     * this is also how an admin can proactively seed a pair before it's
+     * ever organically requested by a transaction.
      */
     public void saveOrUpdateRates(List<ExchangeRateEntry> entries) {
         for (ExchangeRateEntry entry : entries) {
-            String base = entry.getBaseCurrency().toUpperCase();
-            String quote = entry.getQuoteCurrency().toUpperCase();
+            String base = validate(entry.getBaseCurrency());
+            String quote = validate(entry.getQuoteCurrency());
 
             ExchangeRate rate = exchangeRateRepository.findByBaseCurrencyAndQuoteCurrency(base, quote)
                     .orElseGet(ExchangeRate::new);
@@ -115,24 +130,31 @@ public class ExchangeRateService {
     }
 
     /**
-     * Refreshes every supported pair from the live Frankfurter API, with
-     * up to config.getMaxRetries() attempts per pair on failure — a
-     * single dropped request shouldn't leave a rate stale for a whole
-     * refresh cycle. One pair failing all its retries doesn't stop the
-     * others from refreshing; each pair succeeds or fails independently.
+     * Refreshes EVERY pair that has ever been saved or organically
+     * requested — no hardcoded list. A brand-new deployment with nothing
+     * saved yet simply has nothing to refresh until the first real
+     * getRate() call (or a manual admin save) seeds a pair. Up to
+     * config.getMaxRetries() attempts per pair on failure; one pair
+     * failing doesn't stop the others from refreshing.
      *
-     * Interval is configurable via application.yml
+     * Interval configurable via application.yml
      * (exchange-rate.refresh-interval-ms), defaulting to 20 minutes
      * (1,200,000 ms) if unset.
      */
     @Scheduled(fixedDelayString = "${exchange-rate.refresh-interval-ms:1200000}")
     public void scheduledRefresh() {
-        log.info("Starting scheduled exchange rate refresh for {} pair(s)", SUPPORTED_PAIRS.size());
+        List<ExchangeRate> existingPairs = exchangeRateRepository.findAll();
+        if (existingPairs.isEmpty()) {
+            log.info("Exchange rate refresh skipped — no pairs have been saved/requested yet");
+            return;
+        }
+
+        log.info("Starting scheduled exchange rate refresh for {} previously-used pair(s)", existingPairs.size());
         int refreshed = 0, failed = 0;
 
-        for (String[] pair : SUPPORTED_PAIRS) {
-            String base = pair[0];
-            String quote = pair[1];
+        for (ExchangeRate pair : existingPairs) {
+            String base = pair.getBaseCurrency();
+            String quote = pair.getQuoteCurrency();
             boolean success = false;
 
             for (int attempt = 1; attempt <= config.getMaxRetries(); attempt++) {
@@ -161,6 +183,19 @@ public class ExchangeRateService {
     }
 
     private String cacheKey(String base, String quote) {
-        return CACHE_KEY_PREFIX + base.toUpperCase() + "-" + quote.toUpperCase();
+        return CACHE_KEY_PREFIX + base + "-" + quote;
+    }
+
+    private String validate(String currency) {
+        if (currency == null) {
+            throw new IllegalArgumentException("Currency code is required");
+        }
+        String upper = currency.trim().toUpperCase();
+        if (!CURRENCY_CODE_PATTERN.matcher(upper).matches()) {
+            throw new IllegalArgumentException(
+                    "'" + currency + "' doesn't look like a valid currency code — expected 3 uppercase letters "
+                            + "(ISO 4217 format, e.g. USD, KES, GBP)");
+        }
+        return upper;
     }
 }
