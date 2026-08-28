@@ -257,10 +257,10 @@ public class MpesaService {
 
     public MpesaAsyncResponse queryTransactionStatus(TransactionStatusRequest req) {
         boolean hasTxId = req.getTransactionId() != null && !req.getTransactionId().isBlank();
-        boolean hasOcid = req.getOriginatorConversationId() != null && !req.getOriginatorConversationId().isBlank();
+        boolean hasOcid = req.getOriginalConversationId() != null && !req.getOriginalConversationId().isBlank();
         if (!hasTxId && !hasOcid) {
             return new MpesaAsyncResponse(false,
-                    "Either transactionId or originatorConversationId is required", null, null);
+                    "Either transactionId or originalConversationId is required", null, null);
         }
 
         MpesaConfig.TransactionStatus cfg = config.getTransactionStatus();
@@ -268,24 +268,27 @@ public class MpesaService {
         String securityCredential = securityCredentialService.encrypt(
                 cfg.getInitiatorPassword(), config.getCertificatePath());
 
+        // Safaricom's TransactionStatusQuery expects every one of these keys
+        // present in the JSON body, even when a value is unused —
+        // TransactionID and OriginalConversationID must BOTH be sent
+        // (whichever one isn't the primary lookup goes through as an empty
+        // string, never omitted), and Occasion is likewise expected present.
+        // Previously these were only put() into the body when non-blank, so
+        // LinkedHashMap silently dropped the key entirely instead of sending
+        // "" — Safaricom read that as a malformed/incomplete request. Defaults
+        // for Remarks/Occasion match a confirmed-working captured payload.
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("Initiator", cfg.getInitiatorName());
         body.put("SecurityCredential", securityCredential);
         body.put("CommandID", "TransactionStatusQuery");
-        if (hasTxId) {
-            body.put("TransactionID", req.getTransactionId());
-        }
-        if (hasOcid) {
-            body.put("OriginalConversationID", req.getOriginatorConversationId());
-        }
+        body.put("TransactionID", hasTxId ? req.getTransactionId() : "");
+        body.put("OriginalConversationID", hasOcid ? req.getOriginalConversationId() : "");
         body.put("PartyA", cfg.getPartyA() != null ? cfg.getPartyA() : config.getShortcode());
         body.put("IdentifierType", cfg.getIdentifierType());
         body.put("ResultURL", cfg.getResultUrl());
         body.put("QueueTimeOutURL", cfg.getQueueTimeoutUrl());
-        body.put("Remarks", req.getRemarks() != null ? req.getRemarks() : "Status check");
-        if (req.getOccasion() != null && !req.getOccasion().isBlank()) {
-            body.put("Occasion", req.getOccasion());
-        }
+        body.put("Remarks", req.getRemarks() != null && !req.getRemarks().isBlank() ? req.getRemarks() : "ok");
+        body.put("Occasion", req.getOccasion() != null && !req.getOccasion().isBlank() ? req.getOccasion() : "ok");
 
         try {
             String respBody = post(config.baseUrl() + "/mpesa/transactionstatus/v1/query", token, body);

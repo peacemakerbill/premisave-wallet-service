@@ -59,7 +59,7 @@ public class MpesaOperationsService {
         MpesaAsyncResponse result = mpesaService.queryTransactionStatus(request);
         Map<String, Object> summary = new HashMap<>();
         summary.put("transactionId", request.getTransactionId());
-        summary.put("originatorConversationId", request.getOriginatorConversationId());
+        summary.put("originalConversationId", request.getOriginalConversationId());
         saveOperation(MpesaOperationType.TRANSACTION_STATUS, initiatedBy, result, summary, null);
         return result;
     }
