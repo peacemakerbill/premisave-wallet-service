@@ -23,6 +23,12 @@ import java.math.RoundingMode;
  * DepositService, mirroring FlutterwaveService's existing role at the
  * API-integration layer.
  *
+ * Migrated to the Deposit entity (Stage 3) — same pattern
+ * NowPaymentsDepositService pioneered (Stage 2): a dedicated Deposit
+ * record instead of a generic Transaction row with detail packed into a
+ * free-text description, plus DepositTransactionRecorder creating the
+ * matching Transaction row on confirmation for the unified history feed.
+ *
  * Called from DepositService.initiateDeposit (dispatcher) for initiation,
  * and directly from WalletController/PaymentCallbackController for the
  * confirm endpoint and webhook handler.
@@ -37,6 +43,7 @@ public class FlutterwaveDepositService {
     private final FlutterwaveService flutterwaveService;
     private final FxRateService fxRateService;
     private final DepositTransactionRecorder depositTransactionRecorder;
+    private final EmailService emailService;
 
     /**
      * Initiates a Flutterwave mobile-money deposit via v4's General Flow.
@@ -230,6 +237,9 @@ public class FlutterwaveDepositService {
 
         depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), deposit.getAmount(),
                 deposit, deposit.getReference());
+
+        emailService.sendDepositConfirmation(wallet.getAccountNumber(), deposit.getAmount().toPlainString(),
+                deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString());
 
         log.info("Wallet credited via Flutterwave: txRef={} amount={} providerReference={} (from initiationRate)",
                 txRef, deposit.getAmount(), providerReference);

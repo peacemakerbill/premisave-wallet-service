@@ -33,6 +33,7 @@ public class FlutterwaveDisbursementService {
     private final FlutterwaveConfig flutterwaveConfig;
     private final DisbursementTransactionRecorder transactionRecorder;
     private final CommissionService commissionService;
+    private final EmailService emailService;
 
     /**
      * Called from DisbursementService.processDisbursement via early
@@ -200,6 +201,9 @@ public class FlutterwaveDisbursementService {
                 disbursementRepository.save(d);
                 transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmount, d, d.getReference());
                 commissionService.recordGatewayCommissionFromDisbursement(d);
+
+                emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
+                        d.getCurrency().name(), d.getDestination(), d.getReference());
             } else {
                 disbursementRepository.save(d);
             }
@@ -211,6 +215,13 @@ public class FlutterwaveDisbursementService {
             d.setStatus(DisbursementStatus.FAILED);
             d.setFailureReason(statusDesc);
             disbursementRepository.save(d);
+
+            if (d.getWalletId() != null) {
+                walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
+                        emailService.sendDisbursementFailed(wallet.getAccountNumber(),
+                                d.getAmount().toPlainString(), d.getCurrency().name(), statusDesc));
+            }
+
             log.warn("Flutterwave disbursement failed: id={} transferId={} reason={}", d.getId(), transferId, statusDesc);
         }
     }

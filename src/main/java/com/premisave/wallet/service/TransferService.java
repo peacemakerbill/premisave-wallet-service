@@ -64,6 +64,7 @@ public class TransferService {
     private final IdempotencyService idempotencyService;
     private final TransferTransactionRecorder transferTransactionRecorder;
     private final CommissionService commissionService;
+    private final EmailService emailService;
 
     @Transactional
     public PaymentResponse transfer(String senderUserId, TransferRequest request) {
@@ -135,6 +136,14 @@ public class TransferService {
         commissionService.recordCommission("COMMISSION_TRANSFER", commission,
                 commissionService.getInternalTransferRate(), amount, "TRANSFER", transfer.getId(), reference,
                 senderUserId, "Commission on transfer to " + recipient.getAccountNumber());
+
+        // Transfer is always synchronous/immediate — no PENDING state, so
+        // both parties are notified right here, right away, unlike the
+        // gateway-based flows which wait for a webhook.
+        emailService.sendTransferNotification(sender.getAccountNumber(), amount.toPlainString(),
+                transfer.getCurrency().name(), recipient.getAccountNumber(), reference, true);
+        emailService.sendTransferNotification(recipient.getAccountNumber(), amount.toPlainString(),
+                transfer.getCurrency().name(), sender.getAccountNumber(), reference, false);
 
         log.info("Transfer completed | Sender: {} | Recipient: {} | Amount: {} | Commission: {} | TotalDebited: {} | Ref: {} | InitiatedBy: {}",
                 sender.getAccountNumber(), recipient.getAccountNumber(), amount, commission, totalDebit, reference, initiatedBy);

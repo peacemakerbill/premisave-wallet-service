@@ -30,6 +30,7 @@ public class PaypalDisbursementService {
     private final FxRateService fxRateService;
     private final DisbursementTransactionRecorder transactionRecorder;
     private final CommissionService commissionService;
+    private final EmailService emailService;
 
     private static final List<String> PAYPAL_TERMINAL_FAILURE_STATUSES =
             List.of("FAILED", "DENIED", "BLOCKED", "RETURNED", "REFUNDED", "REVERSED", "CANCELED");
@@ -96,6 +97,9 @@ public class PaypalDisbursementService {
                 disbursementRepository.save(d);
                 transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmount, d, d.getReference());
                 commissionService.recordGatewayCommissionFromDisbursement(d);
+
+                emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
+                        d.getCurrency().name(), d.getDestination(), d.getReference());
             } else {
                 disbursementRepository.save(d);
             }
@@ -106,8 +110,16 @@ public class PaypalDisbursementService {
             // No refund needed — the wallet was never debited for a
             // PENDING PayPal payout (see disbursePaypal above).
             d.setStatus(DisbursementStatus.FAILED);
-            d.setFailureReason(errorMessage != null && !errorMessage.isBlank() ? errorMessage : transactionStatus);
+            String reason = errorMessage != null && !errorMessage.isBlank() ? errorMessage : transactionStatus;
+            d.setFailureReason(reason);
             disbursementRepository.save(d);
+
+            if (d.getWalletId() != null) {
+                walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
+                        emailService.sendDisbursementFailed(wallet.getAccountNumber(),
+                                d.getAmount().toPlainString(), d.getCurrency().name(), reason));
+            }
+
             log.warn("PayPal disbursement failed ({}): id={} payoutBatchId={} reason={}",
                     transactionStatus, d.getId(), payoutBatchId, errorMessage);
         } else {

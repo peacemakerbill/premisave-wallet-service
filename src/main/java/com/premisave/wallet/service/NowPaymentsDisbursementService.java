@@ -28,6 +28,7 @@ public class NowPaymentsDisbursementService {
     private final NowPaymentsService nowPaymentsService;
     private final DisbursementTransactionRecorder transactionRecorder;
     private final CommissionService commissionService;
+    private final EmailService emailService;
 
     /**
      * Converts the wallet's KES amount into the target crypto using
@@ -126,6 +127,9 @@ public class NowPaymentsDisbursementService {
                 disbursementRepository.save(d);
                 transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmount, d, d.getReference());
                 commissionService.recordGatewayCommissionFromDisbursement(d);
+
+                emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
+                        d.getCurrency().name(), d.getDestination(), d.getReference());
             } else {
                 disbursementRepository.save(d);
             }
@@ -137,6 +141,13 @@ public class NowPaymentsDisbursementService {
             d.setStatus(DisbursementStatus.FAILED);
             d.setFailureReason(failureReason);
             disbursementRepository.save(d);
+
+            if (d.getWalletId() != null) {
+                walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
+                        emailService.sendDisbursementFailed(wallet.getAccountNumber(),
+                                d.getAmount().toPlainString(), d.getCurrency().name(), failureReason));
+            }
+
             log.warn("NOWPayments disbursement failed: id={} payoutId={} reason={}", d.getId(), payoutId, failureReason);
         }
     }

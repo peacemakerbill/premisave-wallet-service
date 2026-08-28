@@ -10,6 +10,8 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -43,6 +45,7 @@ public class EmailService {
     private final JavaMailSender mailSender;
 
     private static final String TEMPLATE_PATH = "templates/email/";
+    private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("dd MMM yyyy, h:mm a");
 
     public void sendDepositConfirmation(String toEmail, String amount, String currency,
                                          String reference, String newBalance) {
@@ -72,11 +75,63 @@ public class EmailService {
         send(toEmail, "Disbursement Failed - Premisave", "disbursement-failed-email.html", vars);
     }
 
+    /**
+     * Sent to BOTH parties of an internal wallet-to-wallet transfer, once
+     * each, with different wording per direction — one shared template
+     * (transfer-notification-email.html) rather than two near-duplicate
+     * files, since the only real difference is a handful of labels, not
+     * the overall layout.
+     *
+     * @param isSenderCopy true for the copy sent to whoever sent the
+     *                      money, false for the copy sent to whoever
+     *                      received it.
+     */
+    public void sendTransferNotification(String toEmail, String amount, String currency,
+                                          String counterpartyEmail, String reference, boolean isSenderCopy) {
+        Map<String, String> vars = new HashMap<>();
+        vars.put("amount", amount);
+        vars.put("currency", currency);
+        vars.put("counterpartyEmail", counterpartyEmail);
+        vars.put("reference", reference);
+
+        if (isSenderCopy) {
+            vars.put("headline", "Money Sent");
+            vars.put("amountLabel", "Amount Sent");
+            vars.put("counterpartyLabel", "Sent To");
+        } else {
+            vars.put("headline", "Money Received");
+            vars.put("amountLabel", "Amount Received");
+            vars.put("counterpartyLabel", "Received From");
+        }
+
+        String subject = (isSenderCopy ? "Transfer Sent" : "Transfer Received") + " - Premisave";
+        send(toEmail, subject, "transfer-notification-email.html", vars);
+    }
+
+    /** For a Payment (wallet deducted for a service — e.g. a booking fee), not a Disbursement — genuinely different wording, hence its own template rather than reusing disbursement-success-email.html's static "Withdrawal Successful" text. */
+    public void sendPaymentConfirmation(String toEmail, String amount, String currency,
+                                         String service, String reference) {
+        Map<String, String> vars = new HashMap<>();
+        vars.put("amount", amount);
+        vars.put("currency", currency);
+        vars.put("service", service);
+        vars.put("reference", reference);
+        send(toEmail, "Payment Confirmation - Premisave", "payment-confirmation-email.html", vars);
+    }
+
     private void send(String toEmail, String subject, String templateFile, Map<String, String> vars) {
         if (toEmail == null || toEmail.isBlank()) {
             log.warn("Skipping email '{}' — no recipient email address available", subject);
             return;
         }
+
+        // Added automatically here, not by each caller — the moment the
+        // email is actually dispatched, not when the underlying
+        // transaction happened (those can differ slightly if sending is
+        // ever delayed/retried), and this guarantees every template gets
+        // it consistently rather than relying on each call site to
+        // remember to pass one.
+        vars.put("timestamp", LocalDateTime.now().format(TIMESTAMP_FORMAT));
 
         try {
             String html = loadTemplate(templateFile);

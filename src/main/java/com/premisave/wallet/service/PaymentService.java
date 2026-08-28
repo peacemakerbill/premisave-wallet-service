@@ -62,6 +62,7 @@ public class PaymentService {
     private final WalletService walletService;
     private final IdempotencyService idempotencyService;
     private final PaymentTransactionRecorder paymentTransactionRecorder;
+    private final EmailService emailService;
 
     @Transactional
     public PaymentResponse deductFromWallet(String userId, PaymentInitiateRequest request) {
@@ -107,6 +108,9 @@ public class PaymentService {
         paymentRepository.save(payment);
 
         paymentTransactionRecorder.record(payment);
+
+        emailService.sendPaymentConfirmation(payment.getEmail(), amount.toPlainString(),
+                payment.getCurrency().name(), service, reference);
 
         log.info("Payment deducted successfully: userId={} | amount={} | service={} | ref={} | initiatedBy={}",
                 userId, amount, service, reference, initiatedBy);

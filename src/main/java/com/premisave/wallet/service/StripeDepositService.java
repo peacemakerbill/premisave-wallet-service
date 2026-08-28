@@ -36,6 +36,14 @@ import java.util.Map;
  * carries card management and Connect linking on top of ordinary deposit
  * flow, which the other four providers don't have an equivalent of.
  *
+ * Migrated to the Deposit entity (Stage 3) — same pattern
+ * NowPaymentsDepositService pioneered (Stage 2): a dedicated Deposit
+ * record instead of a generic Transaction row, plus
+ * DepositTransactionRecorder creating the matching Transaction row on
+ * confirmation. Only the deposit lifecycle logic changed here — every
+ * saved-card and Connect-linking method is untouched, since none of them
+ * ever read or write Transaction/Deposit at all.
+ *
  * Called from DepositService.initiateDeposit (dispatcher) for initiation,
  * and directly from WalletController/PaymentCallbackController for the
  * card-management endpoints, confirm endpoint, and webhook handlers.
@@ -50,6 +58,7 @@ public class StripeDepositService {
     private final SavedCardRepository savedCardRepository;
     private final StripeService stripeService;
     private final DepositTransactionRecorder depositTransactionRecorder;
+    private final EmailService emailService;
 
     // ─── Deposits ────────────────────────────────────────────────────────────
 
@@ -374,6 +383,9 @@ public class StripeDepositService {
 
         depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), amount,
                 deposit, deposit.getReference());
+
+        emailService.sendDepositConfirmation(wallet.getAccountNumber(), amount.toPlainString(),
+                deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString());
 
         log.info("Wallet credited via Stripe: reference={} amount={} piId={}", reference, amount, paymentIntentId);
     }

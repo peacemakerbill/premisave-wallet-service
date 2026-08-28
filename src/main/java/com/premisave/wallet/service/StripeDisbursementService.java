@@ -29,6 +29,7 @@ public class StripeDisbursementService {
     private final FxRateService fxRateService;
     private final DisbursementTransactionRecorder transactionRecorder;
     private final CommissionService commissionService;
+    private final EmailService emailService;
 
     /**
      * Converts the wallet's KES amount to whatever currency the withdrawal
@@ -125,6 +126,9 @@ public class StripeDisbursementService {
                 disbursementRepository.save(d);
                 transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmount, d, d.getReference());
                 commissionService.recordGatewayCommissionFromDisbursement(d);
+
+                emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
+                        d.getCurrency().name(), d.getDestination(), d.getReference());
             } else {
                 disbursementRepository.save(d);
             }
@@ -134,6 +138,13 @@ public class StripeDisbursementService {
             d.setStatus(DisbursementStatus.FAILED);
             d.setFailureReason(failureReason);
             disbursementRepository.save(d);
+
+            if (d.getWalletId() != null) {
+                walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
+                        emailService.sendDisbursementFailed(wallet.getAccountNumber(),
+                                d.getAmount().toPlainString(), d.getCurrency().name(), failureReason));
+            }
+
             log.error("Stripe Connect payout FAILED: id={} payoutId={} reason={} destinationAccount={} — " +
                     "funds already left the platform balance via the earlier Transfer and are stranded in " +
                     "that connected account; needs manual reconciliation, NOT a routine no-op failure",

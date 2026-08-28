@@ -43,6 +43,7 @@ public class MpesaDepositService {
     private final DepositRepository depositRepository;
     private final MpesaService mpesaService;
     private final DepositTransactionRecorder depositTransactionRecorder;
+    private final EmailService emailService;
 
     // ─── M-Pesa STK Push ─────────────────────────────────────────────────────
 
@@ -109,6 +110,12 @@ public class MpesaDepositService {
 
         depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), amount,
                 deposit, deposit.getReference());
+
+        // wallet.getAccountNumber() IS the user's email — confirmed
+        // consistently across ManualAdjustment/Payment/Transfer's own
+        // documented use of this same field for the same purpose.
+        emailService.sendDepositConfirmation(wallet.getAccountNumber(), amount.toPlainString(),
+                deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString());
 
         log.info("Wallet credited via M-Pesa STK: checkoutRequestId={} amount={} receipt={}",
                 checkoutRequestId, amount, mpesaReceiptNumber);

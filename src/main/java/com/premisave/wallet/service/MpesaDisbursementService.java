@@ -51,6 +51,7 @@ public class MpesaDisbursementService {
     private final IdempotencyService idempotencyService;
     private final DisbursementTransactionRecorder transactionRecorder;
     private final CommissionService commissionService;
+    private final EmailService emailService;
 
     // ─── User-facing B2C withdrawal ──────────────────────────────────────────
 
@@ -308,6 +309,12 @@ public class MpesaDisbursementService {
                 disbursementRepository.save(d);
                 transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmount, d, d.getReference());
                 commissionService.recordGatewayCommissionFromDisbursement(d);
+
+                // Only reachable here for a real customer disbursement
+                // (B2C/B2C_POCHI, walletId present) — the else branch below
+                // (B2B, no walletId) has no customer wallet/email to notify.
+                emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
+                        d.getCurrency().name(), d.getDestination(), d.getReference());
             } else {
                 disbursementRepository.save(d);
             }
@@ -321,6 +328,18 @@ public class MpesaDisbursementService {
             d.setStatus(DisbursementStatus.FAILED);
             d.setFailureReason(resultDesc);
             disbursementRepository.save(d);
+
+            // Only a real customer disbursement (walletId present) has an
+            // actual customer inbox to notify — a company-initiated one
+            // (B2B, no walletId) has no wallet to look up here, and
+            // d.getUserId() there is an admin identifier, not a real
+            // customer's own email.
+            if (d.getWalletId() != null) {
+                walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
+                        emailService.sendDisbursementFailed(wallet.getAccountNumber(),
+                                d.getAmount().toPlainString(), d.getCurrency().name(), resultDesc));
+            }
+
             log.warn("M-Pesa {} disbursement failed: id={} conversationId={} reason={}",
                     d.getChannel(), d.getId(), conversationId, resultDesc);
         }
