@@ -25,7 +25,16 @@ public class Wallet {
 
     private BigDecimal balance = BigDecimal.ZERO;
 
-    private Currency currency = Currency.KES;
+    /**
+     * Fixed at USD for every wallet — deliberately NOT user-changeable
+     * (no setter is exposed anywhere for this by design). M-Pesa (KES-
+     * native) and Flutterwave mobile money (local-currency-native) both
+     * convert to USD before touching balance — see
+     * MpesaDepositService/MpesaDisbursementService and
+     * FlutterwaveDepositService/FlutterwaveDisbursementService. PayPal
+     * and Stripe are already USD-native and need no conversion at all.
+     */
+    private Currency currency = Currency.USD;
 
     private boolean isFrozen = false;
 

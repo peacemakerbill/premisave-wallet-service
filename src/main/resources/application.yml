@@ -35,7 +35,20 @@ server:
 auth:
   service:
     url: ${AUTH_SERVICE_URL:http://localhost:8080}
+    # api-key removed from here entirely — AuthServiceFeignConfig (or
+    # whichever class calls auth-service) must now read internal.api-key
+    # directly instead of auth.service.api-key. One shared key across every
+    # microservice, with no separate property path aliasing it.
 
+# Shared secret internal services present via X-API-Key when calling
+# wallet-service's /internal/** endpoints (see InternalApiKeyFilter), AND
+# also used by wallet-service itself when it calls OUT to auth-service —
+# ONE key, reused everywhere, read directly from here rather than through
+# a separate auth.service.api-key alias.
+# Must match property-service's app.api-key (INTERNAL_API_KEY env var) --
+# every service reads the same INTERNAL_API_KEY name, but from its own
+# separate .env file, so the actual value must be copied identically to
+# all of them.
 internal:
   api-key: ${INTERNAL_API_KEY}
 
@@ -252,6 +265,15 @@ commission:
 # Frontend URL for CORS
 frontend:
   url: ${FRONTEND_URL:http://localhost:3000}
+
+# ─── Exchange Rate refresh ─────────────────────────────────────────────────
+# See ExchangeRateService — refreshIntervalMs is read directly by the
+# @Scheduled annotation itself via a property placeholder, not through
+# this properties class at annotation-processing time; both are kept in
+# sync with the same default (20 minutes) regardless.
+exchange-rate:
+  refresh-interval-ms: ${EXCHANGE_RATE_REFRESH_INTERVAL_MS:1200000}
+  max-retries: ${EXCHANGE_RATE_MAX_RETRIES:3}
 
 logging:
   level:

@@ -11,7 +11,6 @@ import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -146,30 +145,6 @@ public class PullTransactionService {
                     recovered, duplicates, unmatched);
         } catch (Exception e) {
             log.error("Failed to parse/reconcile Pull Transactions callback payload — raw payload logged above", e);
-        }
-    }
-
-    // ─── Scheduled sweep ──────────────────────────────────────────────────────
-
-    /**
-     * Runs the reconciliation automatically every 6 hours so missed C2B
-     * confirmations get recovered even if nobody remembers to trigger it
-     * manually. Registration must have already succeeded at least once —
-     * if not, Safaricom will simply return an error here, which is logged
-     * and otherwise harmless.
-     */
-    @Scheduled(cron = "0 0 */6 * * *")
-    public void scheduledReconciliation() {
-        try {
-            PullTransactionResponse result = queryAndReconcileDefault();
-            if (!result.isSuccess()) {
-                log.warn("Scheduled Pull Transactions reconciliation failed: {}", result.getMessage());
-                return;
-            }
-            log.info("Scheduled Pull Transactions reconciliation complete: recovered={} duplicates={} unmatched={}",
-                    result.getRecovered(), result.getDuplicates(), result.getUnmatched());
-        } catch (Exception e) {
-            log.error("Scheduled Pull Transactions reconciliation threw an exception", e);
         }
     }
 

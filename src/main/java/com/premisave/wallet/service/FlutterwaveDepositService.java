@@ -29,6 +29,19 @@ import java.math.RoundingMode;
  * free-text description, plus DepositTransactionRecorder creating the
  * matching Transaction row on confirmation for the unified history feed.
  *
+ * CURRENCY CONVERSION: the wallet is now fixed at USD (see Wallet.currency),
+ * so the conversion TARGET changed from KES to USD throughout this file —
+ * this used to convert local currency -> KES; it now converts local
+ * currency -> USD. getRateToUsd() below tries ExchangeRateService (the
+ * Redis/MongoDB-cached layer) first for KES/USD/EUR — the only three
+ * values Currency actually has — and falls back to FxRateService's own
+ * live call directly for any other local currency (GHS, UGX, etc.), since
+ * those genuinely aren't covered by ExchangeRateService's fixed,
+ * enum-based pair set. That fallback is less resilient (a live HTTP call
+ * inline, no cache, no scheduled refresh) than the cached path, but the
+ * alternative would be failing every non-KES/EUR mobile money deposit
+ * outright — worth knowing this asymmetry exists rather than hiding it.
+ *
  * Called from DepositService.initiateDeposit (dispatcher) for initiation,
  * and directly from WalletController/PaymentCallbackController for the
  * confirm endpoint and webhook handler.
@@ -42,6 +55,7 @@ public class FlutterwaveDepositService {
     private final DepositRepository depositRepository;
     private final FlutterwaveService flutterwaveService;
     private final FxRateService fxRateService;
+    private final ExchangeRateService exchangeRateService;
     private final DepositTransactionRecorder depositTransactionRecorder;
     private final EmailService emailService;
 
@@ -57,15 +71,16 @@ public class FlutterwaveDepositService {
      * Uganda, etc. — NOT KES, since Kenyan mobile money goes through the
      * direct M-Pesa STK push path instead, see provider=MPESA).
      *
-     * The wallet always operates in KES, so — same pattern as the PayPal
-     * branch above, just with the local currency as the base instead of
-     * USD — the live FX rate from the local currency to KES is used to
-     * compute what actually gets credited to the wallet. The FX rate is
+     * The wallet is fixed at USD, so the live FX rate from the local
+     * currency to USD is used to compute what actually gets credited to
+     * the wallet — see getRateToUsd() below for how KES/USD/EUR route
+     * through the cached ExchangeRateService while any other local
+     * currency falls back to FxRateService's own live call. The rate is
      * logged for reconciliation against the eventual webhook payout amount.
      * Stored as Deposit.priceAmount/priceCurrency — same fields
      * NowPaymentsDepositService populates for its own fiat-pricing case,
      * reused here since the underlying concept (amount priced in a
-     * non-KES currency, converted once at initiation) is identical.
+     * non-USD currency, converted once at initiation) is identical.
      *
      * chargeId is stored as Deposit.providerReference immediately — v4
      * only supports verifying a charge by ITS OWN id (GET /charges/{id}),
@@ -97,15 +112,10 @@ public class FlutterwaveDepositService {
         }
 
         BigDecimal chargeAmount = request.getAmount(); // amount in localCurrency
-        BigDecimal fxRate;
-        BigDecimal kesEquivalent;
-        if ("KES".equals(localCurrency)) {
-            fxRate = BigDecimal.ONE;
-            kesEquivalent = chargeAmount;
-        } else {
-            fxRate = fxRateService.getRate(localCurrency, "KES");
-            kesEquivalent = chargeAmount.multiply(fxRate).setScale(2, RoundingMode.HALF_UP);
-        }
+        BigDecimal fxRate = getRateToUsd(localCurrency);
+        BigDecimal usdEquivalent = "USD".equals(localCurrency)
+                ? chargeAmount
+                : chargeAmount.multiply(fxRate).setScale(2, RoundingMode.HALF_UP);
 
         String txRef = idempotencyKey;
         String customerName = request.getCustomerName() != null ? request.getCustomerName() : userEmail;
@@ -120,14 +130,14 @@ public class FlutterwaveDepositService {
             return new PaymentResponse(false, null, "Flutterwave charge initiation failed: " + result.message());
         }
 
-        log.info("Flutterwave charge created: userId={} txRef={} chargeId={} localAmount={} {} kesEquivalent={} rate={} nextAction={}",
-                userId, txRef, result.chargeId(), chargeAmount, localCurrency, kesEquivalent, fxRate, result.nextActionType());
+        log.info("Flutterwave charge created: userId={} txRef={} chargeId={} localAmount={} {} usdEquivalent={} rate={} nextAction={}",
+                userId, txRef, result.chargeId(), chargeAmount, localCurrency, usdEquivalent, fxRate, result.nextActionType());
 
         Deposit deposit = new Deposit();
         deposit.setUserId(userId);
         deposit.setWalletId(wallet.getId());
-        deposit.setAmount(kesEquivalent);
-        deposit.setCurrency(Currency.KES);
+        deposit.setAmount(usdEquivalent);
+        deposit.setCurrency(Currency.USD);
         deposit.setProvider("FLUTTERWAVE");
         deposit.setChannel("FLUTTERWAVE_MOBILE_MONEY");
         deposit.setSource(request.getCustomerPhone());
@@ -146,7 +156,7 @@ public class FlutterwaveDepositService {
                 ? "Redirect to " + redirectUrl + " to authorize the charge."
                 : instructionNote != null
                 ? "Approve the charge on your phone: " + instructionNote
-                : localCurrency + " " + chargeAmount + " charge initiated (KES " + kesEquivalent + ").";
+                : localCurrency + " " + chargeAmount + " charge initiated (USD " + usdEquivalent + ").";
 
         return new PaymentResponse(true, redirectUrl != null ? redirectUrl : txRef, userFacingMessage);
     }
@@ -197,13 +207,11 @@ public class FlutterwaveDepositService {
      *
      * Both ensure verifyChargeById has been called first, preventing
      * spoofed/rejected charges from crediting the wallet. Safe idempotency:
-     * if a charge is already SUCCESS, this method no-ops — same pattern as
-     * confirmFlutterwaveDeposit (frontend redirect confirm) and by the
-     * charge.completed webhook handler in PaymentCallbackController.
-     * The credited amount always comes from the deposit record created
-     * at initiation time (computed from a live FX rate at that moment),
-     * same reasoning as before — this method only takes txRef and a
-     * provider reference for the audit trail, not an amount.
+     * if a charge is already SUCCESS, this method no-ops. The credited
+     * amount always comes from the deposit record created at initiation
+     * time (computed from a live/cached FX rate at that moment, already
+     * in USD) — this method only takes txRef and a provider reference for
+     * the audit trail, not an amount, so no conversion happens here.
      */
     @Transactional
     public void creditWalletFromFlutterwaveCallback(String txRef, String providerReference) {
@@ -257,5 +265,27 @@ public class FlutterwaveDepositService {
             depositRepository.save(deposit);
             log.warn("Flutterwave deposit failed: txRef={} reason={}", txRef, reason);
         }, () -> log.warn("Failure callback for unknown Flutterwave txRef={}: {}", txRef, reason));
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    /**
+     * KES/EUR route through ExchangeRateService (Redis/MongoDB-cached,
+     * refreshed on a schedule — see that class). Any other local currency
+     * (GHS, UGX, etc. — genuinely possible, Flutterwave covers many
+     * African countries) isn't one of the three Currency enum values that
+     * system covers, so it falls back to FxRateService's own live
+     * Frankfurter call directly — the same uncached path this method
+     * always used before this conversion feature existed, just now
+     * targeting USD instead of KES.
+     */
+    private BigDecimal getRateToUsd(String currency) {
+        if ("USD".equals(currency)) {
+            return BigDecimal.ONE;
+        }
+        if ("KES".equals(currency) || "EUR".equals(currency)) {
+            return exchangeRateService.getRate(currency, "USD");
+        }
+        return fxRateService.getRate(currency, "USD");
     }
 }

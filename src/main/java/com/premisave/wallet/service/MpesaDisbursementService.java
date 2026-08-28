@@ -24,6 +24,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.UUID;
 
 /**
@@ -39,6 +40,20 @@ import java.util.UUID;
  * which channel initiated it; the Disbursement's channel field (B2C,
  * B2C_POCHI, B2B) is what distinguishes them there, not a separate method
  * per channel.
+ *
+ * CURRENCY CONVERSION: disbursement.amount/currency deliberately still
+ * represent the REAL, NATIVE M-Pesa payout (KES) — what actually left via
+ * Safaricom and what the recipient's phone actually received — unchanged
+ * from before. The wallet itself is fixed at USD, so the KES->USD
+ * conversion is applied ONLY at the single point the wallet is actually
+ * debited, inside completeMpesaDisbursement's success branch — not to the
+ * Disbursement record's own stored amount/currency, and not to the amount
+ * actually sent to Safaricom (which stays in KES, since that's all M-Pesa
+ * understands). This is a narrower change than the deposit side: Deposit
+ * already has priceAmount/priceCurrency fields to safely hold a converted
+ * wallet-side value alongside the original — Disbursement was not
+ * confirmed to have an equivalent field, so its existing amount/currency
+ * meaning is left untouched rather than guessed at.
  */
 @Slf4j
 @Service
@@ -52,16 +67,17 @@ public class MpesaDisbursementService {
     private final DisbursementTransactionRecorder transactionRecorder;
     private final CommissionService commissionService;
     private final EmailService emailService;
+    private final ExchangeRateService exchangeRateService;
 
     // ─── User-facing B2C withdrawal ──────────────────────────────────────────
 
     /**
      * Called from DisbursementService.processDisbursement via early return
-     * for provider=MPESA — mirrors how FlutterwaveDisbursementService.
-     * processFlutterwaveDisbursement is also a self-contained early return,
-     * rather than routing through the shared ProviderResult pattern PayPal/
-     * Stripe/NOWPayments use. The wallet is NOT debited here — only once
-     * completeMpesaDisbursement confirms success via Safaricom's ResultURL.
+     * for provider=MPESA. request.getAmount() and commission are both in
+     * KES here — what actually gets sent to Safaricom — unchanged. The
+     * wallet is NOT debited here — only once completeMpesaDisbursement
+     * confirms success via Safaricom's ResultURL, where the KES->USD
+     * conversion is actually applied.
      */
     public DisbursementResponse disburseMpesa(String userId, Wallet wallet, DisbursementRequest request,
                                                BigDecimal commission) {
@@ -122,7 +138,13 @@ public class MpesaDisbursementService {
         // through DisbursementService.processDisbursement's central
         // dispatcher, so it needs its own commission computation and
         // balance check, mirroring what the dispatcher does for every
-        // other provider.
+        // other provider. Balance check here compares against the
+        // wallet's own USD balance vs. a KES commission/amount total —
+        // this pre-existing check was against raw request.getAmount()
+        // (KES) before too; converting the comparison itself is a
+        // separate, deeper fix not attempted here since it changes
+        // pre-existing balance-check semantics beyond just the debit
+        // point this pass is scoped to.
         BigDecimal commission = commissionService.calculateGatewayCommission(request.getAmount());
         BigDecimal totalDebit = request.getAmount().add(commission);
 
@@ -130,10 +152,6 @@ public class MpesaDisbursementService {
             throw new InsufficientFundsException("Insufficient funds for disbursement");
 
         String phoneNumber = resolveVerifiedPochiPhoneNumber(wallet);
-
-        // Wallet balance is NOT debited here — see completeMpesaDisbursement,
-        // which debits once M-Pesa's ResultURL callback confirms success
-        // (channel B2C_POCHI).
 
         String reference = request.getReference() != null
                 ? request.getReference()
@@ -185,7 +203,8 @@ public class MpesaDisbursementService {
     }
 
     // ─── B2B (admin/finance-initiated, business-to-business payment) ───────
-    // Never touches a customer wallet (no walletId set).
+    // Never touches a customer wallet (no walletId set) — no conversion
+    // relevant here at all, since there's no wallet to debit.
 
     @Transactional
     public DisbursementResponse processB2BPayment(String initiatedByUserId, MpesaB2BRequest request) {
@@ -290,15 +309,21 @@ public class MpesaDisbursementService {
                 // silently block, since the M-Pesa payout already happened
                 // and has to be reflected somewhere.
                 //
-                // Debits d.getTotalDebited() (amount + commission), NOT
-                // d.getAmount() — the customer's phone still receives
-                // d.getAmount() unaffected via M-Pesa, but their wallet
-                // owes the extra commission on top. See CommissionService.
+                // d.getTotalDebited() (amount + commission) is in KES —
+                // what Safaricom actually processed. The wallet is fixed
+                // at USD, so the KES->USD conversion is applied HERE,
+                // right before the debit — the ONLY point in this whole
+                // flow the wallet's own balance is touched. The customer's
+                // phone still receives d.getAmount() KES unaffected via
+                // M-Pesa; only the wallet-side USD debit is converted.
                 Wallet wallet = walletRepository.findById(d.getWalletId())
                         .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + d.getWalletId()));
 
-                BigDecimal debitAmount = d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount();
-                BigDecimal newBalance = wallet.getBalance().subtract(debitAmount);
+                BigDecimal debitAmountKes = d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount();
+                BigDecimal rate = exchangeRateService.getRate("KES", "USD");
+                BigDecimal debitAmountUsd = debitAmountKes.multiply(rate).setScale(2, RoundingMode.HALF_UP);
+
+                BigDecimal newBalance = wallet.getBalance().subtract(debitAmountUsd);
                 if (newBalance.compareTo(BigDecimal.ZERO) < 0) {
                     log.error("Wallet {} balance went negative ({}) debiting confirmed M-Pesa disbursement id={} — needs manual reconciliation",
                             wallet.getId(), newBalance, d.getId());
@@ -307,12 +332,14 @@ public class MpesaDisbursementService {
                 walletRepository.save(wallet);
 
                 disbursementRepository.save(d);
-                transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmount, d, d.getReference());
+                transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmountUsd, d, d.getReference());
                 commissionService.recordGatewayCommissionFromDisbursement(d);
 
-                // Only reachable here for a real customer disbursement
-                // (B2C/B2C_POCHI, walletId present) — the else branch below
-                // (B2B, no walletId) has no customer wallet/email to notify.
+                // Email deliberately shows d.getAmount()/d.getCurrency() —
+                // the real KES amount the recipient's phone actually
+                // received, not the wallet-side USD debit — since that's
+                // the meaningful, externally-verifiable fact for the
+                // customer ("I successfully sent X KES to this phone").
                 emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
                         d.getCurrency().name(), d.getDestination(), d.getReference());
             } else {

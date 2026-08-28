@@ -16,13 +16,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 /**
- * M-Pesa deposit business logic — STK Push and B2B Express Checkout (USSD
- * push to till) initiation, plus reconciling their callbacks. Split out of
- * the former all-providers DepositService — mirrors how MpesaService already
- * sits alone at the API-integration layer; this is the same split applied
- * one layer up, at business logic/orchestration.
+ * M-Pesa deposit business logic — STK Push initiation, plus reconciling
+ * its callback. Split out of the former all-providers DepositService —
+ * mirrors how MpesaService already sits alone at the API-integration
+ * layer; this is the same split applied one layer up, at business
+ * logic/orchestration.
  *
  * Migrated to the Deposit entity (Stage 3) — same pattern
  * NowPaymentsDepositService pioneered (Stage 2): a dedicated Deposit
@@ -30,9 +31,23 @@ import java.math.BigDecimal;
  * free-text description, plus DepositTransactionRecorder creating the
  * matching Transaction row on confirmation for the unified history feed.
  *
+ * CURRENCY CONVERSION: the wallet is now fixed at USD (see Wallet.currency),
+ * but M-Pesa only ever operates in KES — the STK push itself still
+ * requests/receives a KES amount from the user, since that's what M-Pesa
+ * understands and what a Kenyan user naturally thinks in. The KES->USD
+ * conversion happens ONLY at confirmation time (creditWalletFromStkCallback),
+ * using the amount Safaricom's own callback confirms was actually paid —
+ * not the originally-requested amount — since that's the real, confirmed
+ * transaction, and the exchange rate could genuinely differ by the few
+ * seconds/minutes between STK push initiation and PIN confirmation.
+ * deposit.amount/currency end up representing the WALLET-side (USD)
+ * value; the original KES amount is preserved on priceAmount/priceCurrency
+ * — same convention FlutterwaveDepositService/NowPaymentsDepositService
+ * already use for their own non-USD pricing, reused here rather than
+ * inventing a different pattern for M-Pesa specifically.
+ *
  * Called from DepositService.initiateDeposit (dispatcher) for initiation,
- * and directly from PaymentCallbackController for the STK/Express Checkout
- * webhook handlers.
+ * and directly from PaymentCallbackController for the STK webhook handler.
  */
 @Slf4j
 @Service
@@ -44,9 +59,17 @@ public class MpesaDepositService {
     private final MpesaService mpesaService;
     private final DepositTransactionRecorder depositTransactionRecorder;
     private final EmailService emailService;
+    private final ExchangeRateService exchangeRateService;
 
     // ─── M-Pesa STK Push ─────────────────────────────────────────────────────
 
+    /**
+     * request.getAmount() here is the KES amount requested via STK push —
+     * unchanged from before, since M-Pesa only understands KES. No
+     * conversion happens at this point; it happens once at confirmation
+     * (see creditWalletFromStkCallback), using the confirmed amount from
+     * Safaricom's own callback.
+     */
     public PaymentResponse initiateMpesaDeposit(String userId, DepositRequest request,
                                                  Wallet wallet, String idempotencyKey) {
         String phoneNumber = (request.getPhoneNumber() != null && !request.getPhoneNumber().isBlank())
@@ -84,6 +107,13 @@ public class MpesaDepositService {
 
     // ─── Callbacks ───────────────────────────────────────────────────────────
 
+    /**
+     * amount here is the CONFIRMED KES amount from Safaricom's own STK
+     * callback — converted to USD before it ever touches wallet.balance,
+     * since the wallet is fixed at USD. Uses ExchangeRateService (the
+     * Redis/MongoDB-cached layer), never FxRateService directly — a live
+     * FX API call has no place sitting inline in a webhook handler.
+     */
     @Transactional
     public void creditWalletFromStkCallback(String checkoutRequestId, BigDecimal amount,
                                              String mpesaReceiptNumber, String phoneNumber) {
@@ -100,25 +130,31 @@ public class MpesaDepositService {
         Wallet wallet = walletRepository.findById(deposit.getWalletId())
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + deposit.getWalletId()));
 
-        wallet.setBalance(wallet.getBalance().add(amount));
+        BigDecimal rate = exchangeRateService.getRate("KES", "USD");
+        BigDecimal usdAmount = amount.multiply(rate).setScale(2, RoundingMode.HALF_UP);
+
+        wallet.setBalance(wallet.getBalance().add(usdAmount));
         walletRepository.save(wallet);
 
         deposit.setStatus(DepositStatus.SUCCESS);
-        deposit.setAmount(amount);
+        deposit.setAmount(usdAmount);
+        deposit.setCurrency(Currency.USD);
+        deposit.setPriceAmount(amount);
+        deposit.setPriceCurrency("kes");
         deposit.setProviderReference(mpesaReceiptNumber);
         depositRepository.save(deposit);
 
-        depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), amount,
+        depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), usdAmount,
                 deposit, deposit.getReference());
 
         // wallet.getAccountNumber() IS the user's email — confirmed
         // consistently across ManualAdjustment/Payment/Transfer's own
         // documented use of this same field for the same purpose.
-        emailService.sendDepositConfirmation(wallet.getAccountNumber(), amount.toPlainString(),
+        emailService.sendDepositConfirmation(wallet.getAccountNumber(), usdAmount.toPlainString(),
                 deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString());
 
-        log.info("Wallet credited via M-Pesa STK: checkoutRequestId={} amount={} receipt={}",
-                checkoutRequestId, amount, mpesaReceiptNumber);
+        log.info("Wallet credited via M-Pesa STK: checkoutRequestId={} kesAmount={} usdAmount={} rate={} receipt={}",
+                checkoutRequestId, amount, usdAmount, rate, mpesaReceiptNumber);
     }
 
     @Transactional
@@ -133,6 +169,13 @@ public class MpesaDepositService {
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
+    /**
+     * Saved at initiation with the REQUESTED KES amount/currency — this
+     * is a transient, pending-state record that gets fully overwritten
+     * (amount, currency, priceAmount, priceCurrency) once
+     * creditWalletFromStkCallback confirms the actual paid amount, so no
+     * conversion happens here yet.
+     */
     private void savePendingDeposit(String userId, String walletId, BigDecimal amount,
                                      String channel, String source, String reference) {
         Deposit deposit = new Deposit();

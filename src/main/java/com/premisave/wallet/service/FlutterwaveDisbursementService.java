@@ -16,11 +16,33 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.UUID;
 
 /**
  * Flutterwave disbursement logic — split out of DisbursementService,
  * mirroring FlutterwaveDepositService's role on the deposit side.
+ *
+ * CURRENCY CONVERSION: same principle as MpesaDisbursementService —
+ * disbursement.amount/currency represent the REAL, NATIVE payout Flutterwave
+ * actually sent (whatever destinationCurrency was used, defaulting to KES),
+ * unchanged from before. The wallet is fixed at USD, so conversion is
+ * applied ONLY at the point the wallet is actually debited, inside
+ * completeFlutterwaveDisbursement's success branch — via
+ * ExchangeRateService, keyed off d.getCurrency() (a typed Currency enum
+ * value, always one of KES/USD/EUR, unlike the deposit side's free-text
+ * localCurrency string — so no FxRateService fallback is needed here;
+ * every possible d.getCurrency() value is already covered by
+ * ExchangeRateService's fixed pair set).
+ *
+ * Worth flagging honestly: disbursement.setCurrency(Currency.KES) below
+ * is hardcoded regardless of the actual destinationCurrency the request
+ * specifies (which defaults to KES but isn't required to be) — a
+ * pre-existing inconsistency in this file that predates this conversion
+ * feature and isn't fixed here, since it's a separate concern from
+ * currency conversion itself. The wallet-debit conversion below uses
+ * d.getCurrency() (whatever was actually persisted) as the best available
+ * source of truth, not destinationCurrency directly.
  */
 @Slf4j
 @Service
@@ -34,6 +56,7 @@ public class FlutterwaveDisbursementService {
     private final DisbursementTransactionRecorder transactionRecorder;
     private final CommissionService commissionService;
     private final EmailService emailService;
+    private final ExchangeRateService exchangeRateService;
 
     /**
      * Called from DisbursementService.processDisbursement via early
@@ -46,7 +69,9 @@ public class FlutterwaveDisbursementService {
      *
      * Same not-debited-until-confirmed pattern as every other provider —
      * Flutterwave transfers resolve asynchronously via the
-     * transfer.disburse webhook (see completeFlutterwaveDisbursement).
+     * transfer.disburse webhook (see completeFlutterwaveDisbursement),
+     * where the actual KES->USD (or whatever d.getCurrency()->USD)
+     * conversion is applied.
      *
      * Branches on flutterwaveTransferType (validated below):
      *  - MOBILE_MONEY → FlutterwaveService.initiateTransfer (msisdn/network body)
@@ -189,8 +214,22 @@ public class FlutterwaveDisbursementService {
                 // unaffected, but the wallet owes the extra commission on
                 // top. Falls back to d.getAmount() for a legacy
                 // disbursement created before this field existed.
-                BigDecimal debitAmount = d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount();
-                BigDecimal newBalance = wallet.getBalance().subtract(debitAmount);
+                //
+                // d.getCurrency() is whatever was persisted at creation
+                // (hardcoded KES today — see class javadoc) and is
+                // converted to USD here, the ONLY point this disbursement
+                // actually touches the wallet. A typed Currency enum
+                // value, always KES/USD/EUR, so no FxRateService fallback
+                // is needed the way the deposit side's free-text
+                // localCurrency required.
+                BigDecimal debitAmountNative = d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount();
+                String nativeCurrency = d.getCurrency() != null ? d.getCurrency().name() : "KES";
+                BigDecimal rate = "USD".equals(nativeCurrency)
+                        ? BigDecimal.ONE
+                        : exchangeRateService.getRate(nativeCurrency, "USD");
+                BigDecimal debitAmountUsd = debitAmountNative.multiply(rate).setScale(2, RoundingMode.HALF_UP);
+
+                BigDecimal newBalance = wallet.getBalance().subtract(debitAmountUsd);
                 if (newBalance.compareTo(BigDecimal.ZERO) < 0) {
                     log.error("Wallet {} balance went negative ({}) debiting confirmed Flutterwave disbursement id={} — needs manual reconciliation",
                             wallet.getId(), newBalance, d.getId());
@@ -199,9 +238,13 @@ public class FlutterwaveDisbursementService {
                 walletRepository.save(wallet);
 
                 disbursementRepository.save(d);
-                transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmount, d, d.getReference());
+                transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmountUsd, d, d.getReference());
                 commissionService.recordGatewayCommissionFromDisbursement(d);
 
+                // Email deliberately shows d.getAmount()/d.getCurrency() —
+                // the real native amount Flutterwave actually paid out,
+                // not the wallet-side USD debit — the meaningful,
+                // externally-verifiable fact for the customer.
                 emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
                         d.getCurrency().name(), d.getDestination(), d.getReference());
             } else {

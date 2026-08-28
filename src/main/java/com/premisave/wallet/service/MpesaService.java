@@ -371,29 +371,6 @@ public class MpesaService {
 
     // ─── Pull Transactions (C2B reconciliation) ─────────────────────────────
 
-    /**
-     * Register Pull — one-time setup per shortcode.
-     *
-     * Safaricom's registration response genuinely uses a DIFFERENT key
-     * naming convention from every other M-Pesa API in this file — literal
-     * spaces in the keys ("Response Status", "Response Description"),
-     * confirmed directly from a real captured sandbox response:
-     * {"ResponseRefID":"...","Response Status":"1001","ShortCode":"...",
-     * "Response Description":"Shortcode already Registered!"}.
-     *
-     * A prior version of this method only checked the no-space variant
-     * ("ResponseStatus"/"ResponseDescription", matching every other M-Pesa
-     * API's convention) — those never matched, so success/message were
-     * ALWAYS wrong here (empty status -> success=false; missing
-     * description -> "Unknown"), even on a genuinely successful (or
-     * already-registered) response. ResponseRefID and ShortCode have no
-     * spaces in the real payload, which is why those two fields were
-     * always correct while only message/success were silently broken.
-     *
-     * firstNonBlank/firstNonBlankOrDefault below check both the space and
-     * no-space variants defensively, rather than assuming one is
-     * definitely correct going forward.
-     */
     public PullTransactionResponse registerPullTransactions() {
         MpesaConfig.PullTransactions cfg = config.getPullTransactions();
         String token = getAccessToken();
@@ -445,26 +422,6 @@ public class MpesaService {
         }
     }
 
-    /**
-     * Also checks the space-variant keys ("Response Status"/"Response
-     * Description") alongside the original no-space fallbacks, applying
-     * the same fix as registerPullTransactions above — same API family,
-     * so the same key-naming inconsistency is plausible here too. This
-     * part IS now confirmed against a real captured Query response
-     * (ResponseCode/ResponseMessage matched cleanly there, no space
-     * variant needed for THIS specific response) — success/message now
-     * come through correctly.
-     *
-     * Transaction extraction fixed separately, also from that same real
-     * response: the actual key is "Response", not "Transaction"/
-     * "transactions" (neither ever existed in the real payload, so this
-     * always returned zero records regardless of query success). The
-     * real shape is ALSO a doubly-nested array — "Response":[[tx1, tx2]]
-     * — an outer array containing exactly one inner array of transaction
-     * objects, not a flat array of objects. Handles both that confirmed
-     * shape and a plain flat array defensively, since a nested response
-     * for a query returning more pages/records is unconfirmed.
-     */
     public PullTransactionResponse parsePullTransactionsResponse(String respBody) throws Exception {
         JsonNode node = objectMapper.readTree(respBody);
 
@@ -478,16 +435,12 @@ public class MpesaService {
         if (txArray.isArray()) {
             for (JsonNode entry : txArray) {
                 if (entry.isArray()) {
-                    // Confirmed real shape: Response -> [ [tx1, tx2, ...] ]
                     for (JsonNode txNode : entry) {
                         if (txNode.isObject()) {
                             records.add(objectMapper.treeToValue(txNode, PullTransactionRecord.class));
                         }
                     }
                 } else if (entry.isObject()) {
-                    // Defensive fallback in case a differently-shaped
-                    // response (e.g. a different page count) is flat
-                    // instead of nested.
                     records.add(objectMapper.treeToValue(entry, PullTransactionRecord.class));
                 }
             }
@@ -533,18 +486,6 @@ public class MpesaService {
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    /**
-     * Shared parser for the "fire-and-await-callback" M-Pesa APIs (B2Pochi,
-     * Account Balance, Transaction Status, Reversal). Safaricom uses two
-     * different response shapes for these paymentrequest/query calls — a
-     * well-formed rejection ({requestId, errorCode, errorMessage}, e.g.
-     * "Invalid Initiator Information" or a locked/invalid SecurityCredential)
-     * carries NO ResponseCode/ResponseDescription at all. Previously this
-     * method didn't check for that shape, so a rejection silently fell
-     * through to the acceptance-shape parsing below and got recorded as
-     * "<apiName> request submitted" — a hard failure logged and saved to the
-     * DB as if it succeeded. The errorCode check below must run first.
-     */
     private MpesaAsyncResponse parseAsyncAck(String respBody, String apiName) throws Exception {
         JsonNode node = objectMapper.readTree(respBody);
 
@@ -593,7 +534,6 @@ public class MpesaService {
         return phone;
     }
 
-    /** Returns the first non-blank value found across the given keys, checked in order, or "" if none match. */
     private String firstNonBlank(JsonNode node, String... keys) {
         for (String key : keys) {
             String value = node.path(key).asText("");
@@ -604,7 +544,6 @@ public class MpesaService {
         return "";
     }
 
-    /** Same as firstNonBlank, but returns defaultValue instead of "" when nothing matches. */
     private String firstNonBlankOrDefault(JsonNode node, String defaultValue, String... keys) {
         String value = firstNonBlank(node, keys);
         return value.isBlank() ? defaultValue : value;
