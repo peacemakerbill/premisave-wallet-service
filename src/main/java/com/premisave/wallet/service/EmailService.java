@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -20,6 +21,13 @@ import java.util.Map;
  * disbursement success/failure) from plain HTML templates stored as
  * classpath resources under templates/email/.
  *
+ * Every public method here runs asynchronously (@Async, enabled via
+ * AsyncConfig) — sending an email involves a real SMTP round-trip, and
+ * without this, that latency would sit directly in the HTTP response
+ * time for whatever action triggered it (a transfer, a disbursement
+ * webhook, a payment). The caller gets its own response back immediately;
+ * the email is dispatched on a separate thread shortly after.
+ *
  * Templates use simple {{placeholder}} string substitution, not a real
  * templating engine (Thymeleaf/Freemarker) — deliberate: these are flat,
  * self-contained HTML files with no conditionals or loops needed, and
@@ -30,7 +38,9 @@ import java.util.Map;
  * failed email must NEVER fail the transaction it's notifying about.
  * By the time this is called, the deposit/disbursement has already
  * succeeded or failed; email is a side effect of that outcome, not a
- * precondition for it.
+ * precondition for it. This matters even more now that sending is
+ * async — by the time any SMTP error surfaces, the triggering request
+ * has usually already returned its response.
  *
  * Depends on spring-boot-starter-mail being on the classpath — this
  * config already exists in application.yml (spring.mail.*), which
@@ -47,6 +57,16 @@ public class EmailService {
     private static final String TEMPLATE_PATH = "templates/email/";
     private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("dd MMM yyyy, h:mm a");
 
+    /**
+     * @Async here (and on every other public method in this class) — NOT
+     * on the private send() helper below, since @Async only takes effect
+     * on calls that go through Spring's proxy, and send() is only ever
+     * called from within this same class (a self-invocation, which
+     * bypasses the proxy entirely and would make @Async silently do
+     * nothing). Requires AsyncConfig's @EnableAsync to actually take
+     * effect at all.
+     */
+    @Async
     public void sendDepositConfirmation(String toEmail, String amount, String currency,
                                          String reference, String newBalance) {
         Map<String, String> vars = new HashMap<>();
@@ -57,6 +77,7 @@ public class EmailService {
         send(toEmail, "Deposit Confirmation - Premisave", "deposit-confirmation-email.html", vars);
     }
 
+    @Async
     public void sendDisbursementSuccess(String toEmail, String amount, String currency,
                                          String destination, String reference) {
         Map<String, String> vars = new HashMap<>();
@@ -67,6 +88,7 @@ public class EmailService {
         send(toEmail, "Withdrawal Successful - Premisave", "disbursement-success-email.html", vars);
     }
 
+    @Async
     public void sendDisbursementFailed(String toEmail, String amount, String currency, String reason) {
         Map<String, String> vars = new HashMap<>();
         vars.put("amount", amount);
@@ -86,6 +108,7 @@ public class EmailService {
      *                      money, false for the copy sent to whoever
      *                      received it.
      */
+    @Async
     public void sendTransferNotification(String toEmail, String amount, String currency,
                                           String counterpartyEmail, String reference, boolean isSenderCopy) {
         Map<String, String> vars = new HashMap<>();
@@ -109,6 +132,7 @@ public class EmailService {
     }
 
     /** For a Payment (wallet deducted for a service — e.g. a booking fee), not a Disbursement — genuinely different wording, hence its own template rather than reusing disbursement-success-email.html's static "Withdrawal Successful" text. */
+    @Async
     public void sendPaymentConfirmation(String toEmail, String amount, String currency,
                                          String service, String reference) {
         Map<String, String> vars = new HashMap<>();
