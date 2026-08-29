@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -190,8 +191,21 @@ public class NowPaymentsDepositService {
         depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), deposit.getAmount(),
                 deposit, deposit.getReference());
 
+        // Same derivation as FlutterwaveDepositService — only meaningful
+        // if this deposit's priceCurrency differs from USD (NOWPayments
+        // can price in a fiat currency while the actual payment is made
+        // in crypto); null otherwise, so no exchange-rate row renders.
+        String exchangeRateInfo = null;
+        if (deposit.getPriceAmount() != null && deposit.getPriceAmount().compareTo(BigDecimal.ZERO) != 0
+                && deposit.getPriceCurrency() != null && !"usd".equalsIgnoreCase(deposit.getPriceCurrency())) {
+            BigDecimal impliedRate = deposit.getAmount()
+                    .divide(deposit.getPriceAmount(), 6, RoundingMode.HALF_UP);
+            exchangeRateInfo = "1 " + deposit.getPriceCurrency().toUpperCase() + " = " + impliedRate.toPlainString() + " USD";
+        }
+
         emailService.sendDepositConfirmation(wallet.getAccountNumber(), deposit.getAmount().toPlainString(),
-                deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString());
+                deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString(),
+                "NOWPayments", exchangeRateInfo, null);
 
         log.info("Wallet credited via NOWPayments: orderId={} amount={} paymentId={}", orderId, deposit.getAmount(), paymentId);
     }

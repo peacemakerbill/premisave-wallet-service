@@ -52,6 +52,35 @@ public class Disbursement {
     private BigDecimal totalDebited;
 
     /**
+     * totalDebited converted to USD at INITIATION time, not re-derived at
+     * completion — same principle as commissionRate above: lock in what
+     * was actually current when the withdrawal was first requested,
+     * rather than letting every downstream path independently decide
+     * whether/how to convert. The wallet is fixed at USD, but
+     * totalDebited/amount/currency represent the real, native payout
+     * (KES for M-Pesa, whatever destinationCurrency for Flutterwave,
+     * already USD for Stripe/PayPal/NOWPayments — where this simply
+     * equals totalDebited, no real conversion needed).
+     *
+     * Every path that eventually debits the wallet for this disbursement
+     * — the automatic webhook completion (completeMpesaDisbursement /
+     * completeFlutterwaveDisbursement) AND the manual admin-approval
+     * path (adminApproveDisbursement) — reads this SAME value, rather
+     * than each needing its own independent conversion call. This
+     * directly closes a real gap: adminApproveDisbursement was debiting
+     * the wallet with the raw native-currency totalDebited, with zero
+     * conversion, since it never had its own call to
+     * ExchangeRateService — a mistake this field's whole design exists
+     * to prevent from happening again at some other future completion
+     * path.
+     *
+     * Null for a disbursement created before this field existed — the
+     * completion paths fall back to converting at completion time using
+     * the current rate in that case.
+     */
+    private BigDecimal totalDebitedUsd;
+
+    /**
      * The exact commission rate applied at INITIATION time, not
      * re-derived from current config at confirmation time — since a
      * disbursement can sit PENDING for a while awaiting a webhook, and

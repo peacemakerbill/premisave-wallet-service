@@ -385,7 +385,8 @@ public class StripeDepositService {
                 deposit, deposit.getReference());
 
         emailService.sendDepositConfirmation(wallet.getAccountNumber(), amount.toPlainString(),
-                deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString());
+                deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString(),
+                "Stripe", null, null);
 
         log.info("Wallet credited via Stripe: reference={} amount={} piId={}", reference, amount, paymentIntentId);
     }

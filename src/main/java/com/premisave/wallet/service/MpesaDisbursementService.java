@@ -87,7 +87,13 @@ public class MpesaDisbursementService {
         disbursement.setUserId(userId);
         disbursement.setWalletId(wallet.getId());
         disbursement.setAmount(request.getAmount());
-        disbursement.setTotalDebited(request.getAmount().add(commission));
+        BigDecimal totalDebited = request.getAmount().add(commission);
+        disbursement.setTotalDebited(totalDebited);
+        // Locked in NOW, at initiation — not re-derived later at
+        // completion or admin approval. See Disbursement.totalDebitedUsd
+        // javadoc for why this exists.
+        BigDecimal initiationRate = exchangeRateService.getRate("KES", "USD");
+        disbursement.setTotalDebitedUsd(totalDebited.multiply(initiationRate).setScale(2, RoundingMode.HALF_UP));
         disbursement.setCommissionRate(commissionService.getGatewayRate());
         disbursement.setDestination(destination);
         disbursement.setProvider("MPESA");
@@ -169,6 +175,9 @@ public class MpesaDisbursementService {
         disbursement.setWalletId(wallet.getId());
         disbursement.setAmount(request.getAmount());
         disbursement.setTotalDebited(totalDebit);
+        // Locked in NOW, at initiation — see Disbursement.totalDebitedUsd javadoc.
+        BigDecimal pochiInitiationRate = exchangeRateService.getRate("KES", "USD");
+        disbursement.setTotalDebitedUsd(totalDebit.multiply(pochiInitiationRate).setScale(2, RoundingMode.HALF_UP));
         disbursement.setCommissionRate(commissionService.getGatewayRate());
         disbursement.setCurrency("KES");
         disbursement.setDestination(phoneNumber);
@@ -308,19 +317,27 @@ public class MpesaDisbursementService {
                 // silently block, since the M-Pesa payout already happened
                 // and has to be reflected somewhere.
                 //
-                // d.getTotalDebited() (amount + commission) is in KES —
-                // what Safaricom actually processed. The wallet is fixed
-                // at USD, so the KES->USD conversion is applied HERE,
-                // right before the debit — the ONLY point in this whole
-                // flow the wallet's own balance is touched. The customer's
-                // phone still receives d.getAmount() KES unaffected via
-                // M-Pesa; only the wallet-side USD debit is converted.
+                // d.getTotalDebitedUsd() was locked in at INITIATION time
+                // (see disburseMpesa/processB2PochiPayment and
+                // Disbursement.totalDebitedUsd's own javadoc) — read here,
+                // not re-converted, so this stays consistent with
+                // whatever rate was current when the withdrawal was first
+                // requested, and so adminApproveDisbursement (the manual
+                // path) reads this exact same value rather than needing
+                // its own independent conversion call. Falls back to
+                // converting at completion time (today's rate) only for
+                // a legacy disbursement created before this field existed.
                 Wallet wallet = walletRepository.findById(d.getWalletId())
                         .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + d.getWalletId()));
 
-                BigDecimal debitAmountKes = d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount();
-                BigDecimal rate = exchangeRateService.getRate("KES", "USD");
-                BigDecimal debitAmountUsd = debitAmountKes.multiply(rate).setScale(2, RoundingMode.HALF_UP);
+                BigDecimal debitAmountUsd;
+                if (d.getTotalDebitedUsd() != null) {
+                    debitAmountUsd = d.getTotalDebitedUsd();
+                } else {
+                    BigDecimal debitAmountKes = d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount();
+                    BigDecimal rate = exchangeRateService.getRate("KES", "USD");
+                    debitAmountUsd = debitAmountKes.multiply(rate).setScale(2, RoundingMode.HALF_UP);
+                }
 
                 BigDecimal newBalance = wallet.getBalance().subtract(debitAmountUsd);
                 if (newBalance.compareTo(BigDecimal.ZERO) < 0) {
@@ -339,8 +356,12 @@ public class MpesaDisbursementService {
                 // received, not the wallet-side USD debit — since that's
                 // the meaningful, externally-verifiable fact for the
                 // customer ("I successfully sent X KES to this phone").
+                // d.getDestination() is masked internally by EmailService,
+                // not here.
+                String exchangeRateInfo = "1 KES = " + exchangeRateService.getRate("KES", "USD").toPlainString() + " USD";
                 emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
-                        d.getCurrency(), d.getDestination(), d.getReference());
+                        d.getCurrency(), d.getDestination(), d.getReference(),
+                        "M-Pesa", exchangeRateInfo);
             } else {
                 disbursementRepository.save(d);
             }
@@ -363,7 +384,8 @@ public class MpesaDisbursementService {
             if (d.getWalletId() != null) {
                 walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
                         emailService.sendDisbursementFailed(wallet.getAccountNumber(),
-                                d.getAmount().toPlainString(), d.getCurrency(), resultDesc));
+                                d.getAmount().toPlainString(), d.getCurrency(), resultDesc,
+                                "M-Pesa", d.getDestination()));
             }
 
             log.warn("M-Pesa {} disbursement failed: id={} conversationId={} reason={}",

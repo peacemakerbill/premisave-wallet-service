@@ -9,18 +9,26 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
 /**
- * Manual add/update and read access to the persisted exchange rates
+ * Live-fetch and read access to the persisted exchange rates
  * ExchangeRateService caches in Redis and refreshes automatically on a
- * schedule (see that class's own javadoc). Same
- * ADMIN/FINANCE/OPERATIONS security posture as every other admin
- * controller in this codebase.
+ * schedule (see that class's own javadoc). Same ADMIN/FINANCE/OPERATIONS
+ * security posture as every other admin controller in this codebase.
+ *
+ * The manual add/update endpoint (POST with a typed-in array) was
+ * removed on request — every saved rate now comes either from
+ * Frankfurter directly (via /fetch below) or from the scheduled
+ * background refresh, never a manually-entered number. saveOrUpdateRates
+ * itself still exists in ExchangeRateService (now private) — it's the
+ * shared persistence logic /fetch and the scheduled refresh both still
+ * call internally — only the public, manually-typed-payload endpoint is
+ * gone.
  */
 @RestController
 @RequestMapping("/admin/exchange-rates")
@@ -31,16 +39,16 @@ public class AdminExchangeRateController {
     private final ExchangeRateService exchangeRateService;
 
     /**
-     * Adds new pairs and updates existing ones in the same call — an
-     * array, so multiple rates can be set at once. An entry whose
-     * base/quote pair already exists is updated in place; a new pair is
-     * inserted. Immediately refreshes Redis too, so a manually-set rate
-     * is available on the very next read.
+     * Fetches EVERY available rate for the given base currency directly
+     * from Frankfurter in one call and saves all of them — the array
+     * comes from Frankfurter itself, no manual entry possible anymore.
+     * No request body — base is a query parameter.
      */
-    @PostMapping
-    public ResponseEntity<ApiResponse<String>> saveOrUpdateRates(@RequestBody List<ExchangeRateEntry> rates) {
-        exchangeRateService.saveOrUpdateRates(rates);
-        return ResponseEntity.ok(ApiResponse.success("Exchange rates saved", rates.size() + " rate(s) saved/updated"));
+    @PostMapping("/fetch")
+    public ResponseEntity<ApiResponse<List<ExchangeRateEntry>>> fetchFromFrankfurter(@RequestParam String base) {
+        List<ExchangeRateEntry> saved = exchangeRateService.fetchAndSaveAllRates(base);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Fetched and saved " + saved.size() + " rate(s) from Frankfurter for base=" + base, saved));
     }
 
     @GetMapping

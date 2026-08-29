@@ -123,7 +123,15 @@ public class FlutterwaveDisbursementService {
         disbursement.setUserId(userId);
         disbursement.setWalletId(wallet.getId());
         disbursement.setAmount(request.getAmount());
-        disbursement.setTotalDebited(request.getAmount().add(commission));
+        BigDecimal totalDebited = request.getAmount().add(commission);
+        disbursement.setTotalDebited(totalDebited);
+        // Locked in NOW, at initiation — see Disbursement.totalDebitedUsd
+        // javadoc. Uses destinationCurrency, already computed above — the
+        // real native payout currency, not a hardcoded guess.
+        BigDecimal initiationRate = "USD".equals(destinationCurrency)
+                ? BigDecimal.ONE
+                : exchangeRateService.getRate(destinationCurrency, "USD");
+        disbursement.setTotalDebitedUsd(totalDebited.multiply(initiationRate).setScale(2, RoundingMode.HALF_UP));
         disbursement.setCommissionRate(commissionService.getGatewayRate());
         disbursement.setDestination(displayDestination);
         disbursement.setProvider("FLUTTERWAVE");
@@ -205,25 +213,29 @@ public class FlutterwaveDisbursementService {
                 Wallet wallet = walletRepository.findById(d.getWalletId())
                         .orElseThrow(() -> new WalletNotFoundException("Wallet not found: " + d.getWalletId()));
 
-                // Debits d.getTotalDebited() (amount + commission), NOT
-                // d.getAmount() — Flutterwave still pays out d.getAmount()
-                // unaffected, but the wallet owes the extra commission on
-                // top. Falls back to d.getAmount() for a legacy
+                // d.getTotalDebitedUsd() was locked in at INITIATION time
+                // (see processFlutterwaveDisbursement and
+                // Disbursement.totalDebitedUsd's own javadoc) — read here,
+                // not re-converted, so this stays consistent with
+                // whatever rate was current when the withdrawal was first
+                // requested, and so adminApproveDisbursement (the manual
+                // path) reads this exact same value rather than needing
+                // its own independent conversion call. Falls back to
+                // converting at completion time (today's rate, keyed off
+                // d.getCurrency() — the real payout currency now, since
+                // the earlier hardcoding bug was fixed) only for a legacy
                 // disbursement created before this field existed.
-                //
-                // d.getCurrency() is whatever was persisted at creation
-                // (hardcoded "KES" today — see class javadoc), converted
-                // to USD here, the ONLY point this disbursement actually
-                // touches the wallet. A plain String now (not the
-                // Currency enum) — ExchangeRateService supports any ISO
-                // 4217 pair Frankfurter covers, not a fixed list, so
-                // whatever currency ends up here is handled the same way.
-                BigDecimal debitAmountNative = d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount();
-                String nativeCurrency = d.getCurrency() != null ? d.getCurrency() : "KES";
-                BigDecimal rate = "USD".equals(nativeCurrency)
-                        ? BigDecimal.ONE
-                        : exchangeRateService.getRate(nativeCurrency, "USD");
-                BigDecimal debitAmountUsd = debitAmountNative.multiply(rate).setScale(2, RoundingMode.HALF_UP);
+                BigDecimal debitAmountUsd;
+                if (d.getTotalDebitedUsd() != null) {
+                    debitAmountUsd = d.getTotalDebitedUsd();
+                } else {
+                    BigDecimal debitAmountNative = d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount();
+                    String nativeCurrency = d.getCurrency() != null ? d.getCurrency() : "KES";
+                    BigDecimal rate = "USD".equals(nativeCurrency)
+                            ? BigDecimal.ONE
+                            : exchangeRateService.getRate(nativeCurrency, "USD");
+                    debitAmountUsd = debitAmountNative.multiply(rate).setScale(2, RoundingMode.HALF_UP);
+                }
 
                 BigDecimal newBalance = wallet.getBalance().subtract(debitAmountUsd);
                 if (newBalance.compareTo(BigDecimal.ZERO) < 0) {
@@ -241,8 +253,17 @@ public class FlutterwaveDisbursementService {
                 // the real native amount Flutterwave actually paid out,
                 // not the wallet-side USD debit — the meaningful,
                 // externally-verifiable fact for the customer.
+                // d.getDestination() is masked internally by EmailService.
+                String exchangeRateInfo = null;
+                BigDecimal nativeDebitForRate = d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount();
+                if (nativeDebitForRate.compareTo(BigDecimal.ZERO) != 0 && d.getCurrency() != null
+                        && !"USD".equals(d.getCurrency())) {
+                    BigDecimal impliedRate = debitAmountUsd.divide(nativeDebitForRate, 6, RoundingMode.HALF_UP);
+                    exchangeRateInfo = "1 " + d.getCurrency() + " = " + impliedRate.toPlainString() + " USD";
+                }
                 emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
-                        d.getCurrency(), d.getDestination(), d.getReference());
+                        d.getCurrency(), d.getDestination(), d.getReference(),
+                        "Flutterwave", exchangeRateInfo);
             } else {
                 disbursementRepository.save(d);
             }
@@ -258,7 +279,8 @@ public class FlutterwaveDisbursementService {
             if (d.getWalletId() != null) {
                 walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
                         emailService.sendDisbursementFailed(wallet.getAccountNumber(),
-                                d.getAmount().toPlainString(), d.getCurrency(), statusDesc));
+                                d.getAmount().toPlainString(), d.getCurrency(), statusDesc,
+                                "Flutterwave", d.getDestination()));
             }
 
             log.warn("Flutterwave disbursement failed: id={} transferId={} reason={}", d.getId(), transferId, statusDesc);

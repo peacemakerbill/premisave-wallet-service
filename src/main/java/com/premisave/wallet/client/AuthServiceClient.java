@@ -16,7 +16,17 @@ import java.util.Optional;
 )
 public interface AuthServiceClient {
 
-    @GetMapping("/auth/users/{email}/details")
+    /**
+     * Fixed: previously pointed at /auth/users/{email}/details, which was
+     * never actually built on the auth-service side — that path also
+     * sits inside AuthController's /auth/** space, which has to allow
+     * unauthenticated requests (signup, signin, etc.), so anything built
+     * there risks being reachable with no auth at all. The real endpoint
+     * now lives under /internal/users, alongside validateEmail below,
+     * protected by the same ApiKeyFilter (X-API-Key header) every other
+     * internal, service-to-service call in this codebase already uses.
+     */
+    @GetMapping("/internal/users/{email}/details")
     Optional<UserDetailsDto> getUserDetails(@PathVariable String email);
 
     /**

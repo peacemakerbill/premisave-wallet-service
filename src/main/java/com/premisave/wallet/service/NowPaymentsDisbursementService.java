@@ -129,7 +129,8 @@ public class NowPaymentsDisbursementService {
                 commissionService.recordGatewayCommissionFromDisbursement(d);
 
                 emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
-                        d.getCurrency(), d.getDestination(), d.getReference());
+                        d.getCurrency(), d.getDestination(), d.getReference(),
+                        "NOWPayments", null);
             } else {
                 disbursementRepository.save(d);
             }
@@ -145,7 +146,8 @@ public class NowPaymentsDisbursementService {
             if (d.getWalletId() != null) {
                 walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
                         emailService.sendDisbursementFailed(wallet.getAccountNumber(),
-                                d.getAmount().toPlainString(), d.getCurrency(), failureReason));
+                                d.getAmount().toPlainString(), d.getCurrency(), failureReason,
+                                "NOWPayments", d.getDestination()));
             }
 
             log.warn("NOWPayments disbursement failed: id={} payoutId={} reason={}", d.getId(), payoutId, failureReason);

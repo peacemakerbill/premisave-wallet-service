@@ -241,8 +241,23 @@ public class FlutterwaveDepositService {
         depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), deposit.getAmount(),
                 deposit, deposit.getReference());
 
+        // Exchange rate info derived from the two values already on the
+        // deposit record (amount = priceAmount * rate, from initiation
+        // time) rather than re-fetched — this stays consistent with
+        // whatever rate was actually applied when this specific deposit
+        // was converted, not whatever the live/cached rate happens to be
+        // right now.
+        String exchangeRateInfo = null;
+        if (deposit.getPriceAmount() != null && deposit.getPriceAmount().compareTo(BigDecimal.ZERO) != 0
+                && deposit.getPriceCurrency() != null) {
+            BigDecimal impliedRate = deposit.getAmount()
+                    .divide(deposit.getPriceAmount(), 6, RoundingMode.HALF_UP);
+            exchangeRateInfo = "1 " + deposit.getPriceCurrency().toUpperCase() + " = " + impliedRate.toPlainString() + " USD";
+        }
+
         emailService.sendDepositConfirmation(wallet.getAccountNumber(), deposit.getAmount().toPlainString(),
-                deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString());
+                deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString(),
+                "Flutterwave", exchangeRateInfo, deposit.getSource());
 
         log.info("Wallet credited via Flutterwave: txRef={} amount={} providerReference={} (from initiationRate)",
                 txRef, deposit.getAmount(), providerReference);

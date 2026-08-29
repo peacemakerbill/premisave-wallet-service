@@ -17,7 +17,9 @@ import java.net.UnknownHostException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -52,7 +54,10 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class FxRateService {
 
-    private static final String BASE_URL = "https://api.frankfurter.dev/v2/rate";
+    private static final String RATE_URL = "https://api.frankfurter.dev/v2/rate";
+
+    /** Bulk endpoint — returns EVERY quote currency Frankfurter supports against one base, in a single call. See getAllRates below. */
+    private static final String LATEST_URL = "https://api.frankfurter.dev/v2/latest";
 
     /** How long a previously-fetched rate remains usable as an emergency fallback. */
     private static final Duration FALLBACK_TTL = Duration.ofMinutes(2);
@@ -124,8 +129,60 @@ public class FxRateService {
         }
     }
 
+    /**
+     * Fetches EVERY quote currency Frankfurter supports against the given
+     * base, in ONE call — Frankfurter's /v2/latest?base=X endpoint, e.g.
+     * base="USD" returns a rate for KES, EUR, GBP, and every other
+     * currency Frankfurter covers, all at once. Used specifically for
+     * bulk-populating the exchange rate database directly from the live
+     * API in a single admin-triggered action, rather than requiring one
+     * getRate() call — and one manually-typed entry — per currency.
+     *
+     * Deliberately does NOT use the last-known-good fallback cache
+     * getRate() has: this is a bulk, admin-triggered action outside any
+     * transaction's hot path, so a failure here should surface clearly
+     * rather than silently serve stale bulk data under a different name.
+     *
+     * @throws IllegalStateException if Frankfurter is unreachable, returns
+     *         a non-2xx response, or the response is missing the expected
+     *         "rates" object.
+     */
+    public Map<String, BigDecimal> getAllRates(String base) {
+        HttpUrl parsedBase = HttpUrl.parse(LATEST_URL);
+        if (parsedBase == null) {
+            throw new IllegalStateException("Failed to build Frankfurter URL for base=" + base);
+        }
+        HttpUrl url = parsedBase.newBuilder().addQueryParameter("base", base.toUpperCase()).build();
+
+        Request request = new Request.Builder().url(url).get().build();
+
+        try (Response response = http.newCall(request).execute()) {
+            String body = response.body() != null ? response.body().string() : "";
+
+            if (!response.isSuccessful()) {
+                throw new IllegalStateException(
+                        "Frankfurter bulk rate lookup failed (" + response.code() + ") for base=" + base + ": " + body);
+            }
+
+            JsonNode node = objectMapper.readTree(body);
+            JsonNode ratesNode = node.path("rates");
+            if (!ratesNode.isObject()) {
+                throw new IllegalStateException(
+                        "Frankfurter response missing 'rates' object for base=" + base + ": " + body);
+            }
+
+            Map<String, BigDecimal> rates = new LinkedHashMap<>();
+            ratesNode.fields().forEachRemaining(entry -> rates.put(entry.getKey(), entry.getValue().decimalValue()));
+
+            log.info("Frankfurter bulk rates fetched for base={}: {} currencies", base, rates.size());
+            return rates;
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to reach Frankfurter FX service for base=" + base, e);
+        }
+    }
+
     private BigDecimal fetchLiveRate(String base, String quote) {
-        HttpUrl url = HttpUrl.parse(BASE_URL + "/" + base.toUpperCase() + "/" + quote.toUpperCase());
+        HttpUrl url = HttpUrl.parse(RATE_URL + "/" + base.toUpperCase() + "/" + quote.toUpperCase());
         if (url == null) {
             throw new IllegalStateException("Failed to build Frankfurter URL for " + base + "->" + quote);
         }

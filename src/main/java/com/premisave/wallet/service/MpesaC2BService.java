@@ -478,9 +478,10 @@ public class MpesaC2BService {
 
         depositTransactionRecorder.record(wallet.getUserId(), wallet.getId(), usdAmount, deposit, transId);
 
+        String exchangeRateInfo = "1 KES = " + rate.toPlainString() + " USD";
         emailService.sendDepositConfirmation(wallet.getAccountNumber(), usdAmount.toPlainString(),
-                deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString());
-
+                deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString(),
+                "M-Pesa", exchangeRateInfo, req.getMSISDN());
         log.info("C2B deposit processed: accountNumber={} mpesaPhoneNumber={} kesAmount={} usdAmount={} rate={} " +
                         "transId={} sender={}",
                 wallet.getAccountNumber(), normalizedPhone, kesAmount, usdAmount, rate, transId, senderName);

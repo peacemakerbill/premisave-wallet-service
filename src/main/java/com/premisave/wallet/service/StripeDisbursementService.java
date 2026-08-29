@@ -128,7 +128,8 @@ public class StripeDisbursementService {
                 commissionService.recordGatewayCommissionFromDisbursement(d);
 
                 emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
-                        d.getCurrency(), d.getDestination(), d.getReference());
+                        d.getCurrency(), d.getDestination(), d.getReference(),
+                        "Stripe", null);
             } else {
                 disbursementRepository.save(d);
             }
@@ -142,7 +143,8 @@ public class StripeDisbursementService {
             if (d.getWalletId() != null) {
                 walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
                         emailService.sendDisbursementFailed(wallet.getAccountNumber(),
-                                d.getAmount().toPlainString(), d.getCurrency(), failureReason));
+                                d.getAmount().toPlainString(), d.getCurrency(), failureReason,
+                                "Stripe", d.getDestination()));
             }
 
             log.error("Stripe Connect payout FAILED: id={} payoutId={} reason={} destinationAccount={} — " +
