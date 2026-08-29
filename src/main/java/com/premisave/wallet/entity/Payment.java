@@ -40,12 +40,22 @@ public class Payment {
      * lookup. The wallet is already fetched in
      * PaymentService.executePayment regardless, so this costs nothing
      * extra to capture. Same reasoning as Transfer.senderEmail/
-     * recipientEmail — full name deliberately excluded, since that data
-     * doesn't exist anywhere in wallet-service's own model (it lives in
-     * auth-service), and capturing it would mean a new cross-service call
-     * inside the payment path itself.
+     * recipientEmail.
      */
     private String email;
+
+    /**
+     * The payer's real full name — resolved via UserNameResolver (a thin
+     * wrapper over the auth service's cross-service lookup) at payment
+     * time. Originally left out of this entity entirely, on the
+     * reasoning that capturing it would require "a new cross-service call
+     * inside the payment path itself" — that reasoning no longer holds,
+     * since UserNameResolver now exists specifically for this purpose and
+     * is already called from every deposit/disbursement/transfer flow.
+     * Null if that lookup failed, or the account genuinely has no name
+     * on file.
+     */
+    private String senderName;
 
     private BigDecimal amount;
     private Currency currency;

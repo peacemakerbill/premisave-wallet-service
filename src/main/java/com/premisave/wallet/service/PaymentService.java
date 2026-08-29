@@ -110,16 +110,15 @@ public class PaymentService {
         payment.setStatus(PaymentStatus.SUCCESS);
         payment.setReference(reference);
         payment.setInitiatedBy(initiatedBy);
+        // Now actually persisted — Payment.senderName exists, see that
+        // field's own javadoc for why this was previously resolved but
+        // had nowhere to go.
+        String senderName = userNameResolver.resolveNameSafely(payment.getEmail());
+        payment.setSenderName(senderName);
         paymentRepository.save(payment);
 
         paymentTransactionRecorder.record(payment);
 
-        // senderName resolved but NOT persisted onto Payment — that would
-        // need a new field on that entity, which hasn't been shared/
-        // verified in this session; not guessed at here the same way
-        // Deposit/Disbursement's new fields weren't guessed at before
-        // those files were actually confirmed.
-        String senderName = userNameResolver.resolveNameSafely(payment.getEmail());
         emailService.sendPaymentConfirmation(payment.getEmail(), amount.toPlainString(),
                 payment.getCurrency().name(), service, reference,
                 senderName, payment.getEmail(), wallet.getId());
