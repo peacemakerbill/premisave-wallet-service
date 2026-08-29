@@ -149,6 +149,19 @@ public class DisbursementService {
             request.setAmount(kesAmount);
         }
 
+
+        if ("MPESA".equals(provider) && request.getCurrency() != null && !request.getCurrency().isBlank()) {
+            String requestedCurrency = request.getCurrency().toUpperCase();
+            if ("USD".equals(requestedCurrency)) {
+                BigDecimal rateToKes = exchangeRateService.getRate("USD", "KES");
+                BigDecimal kesAmount = request.getAmount().multiply(rateToKes).setScale(2, java.math.RoundingMode.HALF_UP);
+                log.info("M-Pesa disbursement priced: requested={} USD kesEquivalent={}", request.getAmount(), kesAmount);
+                request.setAmount(kesAmount);
+            } else if (!"KES".equals(requestedCurrency)) {
+                throw new IllegalArgumentException("M-Pesa disbursements must be in KES or USD");
+            }
+        }
+
         // Computed ONCE, centrally, on the final (already KES-normalized)
         // amount — every provider path below (both the two self-contained
         // early returns and the shared ProviderResult switch) receives
@@ -162,11 +175,6 @@ public class DisbursementService {
 
         if (wallet.getBalance().compareTo(totalDebit) < 0)
             throw new InsufficientFundsException("Insufficient funds for disbursement");
-
-        if ("MPESA".equals(provider) && request.getCurrency() != null
-                && !"KES".equalsIgnoreCase(request.getCurrency())) {
-            throw new IllegalArgumentException("M-Pesa disbursements must be in KES");
-        }
 
         // MPESA and Flutterwave are self-contained early returns — see
         // class javadoc for why.
@@ -574,6 +582,8 @@ public class DisbursementService {
         r.setTotalDebited(d.getTotalDebited());
         r.setCommissionRate(d.getCommissionRate());
         r.setCurrency(d.getCurrency());
+        r.setNativeAmount(d.getNativeAmount());
+        r.setNativeCurrency(d.getNativeCurrency());
         r.setDestination(d.getDestination());
         r.setProvider(d.getProvider());
         r.setChannel(d.getChannel());

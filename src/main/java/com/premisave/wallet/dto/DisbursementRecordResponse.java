@@ -25,6 +25,19 @@ public class DisbursementRecordResponse {
     /** Plain currency code (e.g. "KES", "USD") — matches Disbursement.currency's own type, not the Currency enum. */
     private String currency;
 
+    /**
+     * The real, native-currency figure actually sent to the external
+     * destination (e.g. the real KES amount an M-Pesa recipient's phone
+     * received) — see Disbursement.nativeAmount's own javadoc. Null for
+     * a provider whose native payout currency already IS USD (Stripe,
+     * PayPal, NOWPayments), since amount/currency above already ARE the
+     * native figure in that case.
+     */
+    private BigDecimal nativeAmount;
+
+    /** Which currency nativeAmount is denominated in (e.g. "KES") — null under the same condition as nativeAmount. */
+    private String nativeCurrency;
+
     private String destination;
     private String provider;
     private String channel;

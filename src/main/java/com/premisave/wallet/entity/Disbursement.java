@@ -20,19 +20,33 @@ public class Disbursement {
     private String userId;
     private String walletId;
 
+    /**
+     * The requested payout amount, before commission. For MPESA, STRIPE,
+     * PAYPAL, and NOWPAYMENTS, this is USD — the wallet-side truth,
+     * matching totalDebited/totalDebitedUsd below (explicit request,
+     * confirmed: "the data saved should always be in dollars... not
+     * Kenyan shillings anywhere" — previously MPESA recorded this in raw
+     * KES, which is what actually distorted CompanyLedgerEntry sums and
+     * AdminReportService's cross-provider totals, since those were
+     * summing native-currency figures from different providers together
+     * as if they were the same unit). FLUTTERWAVE is the one exception,
+     * still genuinely native (destinationCurrency) — not touched by this
+     * change, since it wasn't part of what was reported as affected. See
+     * nativeAmount below for the real, native-currency figure that was
+     * actually sent, on every provider where amount here is USD.
+     */
     private BigDecimal amount;
 
     /**
      * A plain ISO-4217-style code (e.g. "KES", "USD"), NOT the Currency
      * enum — unlike Wallet/Deposit/Transaction, which stay on the enum
      * since those represent an internal, always-known value (in
-     * practice, always USD post-conversion). A disbursement's native
-     * payout currency can genuinely be anything a gateway supports
+     * practice, always USD post-conversion). Kept as a String rather
+     * than reverted to the enum even now that MPESA/STRIPE/PAYPAL/
+     * NOWPAYMENTS are USD here, since FLUTTERWAVE's native payout
+     * currency still can genuinely be anything a gateway supports
      * (Flutterwave alone covers many countries/currencies), and the
-     * fixed three-value enum (KES/USD/EUR) can't represent that — this
-     * previously forced incorrect hardcoding (see
-     * FlutterwaveDisbursementService's own history) rather than
-     * accurately recording what was actually paid out. Mirrors
+     * fixed three-value enum (KES/USD/EUR) can't represent that. Mirrors
      * Deposit.priceCurrency, which was already a plain String for the
      * same underlying reason.
      */
@@ -105,6 +119,23 @@ public class Disbursement {
      * initiating the withdrawal.
      */
     private String senderName;
+
+    /**
+     * The real, native-currency figure actually sent to the external
+     * destination — e.g. the real KES amount an M-Pesa recipient's phone
+     * received, distinct from amount/currency above (which are always
+     * USD — see Disbursement's class-level currency-model note). Mirrors
+     * Deposit.priceAmount exactly, same role on the opposite side of the
+     * wallet: preserves the real, externally-verifiable figure alongside
+     * the USD wallet-side truth, rather than losing it. Null for a
+     * provider whose native payout currency already IS USD (Stripe,
+     * PayPal, NOWPayments), since there's nothing distinct to preserve
+     * there — amount/currency already ARE the native figure in that case.
+     */
+    private BigDecimal nativeAmount;
+
+    /** Which currency nativeAmount is denominated in (e.g. "KES") — null under the same condition as nativeAmount. */
+    private String nativeCurrency;
 
     private String provider;    // MPESA, PAYPAL, STRIPE, FLUTTERWAVE, NOWPAYMENTS
     private String channel;     // B2C, B2C_POCHI, B2B, B2C_TOPUP, PAYPAL_PAYOUT, STRIPE_PAYOUT, FLUTTERWAVE_BANK, FLUTTERWAVE_MOBILE_MONEY, NOWPAYMENTS_PAYOUT

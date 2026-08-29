@@ -40,19 +40,28 @@ import java.util.UUID;
  * B2C_POCHI, B2B) is what distinguishes them there, not a separate method
  * per channel.
  *
- * CURRENCY CONVERSION: disbursement.amount/currency deliberately still
- * represent the REAL, NATIVE M-Pesa payout (KES) — what actually left via
- * Safaricom and what the recipient's phone actually received — unchanged
- * from before. The wallet itself is fixed at USD, so the KES->USD
- * conversion is applied ONLY at the single point the wallet is actually
- * debited, inside completeMpesaDisbursement's success branch — not to the
- * Disbursement record's own stored amount/currency, and not to the amount
- * actually sent to Safaricom (which stays in KES, since that's all M-Pesa
- * understands). This is a narrower change than the deposit side: Deposit
- * already has priceAmount/priceCurrency fields to safely hold a converted
- * wallet-side value alongside the original — Disbursement was not
- * confirmed to have an equivalent field, so its existing amount/currency
- * meaning is left untouched rather than guessed at.
+ * CURRENCY CONVERSION (revised): disbursement.amount/currency (and
+ * totalDebited) are now USD — the wallet-side truth, matching every other
+ * provider — not the native KES payout, per explicit request: "the data
+ * saved should always be in dollars... not Kenyan shillings anywhere,"
+ * confirmed to be distorting CompanyLedgerEntry sums and
+ * AdminReportService's cross-provider totals (which were summing
+ * native-currency figures from different providers together as if they
+ * were the same unit). This reverses the PRIOR design here, which
+ * deliberately left amount/currency as native KES specifically because
+ * Disbursement had no equivalent to Deposit.priceAmount/priceCurrency at
+ * the time to safely hold a converted value alongside the original — now
+ * resolved by nativeAmount/nativeCurrency (added for exactly this),
+ * mirroring Deposit's own pattern. The real KES amount that actually
+ * leaves via Safaricom and reaches the recipient's phone is preserved
+ * there, not lost — it's just no longer what amount/currency themselves
+ * mean. What's UNCHANGED: the actual amount sent to Safaricom's own APIs
+ * (sendB2C/sendToPochi/sendB2B) still has to be KES, since that's all
+ * M-Pesa understands — this only changes what gets SAVED and EMAILED, not
+ * what's physically sent. Callers may now also specify their input amount
+ * in USD instead of KES (DisbursementRequest.currency /
+ * B2PochiRequest.currency / MpesaB2BRequest.currency) — converted to the
+ * real KES figure before ever reaching Safaricom.
  */
 @Slf4j
 @Service
@@ -73,39 +82,54 @@ public class MpesaDisbursementService {
 
     /**
      * Called from DisbursementService.processDisbursement via early return
-     * for provider=MPESA. request.getAmount() and commission are both in
-     * KES here — what actually gets sent to Safaricom — unchanged. The
-     * wallet is NOT debited here — only once completeMpesaDisbursement
-     * confirms success via Safaricom's ResultURL, where the KES->USD
-     * conversion is actually applied.
+     * for provider=MPESA. request.getAmount() is ALWAYS KES by the time it
+     * reaches here — processDisbursement converts any USD input to KES
+     * before calling this method (see its own updated javadoc), and
+     * commission (computed there) is likewise already in KES — this is
+     * exactly what actually gets sent to Safaricom. The wallet is NOT
+     * debited here — only once completeMpesaDisbursement confirms success
+     * via Safaricom's ResultURL.
+     *
+     * What's saved to the Disbursement record itself is USD, not KES —
+     * see this class's own javadoc for why. kesAmount/totalDebitedKes are
+     * converted to USD once, here, at initiation (locked in, same
+     * principle as totalDebitedUsd already was) and saved as
+     * amount/totalDebited/currency; the real KES figures are preserved
+     * separately in nativeAmount/nativeCurrency.
      */
     public DisbursementResponse disburseMpesa(String userId, Wallet wallet, DisbursementRequest request,
                                                BigDecimal commission) {
         String destination = resolveVerifiedPhoneNumber(wallet);
         String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
 
-        Disbursement disbursement = new Disbursement();
-        disbursement.setUserId(userId);
-        disbursement.setWalletId(wallet.getId());
-        disbursement.setAmount(request.getAmount());
-        BigDecimal totalDebited = request.getAmount().add(commission);
-        disbursement.setTotalDebited(totalDebited);
+        BigDecimal kesAmount = request.getAmount();
+        BigDecimal totalDebitedKes = kesAmount.add(commission);
         // Locked in NOW, at initiation — not re-derived later at
         // completion or admin approval. See Disbursement.totalDebitedUsd
         // javadoc for why this exists.
         BigDecimal initiationRate = exchangeRateService.getRate("KES", "USD");
-        disbursement.setTotalDebitedUsd(totalDebited.multiply(initiationRate).setScale(2, RoundingMode.HALF_UP));
+        BigDecimal usdAmount = kesAmount.multiply(initiationRate).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal totalDebitedUsd = totalDebitedKes.multiply(initiationRate).setScale(2, RoundingMode.HALF_UP);
+
+        Disbursement disbursement = new Disbursement();
+        disbursement.setUserId(userId);
+        disbursement.setWalletId(wallet.getId());
+        disbursement.setAmount(usdAmount);
+        disbursement.setTotalDebited(totalDebitedUsd);
+        disbursement.setTotalDebitedUsd(totalDebitedUsd);
         disbursement.setCommissionRate(commissionService.getGatewayRate());
         disbursement.setDestination(destination);
         disbursement.setProvider("MPESA");
         disbursement.setChannel("B2C");
         disbursement.setReference(reference);
         disbursement.setStatus(DisbursementStatus.PENDING);
-        disbursement.setCurrency("KES");
+        disbursement.setCurrency("USD");
+        disbursement.setNativeAmount(kesAmount);
+        disbursement.setNativeCurrency("KES");
 
         MpesaB2CResponse result;
         try {
-            result = mpesaService.sendB2C(destination, request.getAmount());
+            result = mpesaService.sendB2C(destination, kesAmount);
         } catch (Exception e) {
             log.error("M-Pesa B2C disbursement threw before a result could be returned: userId={}", userId, e);
             disbursement.setStatus(DisbursementStatus.FAILED);
@@ -144,6 +168,18 @@ public class MpesaDisbursementService {
 
         if (wallet.isFrozen()) throw new WalletFrozenException("Wallet is frozen");
 
+        if (request.getCurrency() != null && !request.getCurrency().isBlank()) {
+            String requestedCurrency = request.getCurrency().toUpperCase();
+            if ("USD".equals(requestedCurrency)) {
+                BigDecimal rateToKes = exchangeRateService.getRate("USD", "KES");
+                BigDecimal kesAmount = request.getAmount().multiply(rateToKes).setScale(2, RoundingMode.HALF_UP);
+                log.info("B2Pochi withdrawal priced: requested={} USD kesEquivalent={}", request.getAmount(), kesAmount);
+                request.setAmount(kesAmount);
+            } else if (!"KES".equals(requestedCurrency)) {
+                throw new IllegalArgumentException("B2Pochi withdrawals must be in KES or USD");
+            }
+        }
+
         // Computed here rather than in DisbursementService — this method
         // is called directly from DisbursementController, never routed
         // through DisbursementService.processDisbursement's central
@@ -173,16 +209,27 @@ public class MpesaDisbursementService {
         resolvedRequest.setOccasion(request.getOccasion());
         resolvedRequest.setReference(reference);
 
+        // What's saved to the Disbursement record itself is USD, not KES
+        // — see this class's own javadoc for why. request.getAmount()/
+        // totalDebit are KES at this point (the real figures actually
+        // sent to Safaricom); converted once, here, at initiation and
+        // saved as amount/totalDebited/currency, with the real KES
+        // figures preserved separately in nativeAmount/nativeCurrency.
+        BigDecimal kesAmount = request.getAmount();
+        BigDecimal pochiInitiationRate = exchangeRateService.getRate("KES", "USD");
+        BigDecimal usdAmount = kesAmount.multiply(pochiInitiationRate).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal totalDebitedUsd = totalDebit.multiply(pochiInitiationRate).setScale(2, RoundingMode.HALF_UP);
+
         Disbursement disbursement = new Disbursement();
         disbursement.setUserId(initiatedByUserId);
         disbursement.setWalletId(wallet.getId());
-        disbursement.setAmount(request.getAmount());
-        disbursement.setTotalDebited(totalDebit);
-        // Locked in NOW, at initiation — see Disbursement.totalDebitedUsd javadoc.
-        BigDecimal pochiInitiationRate = exchangeRateService.getRate("KES", "USD");
-        disbursement.setTotalDebitedUsd(totalDebit.multiply(pochiInitiationRate).setScale(2, RoundingMode.HALF_UP));
+        disbursement.setAmount(usdAmount);
+        disbursement.setTotalDebited(totalDebitedUsd);
+        disbursement.setTotalDebitedUsd(totalDebitedUsd);
         disbursement.setCommissionRate(commissionService.getGatewayRate());
-        disbursement.setCurrency("KES");
+        disbursement.setCurrency("USD");
+        disbursement.setNativeAmount(kesAmount);
+        disbursement.setNativeCurrency("KES");
         disbursement.setDestination(phoneNumber);
         disbursement.setProvider("MPESA");
         disbursement.setChannel("B2C_POCHI");
@@ -214,8 +261,11 @@ public class MpesaDisbursementService {
     }
 
     // ─── B2B (admin/finance-initiated, business-to-business payment) ───────
-    // Never touches a customer wallet (no walletId set) — no conversion
-    // relevant here at all, since there's no wallet to debit.
+    // Never touches a customer wallet (no walletId set) — no commission
+    // or wallet-debit conversion relevant here at all, since there's no
+    // wallet to debit. What IS still relevant: converting a USD-input
+    // request to the real KES figure before it reaches Safaricom, and
+    // what gets SAVED — see this class's own javadoc.
 
     @Transactional
     public DisbursementResponse processB2BPayment(String initiatedByUserId, MpesaB2BRequest request) {
@@ -223,6 +273,22 @@ public class MpesaDisbursementService {
         // identical fix for why this ordering matters.
         String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
         idempotencyService.checkIdempotency(reference);
+
+        if (request.getCurrency() != null && !request.getCurrency().isBlank()) {
+            String requestedCurrency = request.getCurrency().toUpperCase();
+            if ("USD".equals(requestedCurrency)) {
+                BigDecimal rateToKes = exchangeRateService.getRate("USD", "KES");
+                BigDecimal kesAmount = request.getAmount().multiply(rateToKes).setScale(2, RoundingMode.HALF_UP);
+                log.info("B2B payment priced: requested={} USD kesEquivalent={}", request.getAmount(), kesAmount);
+                request.setAmount(kesAmount);
+            } else if (!"KES".equals(requestedCurrency)) {
+                throw new IllegalArgumentException("B2B payments must be in KES or USD");
+            }
+        }
+
+        BigDecimal kesAmount = request.getAmount();
+        BigDecimal b2bRate = exchangeRateService.getRate("KES", "USD");
+        BigDecimal usdAmount = kesAmount.multiply(b2bRate).setScale(2, RoundingMode.HALF_UP);
 
         String verifiedRecipientName = null;
         String verifiedChargeProfileId = null;
@@ -240,8 +306,10 @@ public class MpesaDisbursementService {
 
                 Disbursement aborted = new Disbursement();
                 aborted.setUserId(initiatedByUserId);
-                aborted.setAmount(request.getAmount());
-                aborted.setCurrency("KES");
+                aborted.setAmount(usdAmount);
+                aborted.setCurrency("USD");
+                aborted.setNativeAmount(kesAmount);
+                aborted.setNativeCurrency("KES");
                 aborted.setDestination(request.getReceiverShortcode());
                 aborted.setProvider("MPESA");
                 aborted.setChannel("B2B");
@@ -264,8 +332,10 @@ public class MpesaDisbursementService {
 
         Disbursement disbursement = new Disbursement();
         disbursement.setUserId(initiatedByUserId);
-        disbursement.setAmount(request.getAmount());
-        disbursement.setCurrency("KES");
+        disbursement.setAmount(usdAmount);
+        disbursement.setCurrency("USD");
+        disbursement.setNativeAmount(kesAmount);
+        disbursement.setNativeCurrency("KES");
         disbursement.setDestination(request.getReceiverShortcode());
         disbursement.setProvider("MPESA");
         disbursement.setChannel("B2B");
@@ -356,12 +426,6 @@ public class MpesaDisbursementService {
                 transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmountUsd, d, d.getReference());
                 commissionService.recordGatewayCommissionFromDisbursement(d);
 
-                // Email deliberately shows d.getAmount()/d.getCurrency() —
-                // the real KES amount the recipient's phone actually
-                // received, not the wallet-side USD debit — since that's
-                // the meaningful, externally-verifiable fact for the
-                // customer ("I successfully sent X KES to this phone").
-                // d.getDestination() shown exactly as given, no masking.
                 String exchangeRateInfo = "1 KES = " + exchangeRateService.getRate("KES", "USD").toPlainString() + " USD";
                 String senderName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
                 d.setSenderName(senderName);

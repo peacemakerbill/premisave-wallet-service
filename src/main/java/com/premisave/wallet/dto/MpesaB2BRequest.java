@@ -44,4 +44,15 @@ public class MpesaB2BRequest {
      * Defaults to "4" since receiverShortcode is a paybill in the common case.
      */
     private String receiverIdentifierTypeForVerification = "4";
+
+    /**
+     * KES or USD — which currency amount above is denominated in.
+     * Defaults to KES if omitted, same reasoning as B2PochiRequest.currency
+     * — every existing caller has always assumed amount is KES (what
+     * Safaricom's B2B API actually pays out in), so the default stays KES
+     * rather than silently reinterpreting existing requests. Set to "USD"
+     * explicitly to specify the payment in dollars instead — converted to
+     * the real KES amount before being sent to Safaricom.
+     */
+    private String currency;
 }

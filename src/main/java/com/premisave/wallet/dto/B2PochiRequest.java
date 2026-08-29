@@ -33,4 +33,18 @@ public class B2PochiRequest {
 
     /** Optional idempotency key — generated if not provided. */
     private String reference;
+
+    /**
+     * KES or USD — which currency amount above is denominated in.
+     * Defaults to KES if omitted, same reasoning as
+     * DisbursementRequest.nowPaymentsPriceCurrency's default: every
+     * existing caller of this endpoint has always assumed amount is KES
+     * (this is what M-Pesa itself actually pays out in), so flipping the
+     * default here would silently reinterpret existing requests rather
+     * than just adding a new option. Set to "USD" explicitly to specify
+     * how much to withdraw in dollars instead — it's converted to the
+     * real KES amount before being sent to Safaricom's B2Pochi API,
+     * which only ever understands KES.
+     */
+    private String currency;
 }
