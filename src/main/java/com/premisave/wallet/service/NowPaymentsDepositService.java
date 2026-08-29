@@ -205,7 +205,7 @@ public class NowPaymentsDepositService {
 
         emailService.sendDepositConfirmation(wallet.getAccountNumber(), deposit.getAmount().toPlainString(),
                 deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString(),
-                "NOWPayments", exchangeRateInfo, null);
+                "NOWPayments", exchangeRateInfo, null, null);
 
         log.info("Wallet credited via NOWPayments: orderId={} amount={} paymentId={}", orderId, deposit.getAmount(), paymentId);
     }

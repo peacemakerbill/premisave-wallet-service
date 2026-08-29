@@ -150,11 +150,11 @@ public class MpesaDepositService {
         // wallet.getAccountNumber() IS the user's email — confirmed
         // consistently across ManualAdjustment/Payment/Transfer's own
         // documented use of this same field for the same purpose.
-        // phoneNumber is masked internally by EmailService, not here.
+        // phoneNumber shown in full, no masking.
         String exchangeRateInfo = "1 KES = " + rate.toPlainString() + " USD";
         emailService.sendDepositConfirmation(wallet.getAccountNumber(), usdAmount.toPlainString(),
                 deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString(),
-                "M-Pesa", exchangeRateInfo, phoneNumber);
+                "M-Pesa", exchangeRateInfo, phoneNumber, null);
 
         log.info("Wallet credited via M-Pesa STK: checkoutRequestId={} kesAmount={} usdAmount={} rate={} receipt={}",
                 checkoutRequestId, amount, usdAmount, rate, mpesaReceiptNumber);

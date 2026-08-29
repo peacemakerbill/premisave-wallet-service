@@ -30,26 +30,27 @@ import java.util.Map;
  *
  * Templates use simple {{placeholder}} string substitution, not a real
  * templating engine — deliberate, see earlier reasoning. To still
- * support OPTIONAL detail rows (gateway, exchange rate used, masked
- * contact info) without a real conditional syntax, each template has a
- * single {{extraRows}} placeholder that this class populates with zero
- * or more pre-built <tr> HTML fragments — see row()/rows() below. A row
- * whose value is null/blank contributes nothing at all, so the
+ * support OPTIONAL detail rows (gateway, exchange rate used, sender
+ * name, contact info) without a real conditional syntax, each template
+ * has a single {{extraRows}} placeholder that this class populates with
+ * zero or more pre-built <tr> HTML fragments — see row()/rows() below. A
+ * row whose value is null/blank contributes nothing at all, so the
  * placeholder is simply empty when a piece of data doesn't apply (e.g.
  * no exchange rate for a USD-native gateway like Stripe/PayPal).
  *
- * MASKING: sender/destination contact info (phone numbers, emails, bank
- * account identifiers) is masked HERE, centrally, given the RAW value —
- * callers pass what they already have; they never mask anything
- * themselves. maskContact() detects an email (contains "@") vs anything
- * else (phone number, bank account number, provider-specific ID) and
- * applies the appropriate masking for each.
+ * NO MASKING — every value (phone number, email, contact info) is shown
+ * in full, exactly as the caller supplies it. Masking was removed on
+ * request; callers pass raw values directly into the template vars, no
+ * transformation happens here anymore.
  *
- * NOT YET INCLUDED: sender/recipient FULL NAME. Wallet has no name field
- * at all (only accountNumber, which is the email) — a real name would
- * have to come from whatever service owns user profile data (a
- * genuinely separate lookup, not something derivable from data already
- * available here). Left out deliberately rather than guessed at.
+ * SENDER NAME: sendDepositConfirmation accepts a senderName parameter,
+ * used specifically for M-Pesa C2B deposits — Safaricom's own callback
+ * includes FirstName/MiddleName/LastName for the person who paid, and
+ * this is the one confirmed case where a real name is genuinely
+ * available without any extra lookup. Other gateways (Stripe, PayPal,
+ * NOWPayments, Flutterwave) generally have no equivalent field to supply
+ * here, so this stays null/blank for them and the row simply doesn't
+ * render.
  *
  * Every send is wrapped in try/catch and only logged on failure — a
  * failed email must NEVER fail the transaction it's notifying about.
@@ -89,14 +90,18 @@ public class EmailService {
      * exchangeRateInfo: a pre-formatted string, e.g. "1 KES = 0.0077
      * USD" — pass null/blank when no conversion applied (a USD-native
      * gateway).
-     * rawSource: the RAW (unmasked) phone number / email / identifier
-     * the deposit came from — masked internally before rendering; pass
-     * null/blank if not applicable.
+     * rawSource: the phone number / email / identifier the deposit came
+     * from — shown exactly as given, no masking; pass null/blank if not
+     * applicable.
+     * senderName: the actual paying party's name, when the gateway's own
+     * callback provides one (confirmed for M-Pesa C2B) — null/blank for
+     * gateways with no equivalent field.
      */
     @Async
     public void sendDepositConfirmation(String toEmail, String amount, String currency,
                                          String reference, String newBalance,
-                                         String gateway, String exchangeRateInfo, String rawSource) {
+                                         String gateway, String exchangeRateInfo, String rawSource,
+                                         String senderName) {
         Map<String, String> vars = new HashMap<>();
         vars.put("amount", amount);
         vars.put("currency", currency);
@@ -105,14 +110,15 @@ public class EmailService {
         vars.put("extraRows", rows(
                 "Payment Gateway", gateway,
                 "Exchange Rate Used", exchangeRateInfo,
-                "Paid From", maskContact(rawSource)
+                "Sender Name", senderName,
+                "Paid From", rawSource
         ));
         send(toEmail, "Deposit Confirmation - Premisave", "deposit-confirmation-email.html", vars);
     }
 
     /**
-     * destination: the RAW destination (phone number, bank account,
-     * PayPal email, etc.) — masked internally before rendering.
+     * destination: the destination (phone number, bank account, PayPal
+     * email, etc.) — shown exactly as given, no masking.
      * gateway/exchangeRateInfo: same convention as sendDepositConfirmation above.
      */
     @Async
@@ -122,7 +128,7 @@ public class EmailService {
         Map<String, String> vars = new HashMap<>();
         vars.put("amount", amount);
         vars.put("currency", currency);
-        vars.put("destination", maskContact(destination));
+        vars.put("destination", destination);
         vars.put("reference", reference);
         vars.put("extraRows", rows(
                 "Payment Gateway", gateway,
@@ -134,9 +140,9 @@ public class EmailService {
     /**
      * gateway/destination added so a failure email still tells the
      * customer WHICH withdrawal attempt this was about (which provider,
-     * to where) even though nothing was actually debited. destination is
-     * masked internally; either may be null/blank if not known at
-     * failure time.
+     * to where) even though nothing was actually debited. destination
+     * shown exactly as given, no masking; either may be null/blank if
+     * not known at failure time.
      */
     @Async
     public void sendDisbursementFailed(String toEmail, String amount, String currency, String reason,
@@ -147,7 +153,7 @@ public class EmailService {
         vars.put("reason", reason);
         vars.put("extraRows", rows(
                 "Payment Gateway", gateway,
-                "Intended Destination", maskContact(destination)
+                "Intended Destination", destination
         ));
         send(toEmail, "Disbursement Failed - Premisave", "disbursement-failed-email.html", vars);
     }
@@ -159,14 +165,11 @@ public class EmailService {
      * files, since the only real difference is a handful of labels, not
      * the overall layout.
      *
-     * counterpartyEmail is masked internally before rendering.
-     * counterpartyName: the other party's full name, if the caller has
-     * it available — currently always null/blank in practice, since no
-     * caller has a way to look up a real name yet (Wallet has no name
-     * field; that would need a separate user-profile-service lookup not
-     * yet wired in). Left in the signature so this is ready to populate
-     * the moment that lookup exists, rather than needing another
-     * signature change later.
+     * counterpartyEmail shown exactly as given, no masking.
+     * counterpartyName: the other party's full name, resolved via
+     * AuthServiceClient by the caller (TransferService) — may still be
+     * null/blank if that lookup failed or the account has no name on
+     * file; the row simply doesn't render in that case.
      *
      * @param isSenderCopy true for the copy sent to whoever sent the
      *                      money, false for the copy sent to whoever
@@ -179,7 +182,7 @@ public class EmailService {
         Map<String, String> vars = new HashMap<>();
         vars.put("amount", amount);
         vars.put("currency", currency);
-        vars.put("counterpartyEmail", maskContact(counterpartyEmail));
+        vars.put("counterpartyEmail", counterpartyEmail);
         vars.put("reference", reference);
         vars.put("extraRows", rows(
                 isSenderCopy ? "Recipient Name" : "Sender Name", counterpartyName
@@ -199,7 +202,7 @@ public class EmailService {
         send(toEmail, subject, "transfer-notification-email.html", vars);
     }
 
-    /** For a Payment (wallet deducted for a service — e.g. a booking fee), not a Disbursement — genuinely different wording, hence its own template rather than reusing disbursement-success-email.html's static "Withdrawal Successful" text. No gateway/exchange-rate/masked-contact fields — this is an internal deduction with no external counterparty at all. */
+    /** For a Payment (wallet deducted for a service — e.g. a booking fee), not a Disbursement — genuinely different wording, hence its own template rather than reusing disbursement-success-email.html's static "Withdrawal Successful" text. No gateway/exchange-rate/contact fields — this is an internal deduction with no external counterparty at all. */
     @Async
     public void sendPaymentConfirmation(String toEmail, String amount, String currency,
                                          String service, String reference) {
@@ -270,52 +273,5 @@ public class EmailService {
             return "";
         }
         return String.format(ROW_HTML, label, value);
-    }
-
-    // ─── Masking (see class javadoc) ────────────────────────────────────────
-
-    /** Detects an email (contains "@") vs anything else and applies the appropriate masking. Returns "" for null/blank input, never null — safe to hand straight to rows()/row() above. */
-    private static String maskContact(String contact) {
-        if (contact == null || contact.isBlank()) {
-            return "";
-        }
-        return contact.contains("@") ? maskEmail(contact) : maskGeneric(contact);
-    }
-
-    /** Keeps the first 2 characters of the local part and the full domain visible, e.g. "grahambill022@gmail.com" -> "gr***********@gmail.com". */
-    private static String maskEmail(String email) {
-        String[] parts = email.split("@", 2);
-        if (parts.length != 2 || parts[1].isBlank()) {
-            return maskGeneric(email);
-        }
-        String local = parts[0];
-        String domain = parts[1];
-        if (local.length() <= 2) {
-            return "*".repeat(Math.max(local.length(), 1)) + "@" + domain;
-        }
-        return local.substring(0, 2) + "*".repeat(local.length() - 2) + "@" + domain;
-    }
-
-    /**
-     * Generic masking for phone numbers, bank account numbers, or any
-     * other provider-specific destination identifier — keeps the first
-     * and last few characters visible, masks the middle, e.g.
-     * "254712345678" -> "254******678", "044-1234567890" ->
-     * "044***********890" is intentionally NOT special-cased for the
-     * "-" separator some Flutterwave bank destinations use — the exact
-     * position of masked characters relative to that separator isn't
-     * important, only that most of the identifier is hidden.
-     */
-    private static String maskGeneric(String value) {
-        int length = value.length();
-        if (length <= 4) {
-            return "*".repeat(length);
-        }
-        if (length <= 8) {
-            return value.charAt(0) + "*".repeat(length - 2) + value.charAt(length - 1);
-        }
-        String start = value.substring(0, 3);
-        String end = value.substring(length - 3);
-        return start + "*".repeat(length - 6) + end;
     }
 }

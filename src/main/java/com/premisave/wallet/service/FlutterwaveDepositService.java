@@ -257,7 +257,7 @@ public class FlutterwaveDepositService {
 
         emailService.sendDepositConfirmation(wallet.getAccountNumber(), deposit.getAmount().toPlainString(),
                 deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString(),
-                "Flutterwave", exchangeRateInfo, deposit.getSource());
+                "Flutterwave", exchangeRateInfo, deposit.getSource(), null);
 
         log.info("Wallet credited via Flutterwave: txRef={} amount={} providerReference={} (from initiationRate)",
                 txRef, deposit.getAmount(), providerReference);

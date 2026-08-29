@@ -2,7 +2,6 @@ package com.premisave.wallet.service;
 
 import com.premisave.wallet.entity.Deposit;
 import com.premisave.wallet.entity.Transaction;
-import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.enums.TransactionStatus;
 import com.premisave.wallet.enums.TransactionType;
 import com.premisave.wallet.repository.TransactionRepository;
@@ -34,7 +33,14 @@ public class DepositTransactionRecorder {
         tx.setType(TransactionType.DEPOSIT);
         tx.setStatus(TransactionStatus.COMPLETED);
         tx.setAmount(amount);
-        tx.setCurrency(Currency.KES);
+        // was hardcoded Currency.KES regardless of the deposit's
+        // actual currency — predates the wallet-currency-to-USD
+        // conversion work entirely, back when every deposit really was
+        // KES and hardcoding it was correct at the time. Every deposit
+        // is USD-denominated on the wallet side now (see Deposit.currency,
+        // already set correctly by every provider's deposit service) —
+        // this just needed to read that instead of assuming.
+        tx.setCurrency(deposit.getCurrency());
         tx.setDescription("Deposit via " + deposit.getProvider());
         tx.setReference(reference);
         tx.setProviderReference(deposit.getProviderReference());

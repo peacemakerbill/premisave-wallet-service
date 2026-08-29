@@ -250,7 +250,7 @@ public class PaypalDepositService {
 
         emailService.sendDepositConfirmation(wallet.getAccountNumber(), deposit.getAmount().toPlainString(),
                 deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString(),
-                "PayPal", null, captureResult.payerEmail());
+                "PayPal", null, captureResult.payerEmail(), null);
 
         log.info("Wallet credited via PayPal: orderId={} amount={} captureId={}",
                 deposit.getReference(), deposit.getAmount(), captureResult.captureId());
