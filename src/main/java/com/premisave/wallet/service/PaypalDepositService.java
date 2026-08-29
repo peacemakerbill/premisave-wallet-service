@@ -16,7 +16,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.Map;
 
 /**
@@ -43,7 +42,6 @@ public class PaypalDepositService {
     private final WalletRepository walletRepository;
     private final DepositRepository depositRepository;
     private final PaypalService paypalService;
-    private final FxRateService fxRateService;
     private final DepositTransactionRecorder depositTransactionRecorder;
     private final EmailService emailService;
     private final UserNameResolver userNameResolver;
@@ -56,7 +54,6 @@ public class PaypalDepositService {
         }
 
         BigDecimal usdAmount = request.getAmount();
-        BigDecimal usdToKesRate = fxRateService.getRate("USD", "KES");
 
         String existingVaultId = wallet.getPaypalVaultId();
         String existingCustomerId = wallet.getPaypalCustomerId();
@@ -65,23 +62,20 @@ public class PaypalDepositService {
                 usdAmount, "USD", idempotencyKey, existingVaultId, existingCustomerId, true);
 
         String orderId = result.orderId();
-        BigDecimal kesEquivalent = usdAmount.multiply(usdToKesRate).setScale(2, RoundingMode.HALF_UP);
 
-        log.info("PayPal Order created: userId={} orderId={} usdAmount={} kesEquivalent={} rate={} vaulted={} requiresAction={}",
-                userId, orderId, usdAmount, kesEquivalent, usdToKesRate,
+        log.info("PayPal Order created: userId={} orderId={} usdAmount={} vaulted={} requiresAction={}",
+                userId, orderId, usdAmount,
                 existingVaultId != null, result.approveUrl() != null);
 
         Deposit deposit = new Deposit();
         deposit.setUserId(userId);
         deposit.setWalletId(wallet.getId());
-        deposit.setAmount(kesEquivalent);
-        deposit.setCurrency(Currency.KES);
+        deposit.setAmount(usdAmount);
+        deposit.setCurrency(Currency.USD);
         deposit.setProvider("PAYPAL");
         deposit.setChannel("PAYPAL_ORDER");
         deposit.setStatus(DepositStatus.PENDING);
         deposit.setReference(orderId);
-        deposit.setPriceAmount(usdAmount);
-        deposit.setPriceCurrency("usd");
         depositRepository.save(deposit);
 
         if (result.approveUrl() == null) {
@@ -107,7 +101,7 @@ public class PaypalDepositService {
 
         return new PaymentResponse(true, result.approveUrl(),
                 "Redirect the user to the PayPal approval URL to complete the deposit. "
-                        + "USD " + usdAmount + " will be credited as approximately KES " + kesEquivalent + ".");
+                        + "USD " + usdAmount + " will be credited to your wallet.");
     }
 
     @Transactional
