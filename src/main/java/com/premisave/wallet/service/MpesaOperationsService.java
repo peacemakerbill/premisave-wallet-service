@@ -16,13 +16,21 @@ import com.premisave.wallet.enums.TransactionType;
 import com.premisave.wallet.repository.MpesaOperationRepository;
 import com.premisave.wallet.repository.TransactionRepository;
 import com.premisave.wallet.repository.WalletRepository;
+import com.premisave.wallet.util.DateRangeCriteriaUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -42,6 +50,7 @@ public class MpesaOperationsService {
     private final MpesaService mpesaService;
     private final IdempotencyService idempotencyService;
     private final GatewayBalanceSnapshotService gatewayBalanceSnapshotService;
+    private final MongoTemplate mongoTemplate;
 
     // ─── Account Balance ─────────────────────────────────────────────────────
 
@@ -133,14 +142,6 @@ public class MpesaOperationsService {
             op.setStatus(DisbursementStatus.FAILED);
             operationRepository.save(op);
 
-            //this branch previously returned immediately,
-            // meaning a failed ACCOUNT_BALANCE check left its
-            // GatewayBalanceSnapshot stuck showing PENDING_ASYNC
-            // forever, with an empty balances array — even though
-            // MpesaOperation correctly recorded the failure. The
-            // snapshot's own status field already documents "ERROR" as
-            // a valid value (see GatewayBalanceSnapshot's own javadoc)
-            // for exactly this case; it just was never actually reached.
             // Saves a NEW snapshot rather than updating the original
             // PENDING_ASYNC one — same history-preserving,
             // never-overwritten pattern every other snapshot save
@@ -442,6 +443,42 @@ public class MpesaOperationsService {
 
     public MpesaOperation getOperation(String conversationId) {
         return operationRepository.findByConversationId(conversationId).orElse(null);
+    }
+
+    /**
+     * Admin-only: every M-Pesa operation (Account Balance, Transaction
+     * Status, Reversal, B2Pochi), paginated — same gap CommissionService's
+     * getAllLedgerEntries closed for the company ledger: the repository
+     * has always been able to hold this data, but nothing exposed it
+     * through the API before this. Only getOperation(conversationId), a
+     * single-record lookup, existed until now.
+     *
+     * type/status/date-range all optional, same dynamic-Criteria approach
+     * as CommissionService/DepositService/DisbursementService's own admin
+     * filtering. type/status are read as plain strings (matching how
+     * every other admin filter in this codebase accepts them from a
+     * controller) and safely upper-cased before matching against the
+     * MpesaOperationType/DisbursementStatus enums stored on the document
+     * — an unrecognized value simply matches nothing rather than
+     * throwing, since Criteria.is() compares against the raw stored enum
+     * value without needing Enum.valueOf() at all.
+     */
+    public Page<MpesaOperation> getAllOperations(String type, String status, LocalDate fromDate,
+                                                  LocalDate toDate, Pageable pageable) {
+        Criteria criteria = new Criteria();
+        if (type != null && !type.isBlank()) {
+            criteria = criteria.and("type").is(type.toUpperCase());
+        }
+        if (status != null && !status.isBlank()) {
+            criteria = criteria.and("status").is(status.toUpperCase());
+        }
+        criteria = DateRangeCriteriaUtil.applyDateRange(criteria, "createdAt", fromDate, toDate);
+
+        long total = mongoTemplate.count(new Query(criteria), MpesaOperation.class);
+        Query pagedQuery = new Query(criteria).with(pageable);
+        List<MpesaOperation> content = mongoTemplate.find(pagedQuery, MpesaOperation.class);
+
+        return new PageImpl<>(content, pageable, total);
     }
 
     // ─── Stuck-operation sweeper (mirrors DisbursementService's) ────────────

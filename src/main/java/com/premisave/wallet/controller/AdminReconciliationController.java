@@ -10,6 +10,9 @@ import com.premisave.wallet.service.DisbursementService;
 import com.premisave.wallet.service.MpesaOperationsService;
 import com.premisave.wallet.service.ReconciliationService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PagedModel;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -20,6 +23,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -59,6 +63,30 @@ public class AdminReconciliationController {
     @GetMapping("/pending")
     public ResponseEntity<ApiResponse<List<PendingReconciliationItem>>> getAllPending() {
         return ResponseEntity.ok(ApiResponse.success("Pending items retrieved", reconciliationService.getAllPending()));
+    }
+
+    /**
+     * Admin-only: every M-Pesa operation (Account Balance, Transaction
+     * Status, Reversal, B2Pochi) ever recorded, paginated — the actual
+     * "fetch all M-Pesa operations from the DB" this was built for.
+     * Previously only /pending existed, which mixes M-Pesa operations in
+     * with pending Deposits/Disbursements/Transfers/Payments and only
+     * ever shows currently-pending ones, never a full history.
+     *
+     * type/status/fromDate/toDate all optional — omitting all of them
+     * returns the full, unfiltered history.
+     * GET /admin/reconciliation/mpesa-operations?type=REVERSAL&status=FAILED&fromDate=2026-08-01&toDate=2026-08-29
+     */
+    @GetMapping("/mpesa-operations")
+    public ResponseEntity<ApiResponse<PagedModel<MpesaOperation>>> getAllOperations(
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            Pageable pageable) {
+        PagedModel<MpesaOperation> body = new PagedModel<>(
+                mpesaOperationsService.getAllOperations(type, status, fromDate, toDate, pageable));
+        return ResponseEntity.ok(ApiResponse.success("M-Pesa operations retrieved", body));
     }
 
     // ─── Deposit resolution ──────────────────────────────────────────────────
