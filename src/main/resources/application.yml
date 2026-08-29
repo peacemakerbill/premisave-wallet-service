@@ -275,6 +275,15 @@ exchange-rate:
   refresh-interval-ms: ${EXCHANGE_RATE_REFRESH_INTERVAL_MS:1200000}
   max-retries: ${EXCHANGE_RATE_MAX_RETRIES:3}
 
+# ─── Notifications ─────────────────────────────────────────────────────────
+# See MpesaDisbursementService.notifyB2BRecipients — B2B never touches a
+# customer wallet, so there's no wallet owner's email to notify the way
+# B2C/B2Pochi have; this is who gets the success/failure email instead.
+# Comma-separated, no spaces required around commas (trimmed either way).
+# Empty/unset is safe — logs a warning and sends nothing, never throws.
+notifications:
+  b2b-recipients: ${B2B_NOTIFICATION_RECIPIENTS:}
+
 logging:
   level:
     "[com.premisave]": DEBUG

@@ -20,11 +20,14 @@ import com.premisave.wallet.repository.DisbursementRepository;
 import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -78,6 +81,22 @@ public class MpesaDisbursementService {
     private final EmailService emailService;
     private final UserNameResolver userNameResolver;
     private final ExchangeRateService exchangeRateService;
+
+    /**
+     * Comma-separated admin/finance notification emails for B2B payments —
+     * explicit request: "who should receive the B2B success/failure
+     * email? all admins, finance." B2B never touches a customer wallet
+     * (see class javadoc), so there's no wallet owner's email to look up
+     * the way B2C/B2Pochi have — and AuthServiceClient only supports
+     * looking a user up BY email, with no userId-based lookup at all, so
+     * d.getUserId() (the initiating admin's userId) can't be resolved
+     * into an email that way either. A configured distribution list
+     * sidesteps both problems: no new cross-service lookup capability
+     * needed, and trivially updatable when who's on the finance/admin
+     * team changes — just edit this one property, no code change.
+     */
+    @Value("${notifications.b2b-recipients:}")
+    private String b2bRecipientsConfig;
 
     // ─── User-facing B2C withdrawal ──────────────────────────────────────────
 
@@ -275,7 +294,15 @@ public class MpesaDisbursementService {
         String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
         idempotencyService.checkIdempotency(reference);
 
-
+        // Fixed: previously always assumed request.getAmount() was KES,
+        // with no option otherwise. Explicit request: "the amount users
+        // input for disbursements on M-Pesa can either be on KES or USD."
+        // Mutates request.amount in place (same pattern as
+        // DisbursementService.processDisbursement's NOWPayments/MPESA
+        // blocks) since mpesaService.sendB2B(request) below reads the
+        // amount directly off this same request object, not a separate
+        // parameter — converting here means that call automatically gets
+        // the correct KES figure with no further change needed there.
         if (request.getCurrency() != null && !request.getCurrency().isBlank()) {
             String requestedCurrency = request.getCurrency().toUpperCase();
             if ("USD".equals(requestedCurrency)) {
@@ -431,7 +458,14 @@ public class MpesaDisbursementService {
                 transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmountUsd, d, d.getReference());
                 commissionService.recordGatewayCommissionFromDisbursement(d);
 
-
+                // Fixed comment (code unchanged): this already reads
+                // d.getAmount()/d.getCurrency() directly, so it now sends
+                // USD automatically — those are USD as of this class's
+                // revised currency model (see class javadoc), not the
+                // native KES payout anymore. exchangeRateInfo below still
+                // gives the recipient's real KES context via the "1 KES =
+                // X USD" rate, without needing a separate dedicated row.
+                // d.getDestination() shown exactly as given, no masking.
                 String exchangeRateInfo = "1 KES = " + exchangeRateService.getRate("KES", "USD").toPlainString() + " USD";
                 String senderName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
                 d.setSenderName(senderName);
@@ -442,12 +476,26 @@ public class MpesaDisbursementService {
                                 senderName, wallet.getAccountNumber(), wallet.getId()));
             } else if ("B2B".equals(d.getChannel())) {
                 // Explicit request: "for b2b ensure it is tracked on the
-
+                // ledger as well, these are like losses to the company."
+                // Mirrors the EXACT same pattern DisbursementService.
+                // adminApproveDisbursement already uses for the
+                // conceptually identical case — a company-initiated
+                // disbursement with no customer wallet involved at all
+                // (Stripe/PayPal/NOWPayments' admin-approved
+                // "COMPANY_DISBURSEMENT" path) — just triggered here at
+                // CONFIRMED async success (Safaricom's ResultURL callback)
+                // rather than at synchronous admin approval, since B2B
+                // genuinely doesn't know it succeeded until this callback
+                // arrives. d.getAmount() is already USD (see this class's
+                // own currency-model note) — negated, since this is a
+                // loss, not a gain, matching CompanyLedgerEntry.amount's
+                // own signed-value convention.
                 disbursementRepository.save(d);
                 commissionService.recordCommission("COMPANY_DISBURSEMENT", d.getAmount().negate(), null, null,
                         "DISBURSEMENT", d.getId(), d.getReference(), d.getUserId(),
                         "Company-initiated MPESA B2B payment to " + d.getDestination(),
                         Currency.valueOf(d.getCurrency()));
+                notifyB2BRecipients(d, true, null);
             } else {
                 disbursementRepository.save(d);
             }
@@ -466,7 +514,8 @@ public class MpesaDisbursementService {
             // actual customer inbox to notify — a company-initiated one
             // (B2B, no walletId) has no wallet to look up here, and
             // d.getUserId() there is an admin identifier, not a real
-            // customer's own email.
+            // customer's own email. B2B gets its own notification path
+            // instead — see notifyB2BRecipients.
             if (d.getWalletId() != null) {
                 walletRepository.findById(d.getWalletId()).ifPresent(wallet -> {
                     String senderName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
@@ -475,6 +524,8 @@ public class MpesaDisbursementService {
                             new EmailService.DisbursementDetails("M-Pesa", null,
                                     senderName, wallet.getAccountNumber(), wallet.getId()));
                 });
+            } else if ("B2B".equals(d.getChannel())) {
+                notifyB2BRecipients(d, false, resultDesc);
             }
 
             log.warn("M-Pesa {} disbursement failed: id={} conversationId={} reason={}",
@@ -490,6 +541,47 @@ public class MpesaDisbursementService {
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    /** Parses b2bRecipientsConfig into a clean list — trims whitespace, drops empty entries, handles the property being entirely unset. */
+    private List<String> b2bRecipients() {
+        if (b2bRecipientsConfig == null || b2bRecipientsConfig.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(b2bRecipientsConfig.split(","))
+                .map(String::trim)
+                .filter(email -> !email.isBlank())
+                .toList();
+    }
+
+    /**
+     * Sends one copy of the B2B success/failure email to every configured
+     * recipient — same "one email per party" pattern
+     * TransferService/EmailService.sendTransferNotification already uses
+     * for sending a separate copy to each of two parties, just scaled to
+     * however many admin/finance addresses are configured here. Logs a
+     * warning and sends nothing if the property is unset — a missing
+     * config value should never throw and break the disbursement
+     * completion flow itself.
+     */
+    private void notifyB2BRecipients(Disbursement d, boolean success, String failureReason) {
+        List<String> recipients = b2bRecipients();
+        if (recipients.isEmpty()) {
+            log.warn("B2B disbursement id={} completed (success={}) but notifications.b2b-recipients is not configured — no email sent",
+                    d.getId(), success);
+            return;
+        }
+        for (String recipient : recipients) {
+            if (success) {
+                emailService.sendDisbursementSuccess(recipient, d.getAmount().toPlainString(),
+                        d.getCurrency(), d.getDestination(), d.getReference(),
+                        new EmailService.DisbursementDetails("M-Pesa", null, null, null, null));
+            } else {
+                emailService.sendDisbursementFailed(recipient, d.getAmount().toPlainString(),
+                        d.getCurrency(), failureReason, d.getDestination(),
+                        new EmailService.DisbursementDetails("M-Pesa", null, null, null, null));
+            }
+        }
+    }
 
     private String resolveVerifiedPochiPhoneNumber(Wallet wallet) {
         if (wallet != null && wallet.getPochiPhoneNumber() != null && !wallet.getPochiPhoneNumber().isBlank()) {

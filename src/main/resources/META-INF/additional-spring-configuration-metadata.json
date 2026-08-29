@@ -557,6 +557,23 @@
 			"type": "java.lang.String",
 			"description": "Frontend application URL used for CORS allowed-origins configuration.",
 			"defaultValue": "http://localhost:3000"
+		},
+		{
+			"name": "notifications.b2b-recipients",
+			"type": "java.lang.String",
+			"description": "Comma-separated admin/finance email addresses notified on every B2B success/failure (see MpesaDisbursementService.notifyB2BRecipients). B2B never touches a customer wallet, so there's no wallet owner's email to notify the way B2C/B2Pochi have — this is who gets it instead. Whitespace around commas is trimmed. Left empty/unset is safe: logs a warning and sends no email, never throws."
+		},
+		{
+			"name": "exchange-rate.refresh-interval-ms",
+			"type": "java.lang.Long",
+			"description": "How often (in milliseconds) ExchangeRateService's scheduled job re-fetches every previously-saved currency pair from Frankfurter and refreshes the Redis/MongoDB cache. Read directly by the @Scheduled annotation itself via this same property placeholder, not through a properties class at annotation-processing time — kept in sync with the same default (20 minutes) regardless.",
+			"defaultValue": 1200000
+		},
+		{
+			"name": "exchange-rate.max-retries",
+			"type": "java.lang.Integer",
+			"description": "Maximum retry attempts ExchangeRateService's scheduled refresh makes per currency pair before giving up on that pair for the current refresh cycle and moving on to the next.",
+			"defaultValue": 3
 		}
 	],
 	"hints": [
