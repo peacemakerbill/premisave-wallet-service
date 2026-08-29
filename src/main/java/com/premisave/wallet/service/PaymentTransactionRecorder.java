@@ -26,7 +26,7 @@ public class PaymentTransactionRecorder {
         tx.setType(TransactionType.PAYMENT);
         tx.setStatus(TransactionStatus.COMPLETED);
         tx.setAmount(payment.getAmount());
-        tx.setCurrency(Currency.KES);
+        tx.setCurrency(Currency.USD);
         tx.setDescription("Payment to " + payment.getService()
                 + (payment.getDescription() != null && !payment.getDescription().isBlank() ? " - " + payment.getDescription() : ""));
         tx.setReference(payment.getReference());

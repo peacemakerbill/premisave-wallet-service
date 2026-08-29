@@ -109,7 +109,7 @@ public class AdminWalletService {
         adjustment.setAccountNumber(wallet.getAccountNumber());
         adjustment.setType(ManualAdjustmentType.CREDIT);
         adjustment.setAmount(request.getAmount());
-        adjustment.setCurrency(Currency.KES);
+        adjustment.setCurrency(Currency.USD);
         adjustment.setBalanceBefore(balanceBefore);
         adjustment.setBalanceAfter(balanceAfter);
         adjustment.setReason(request.getReason());
@@ -149,7 +149,7 @@ public class AdminWalletService {
         adjustment.setAccountNumber(wallet.getAccountNumber());
         adjustment.setType(ManualAdjustmentType.DEBIT);
         adjustment.setAmount(request.getAmount());
-        adjustment.setCurrency(Currency.KES);
+        adjustment.setCurrency(Currency.USD);
         adjustment.setBalanceBefore(balanceBefore);
         adjustment.setBalanceAfter(balanceAfter);
         adjustment.setReason(request.getReason());
@@ -295,7 +295,7 @@ public class AdminWalletService {
         tx.setType(type);
         tx.setStatus(TransactionStatus.COMPLETED);
         tx.setAmount(amount);
-        tx.setCurrency(Currency.KES);
+        tx.setCurrency(Currency.USD);
         tx.setDescription(description);
         tx.setReference(reference);
         return tx;

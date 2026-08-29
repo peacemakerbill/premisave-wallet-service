@@ -80,13 +80,14 @@ public class CommissionService {
      * actual money movement has already succeeded, same "record only
      * once the real event happened" ordering already used for every
      * other entity in this codebase.
+     *
      */
     public void recordCommission(String type, BigDecimal commissionAmount, BigDecimal rate, BigDecimal grossAmount,
                                   String sourceType, String sourceId, String sourceReference, String userId,
-                                  String description) {
+                                  String description, Currency currency) {
         CompanyLedgerEntry entry = new CompanyLedgerEntry();
         entry.setAmount(commissionAmount);
-        entry.setCurrency(Currency.KES);
+        entry.setCurrency(currency);
         entry.setType(type);
         entry.setDescription(description);
         entry.setSourceType(sourceType);
@@ -119,7 +120,8 @@ public class CommissionService {
         }
         recordCommission("COMMISSION_DISBURSEMENT", commission, d.getCommissionRate(), d.getAmount(),
                 "DISBURSEMENT", d.getId(), d.getReference(), d.getUserId(),
-                "Commission on " + d.getProvider() + " disbursement to " + d.getDestination());
+                "Commission on " + d.getProvider() + " disbursement to " + d.getDestination(),
+                Currency.valueOf(d.getCurrency()));
     }
 
     /**

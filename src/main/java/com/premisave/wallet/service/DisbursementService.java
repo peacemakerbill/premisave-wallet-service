@@ -5,6 +5,7 @@ import com.premisave.wallet.dto.DisbursementRecordResponse;
 import com.premisave.wallet.dto.DisbursementResponse;
 import com.premisave.wallet.entity.Disbursement;
 import com.premisave.wallet.entity.Wallet;
+import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.enums.DisbursementStatus;
 import com.premisave.wallet.exception.InsufficientFundsException;
 import com.premisave.wallet.exception.ResourceNotFoundException;
@@ -27,6 +28,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -67,6 +69,7 @@ public class DisbursementService {
 
     private final WalletRepository walletRepository;
     private final DisbursementRepository disbursementRepository;
+    private final ExchangeRateService exchangeRateService;
     private final MongoTemplate mongoTemplate;
     private final IdempotencyService idempotencyService;
     private final FxRateService fxRateService;
@@ -102,7 +105,14 @@ public class DisbursementService {
      */
     @Transactional
     public DisbursementResponse processDisbursement(String userId, DisbursementRequest request) {
-        idempotencyService.checkIdempotency(request.getReference());
+        // Resolved BEFORE the idempotency check below — previously the
+        // check ran on request.getReference() directly while the
+        // UUID-fallback (originally further down) only applied afterward,
+        // meaning an omitted reference reached checkIdempotency as null
+        // instead of ever getting the fallback that's specifically meant
+        // to protect this check.
+        String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
+        idempotencyService.checkIdempotency(reference);
 
         Wallet wallet = walletRepository.findByUserId(userId)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
@@ -210,13 +220,19 @@ public class DisbursementService {
             destination = request.getDestination();
         }
 
-        String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
-
         Disbursement disbursement = new Disbursement();
         disbursement.setUserId(userId);
         disbursement.setWalletId(wallet.getId());
         disbursement.setAmount(request.getAmount());
         disbursement.setTotalDebited(totalDebit);
+        // These three providers are already USD-native — totalDebitedUsd
+        // simply equals totalDebit, no real conversion needed. Still set
+        // explicitly (not left null) so every completion/approval path
+        // can read this field the same way regardless of provider,
+        // rather than needing provider-specific branching to know
+        // whether conversion applies. See Disbursement.totalDebitedUsd
+        // javadoc.
+        disbursement.setTotalDebitedUsd(totalDebit);
         disbursement.setCommissionRate(commissionService.getGatewayRate());
         disbursement.setDestination(destination);
         disbursement.setProvider(provider);
@@ -390,15 +406,26 @@ public class DisbursementService {
                     "Only a PENDING disbursement can be approved — this disbursement is already " + disbursement.getStatus());
         }
 
-        BigDecimal debitAmount = disbursement.getTotalDebited() != null
-                ? disbursement.getTotalDebited() : disbursement.getAmount();
+        BigDecimal debitAmount;
+        if (disbursement.getTotalDebitedUsd() != null) {
+            debitAmount = disbursement.getTotalDebitedUsd();
+        } else {
+            BigDecimal nativeAmount = disbursement.getTotalDebited() != null
+                    ? disbursement.getTotalDebited() : disbursement.getAmount();
+            String nativeCurrency = disbursement.getCurrency() != null ? disbursement.getCurrency() : "USD";
+            debitAmount = "USD".equals(nativeCurrency)
+                    ? nativeAmount
+                    : nativeAmount.multiply(exchangeRateService.getRate(nativeCurrency, "USD"))
+                            .setScale(2, RoundingMode.HALF_UP);
+        }
 
         if (disbursement.getWalletId() == null || disbursement.getWalletId().isBlank()) {
             commissionService.recordCommission("COMPANY_DISBURSEMENT", debitAmount.negate(), null, null,
                     "DISBURSEMENT", disbursement.getId(), disbursement.getReference(), disbursement.getUserId(),
                     "Company-initiated " + disbursement.getProvider() + " " + disbursement.getChannel()
                             + " disbursement to " + disbursement.getDestination()
-                            + " — manually approved by admin " + approvedBy);
+                            + " — manually approved by admin " + approvedBy,
+                    Currency.USD);
 
             disbursement.setStatus(DisbursementStatus.SUCCESS);
             disbursementRepository.save(disbursement);

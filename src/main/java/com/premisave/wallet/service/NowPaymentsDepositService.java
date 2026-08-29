@@ -34,10 +34,15 @@ import java.util.List;
  * PaypalDepositService/FlutterwaveDepositService still deal in Transaction
  * directly — not yet migrated to this same pattern.
  *
- * Unlike every other provider here, NOWPayments deposits are priced in
- * KES directly (price_currency=kes) and NOWPayments itself quotes the
- * crypto-equivalent amount at checkout time — no FxRateService needed on
- * this side, the conversion happens on NOWPayments' end, not ours.
+ * Unlike every other provider here, NOWPayments deposits can be priced
+ * in ANY fiat currency the client chooses (via
+ * request.getNowPaymentsPriceCurrency(), defaulting to "usd"), while
+ * NOWPayments itself separately quotes the crypto-equivalent amount at
+ * checkout time. When the price currency isn't already USD, this class
+ * converts it to USD (via ExchangeRateService) before crediting the
+ * wallet — the wallet is fixed at USD, so that's the only conversion
+ * target that's ever correct here, regardless of what fiat currency the
+ * customer chose to be priced in.
  */
 @Slf4j
 @Service
@@ -47,7 +52,7 @@ public class NowPaymentsDepositService {
     private final WalletRepository walletRepository;
     private final DepositRepository depositRepository;
     private final NowPaymentsService nowPaymentsService;
-    private final FxRateService fxRateService;
+    private final ExchangeRateService exchangeRateService;
     private final DepositTransactionRecorder depositTransactionRecorder;
     private final EmailService emailService;
     private final UserNameResolver userNameResolver;
@@ -60,19 +65,18 @@ public class NowPaymentsDepositService {
      * (e.g. "usdttrc20", "btc").
      *
      * request.getNowPaymentsPriceCurrency() = the FIAT currency the amount
-     * is denominated in for pricing (defaults to "usd" — see
-     * DepositRequest.nowPaymentsPriceCurrency's javadoc for why this isn't
-     * hardcoded to KES the way every other provider's deposit amount is).
+     * is denominated in for pricing (defaults to "usd").
      *
      * request.getAmount() is priced in THAT fiat currency and sent to
      * NOWPayments as-is (so their quote reflects exactly what the customer
-     * agreed to pay), then SEPARATELY converted to KES via FxRateService
-     * — skipped entirely if the price currency is already KES — and that
-     * converted figure is what actually gets stored as Deposit.amount and
-     * credited to the wallet on confirmation. Same "compute the converted
-     * amount once at initiation, credit that fixed figure on confirmation"
-     * pattern already used by disburseStripe/disbursePaypal on the
-     * withdrawal side.
+     * agreed to pay), then SEPARATELY converted to USD via
+     * ExchangeRateService — skipped entirely if the price currency is
+     * already USD — and that converted figure is what actually gets
+     * stored as Deposit.amount and credited to the wallet on
+     * confirmation. Same "compute the converted amount once at
+     * initiation, credit that fixed figure on confirmation" pattern
+     * already used by disburseStripe/disbursePaypal on the withdrawal
+     * side.
      *
      * order_id is set to the idempotencyKey, same role as every other
      * provider's txRef/reference — this is what the IPN webhook and any
@@ -95,7 +99,7 @@ public class NowPaymentsDepositService {
         if (payCurrency == null || payCurrency.isBlank()) {
             throw new IllegalArgumentException(
                     "currency is required for NOWPayments deposits — the CRYPTOCURRENCY the customer will pay in "
-                            + "(e.g. \"usdttrc20\", \"btc\"), not the wallet's KES balance currency.");
+                            + "(e.g. \"usdttrc20\", \"btc\"), not the wallet's USD balance currency.");
         }
 
         String priceCurrency = request.getNowPaymentsPriceCurrency() != null
@@ -103,12 +107,12 @@ public class NowPaymentsDepositService {
                 ? request.getNowPaymentsPriceCurrency().toLowerCase()
                 : "usd";
 
-        BigDecimal kesAmount;
-        if ("kes".equals(priceCurrency)) {
-            kesAmount = request.getAmount();
+        BigDecimal usdAmount;
+        if ("usd".equals(priceCurrency)) {
+            usdAmount = request.getAmount();
         } else {
-            BigDecimal rateToKes = fxRateService.getRate(priceCurrency.toUpperCase(), "KES");
-            kesAmount = request.getAmount().multiply(rateToKes).setScale(2, java.math.RoundingMode.HALF_UP);
+            BigDecimal rateToUsd = exchangeRateService.getRate(priceCurrency.toUpperCase(), "USD");
+            usdAmount = request.getAmount().multiply(rateToUsd).setScale(2, java.math.RoundingMode.HALF_UP);
         }
 
         NowPaymentsService.CreatePaymentResult result = nowPaymentsService.createPayment(
@@ -120,14 +124,14 @@ public class NowPaymentsDepositService {
             return new PaymentResponse(false, null, "NOWPayments payment creation failed: " + result.message());
         }
 
-        log.info("NOWPayments deposit priced: userId={} priceAmount={} {} kesEquivalent={}",
-                userId, request.getAmount(), priceCurrency.toUpperCase(), kesAmount);
+        log.info("NOWPayments deposit priced: userId={} priceAmount={} {} usdEquivalent={}",
+                userId, request.getAmount(), priceCurrency.toUpperCase(), usdAmount);
 
         Deposit deposit = new Deposit();
         deposit.setUserId(userId);
         deposit.setWalletId(wallet.getId());
-        deposit.setAmount(kesAmount); // KES-converted amount, credited as-is on confirmation
-        deposit.setCurrency(Currency.KES);
+        deposit.setAmount(usdAmount); // USD-converted amount, credited as-is on confirmation
+        deposit.setCurrency(Currency.USD);
         deposit.setProvider("NOWPAYMENTS");
         deposit.setChannel("NOWPAYMENTS_CRYPTO");
         deposit.setStatus(DepositStatus.PENDING);

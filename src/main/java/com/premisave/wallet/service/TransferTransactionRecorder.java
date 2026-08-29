@@ -41,7 +41,7 @@ public class TransferTransactionRecorder {
         debit.setType(TransactionType.TRANSFER);
         debit.setStatus(TransactionStatus.COMPLETED);
         debit.setAmount(transfer.getTotalDebited().negate());
-        debit.setCurrency(Currency.KES);
+        debit.setCurrency(Currency.USD);
         debit.setDescription("Transfer to " + recipient.getAccountNumber() + descriptionSuffix + " (incl. commission)");
         debit.setReference(transfer.getReference());
         transactionRepository.save(debit);
@@ -52,7 +52,7 @@ public class TransferTransactionRecorder {
         credit.setType(TransactionType.TRANSFER);
         credit.setStatus(TransactionStatus.COMPLETED);
         credit.setAmount(transfer.getAmount());
-        credit.setCurrency(Currency.KES);
+        credit.setCurrency(Currency.USD);
         credit.setDescription("Transfer from " + sender.getAccountNumber() + descriptionSuffix);
         credit.setReference(transfer.getReference());
         transactionRepository.save(credit);

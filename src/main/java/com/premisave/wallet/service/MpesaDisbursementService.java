@@ -132,7 +132,12 @@ public class MpesaDisbursementService {
 
     @Transactional
     public DisbursementResponse processB2PochiPayment(String initiatedByUserId, B2PochiRequest request) {
-        idempotencyService.checkIdempotency(request.getReference());
+        // Resolved BEFORE the idempotency check -- see DisbursementService's
+        // identical fix for why this ordering matters.
+        String reference = request.getReference() != null
+                ? request.getReference()
+                : "POCHI-" + initiatedByUserId + "-" + System.currentTimeMillis();
+        idempotencyService.checkIdempotency(reference);
 
         Wallet wallet = walletRepository.findByUserId(initiatedByUserId)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + initiatedByUserId));
@@ -159,9 +164,6 @@ public class MpesaDisbursementService {
 
         String phoneNumber = resolveVerifiedPochiPhoneNumber(wallet);
 
-        String reference = request.getReference() != null
-                ? request.getReference()
-                : "POCHI-" + phoneNumber + "-" + System.currentTimeMillis();
         String originatorConversationId = mpesaService.generateOriginatorConversationId("B2POCHI");
 
         B2PochiRequest resolvedRequest = new B2PochiRequest();
@@ -217,8 +219,10 @@ public class MpesaDisbursementService {
 
     @Transactional
     public DisbursementResponse processB2BPayment(String initiatedByUserId, MpesaB2BRequest request) {
-        idempotencyService.checkIdempotency(request.getReference());
+        // Resolved BEFORE the idempotency check -- see DisbursementService's
+        // identical fix for why this ordering matters.
         String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
+        idempotencyService.checkIdempotency(reference);
 
         String verifiedRecipientName = null;
         String verifiedChargeProfileId = null;

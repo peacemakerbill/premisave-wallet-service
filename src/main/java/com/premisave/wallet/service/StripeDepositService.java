@@ -65,7 +65,7 @@ public class StripeDepositService {
 
     public PaymentResponse initiateStripeDeposit(String userId, String userEmail, DepositRequest request,
                                                   Wallet wallet, String idempotencyKey) {
-        String currency = request.getCurrency() != null ? request.getCurrency() : "kes";
+        String currency = request.getCurrency() != null ? request.getCurrency() : "usd";
 
         String customerId = wallet.getStripeCustomerId();
         if (customerId == null) {
@@ -162,8 +162,6 @@ public class StripeDepositService {
     }
 
     // ─── Saved cards (multiple per wallet) ──────────────────────────────────
-    // Unchanged from before this migration — none of this section reads or
-    // writes Transaction/Deposit at all.
 
     /**
      * Creates or updates the SavedCard row for this PaymentMethod, and makes
@@ -522,7 +520,7 @@ public class StripeDepositService {
         deposit.setUserId(userId);
         deposit.setWalletId(walletId);
         deposit.setAmount(amount);
-        deposit.setCurrency(Currency.KES);
+        deposit.setCurrency(Currency.USD);
         deposit.setProvider("STRIPE");
         deposit.setChannel("STRIPE_CARD");
         deposit.setStatus(DepositStatus.PENDING);
@@ -531,11 +529,11 @@ public class StripeDepositService {
     }
 
     private Currency resolveCurrency(String currency) {
-        if (currency == null) return Currency.KES;
+        if (currency == null) return Currency.USD;
         return switch (currency.toUpperCase()) {
             case "USD" -> Currency.USD;
             case "EUR" -> Currency.EUR;
-            default    -> Currency.KES;
+            default    -> Currency.USD;
         };
     }
 }

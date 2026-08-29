@@ -79,7 +79,15 @@ public class PaymentService {
 
     private PaymentResponse executePayment(String userId, BigDecimal amount, String service, String description,
                                             String requestedReference, String initiatedBy) {
-        idempotencyService.checkIdempotency(requestedReference);
+        // Resolved BEFORE the idempotency check -- previously the check
+        // ran on requestedReference directly while this same fallback
+        // (originally further down) only applied afterward, meaning an
+        // omitted reference reached checkIdempotency as null instead of
+        // ever getting the fallback that's specifically meant to protect
+        // this check -- the exact gap the comment below already described
+        // this fallback as fixing, just not fully.
+        String reference = requestedReference != null ? requestedReference : UUID.randomUUID().toString();
+        idempotencyService.checkIdempotency(reference);
 
         Wallet wallet = walletRepository.findByUserId(userId)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
@@ -90,7 +98,6 @@ public class PaymentService {
         // same as TransferService — the original version of this method
         // saved a null reference outright when one wasn't given, leaving
         // that specific payment with no idempotency protection at all.
-        String reference = requestedReference != null ? requestedReference : UUID.randomUUID().toString();
 
         wallet.setBalance(wallet.getBalance().subtract(amount));
         walletRepository.save(wallet);

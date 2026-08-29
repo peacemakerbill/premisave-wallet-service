@@ -36,7 +36,7 @@ public class DisbursementTransactionRecorder {
         tx.setType(TransactionType.DISBURSEMENT);
         tx.setStatus(TransactionStatus.COMPLETED);
         tx.setAmount(amount);
-        tx.setCurrency(Currency.KES);
+        tx.setCurrency(Currency.USD);
         tx.setDescription("Disbursement via " + disbursement.getProvider() + " to " + disbursement.getDestination());
         tx.setReference(reference);
         tx.setProviderReference(disbursement.getProviderReference());

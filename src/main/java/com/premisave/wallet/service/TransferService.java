@@ -81,7 +81,10 @@ public class TransferService {
 
     private PaymentResponse executeTransfer(String senderUserId, String recipientAccountNumber, BigDecimal amount,
                                              String description, String requestedReference, String initiatedBy) {
-        idempotencyService.checkIdempotency(requestedReference);
+        // Resolved BEFORE the idempotency check -- see PaymentService's
+        // identical fix for why this ordering matters.
+        String reference = requestedReference != null ? requestedReference : UUID.randomUUID().toString();
+        idempotencyService.checkIdempotency(reference);
 
         Wallet sender = walletRepository.findByUserId(senderUserId)
                 .orElseThrow(() -> new WalletNotFoundException("Sender wallet not found for userId: " + senderUserId));
@@ -106,8 +109,6 @@ public class TransferService {
             throw new WalletFrozenException("Recipient wallet is currently frozen and cannot receive funds");
         }
 
-        String reference = requestedReference != null ? requestedReference : UUID.randomUUID().toString();
-
         // Perform transfer — sender pays amount PLUS commission;
         // recipient receives exactly the stated amount, unaffected.
         sender.setBalance(sender.getBalance().subtract(totalDebit));
@@ -125,7 +126,11 @@ public class TransferService {
         transfer.setRecipientEmail(recipient.getAccountNumber());
         transfer.setAmount(amount);
         transfer.setTotalDebited(totalDebit);
-        transfer.setCurrency(Currency.KES);
+        // Fixed: was hardcoded Currency.KES. amount/totalDebit are both
+        // computed directly against sender.getBalance()/recipient.getBalance()
+        // above, and the wallet is fixed at USD -- so this transfer is
+        // always genuinely USD, never KES.
+        transfer.setCurrency(Currency.USD);
         transfer.setDescription(description);
         transfer.setStatus(TransferStatus.SUCCESS);
         transfer.setReference(reference);
@@ -136,7 +141,7 @@ public class TransferService {
 
         commissionService.recordCommission("COMMISSION_TRANSFER", commission,
                 commissionService.getInternalTransferRate(), amount, "TRANSFER", transfer.getId(), reference,
-                senderUserId, "Commission on transfer to " + recipient.getAccountNumber());
+                senderUserId, "Commission on transfer to " + recipient.getAccountNumber(), Currency.USD);
 
         // Transfer is always synchronous/immediate — no PENDING state, so
         // both parties are notified right here, right away, unlike the
