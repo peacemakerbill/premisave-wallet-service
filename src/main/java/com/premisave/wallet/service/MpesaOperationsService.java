@@ -132,6 +132,27 @@ public class MpesaOperationsService {
         if (!success) {
             op.setStatus(DisbursementStatus.FAILED);
             operationRepository.save(op);
+
+            //this branch previously returned immediately,
+            // meaning a failed ACCOUNT_BALANCE check left its
+            // GatewayBalanceSnapshot stuck showing PENDING_ASYNC
+            // forever, with an empty balances array — even though
+            // MpesaOperation correctly recorded the failure. The
+            // snapshot's own status field already documents "ERROR" as
+            // a valid value (see GatewayBalanceSnapshot's own javadoc)
+            // for exactly this case; it just was never actually reached.
+            // Saves a NEW snapshot rather than updating the original
+            // PENDING_ASYNC one — same history-preserving,
+            // never-overwritten pattern every other snapshot save
+            // already follows; this new row becomes the "latest" one
+            // an admin sees (findFirstByProviderOrderByCreatedAtDesc),
+            // while the original PENDING_ASYNC row stays in history,
+            // accurately reflecting what was known at that earlier moment.
+            if (op.getType() == MpesaOperationType.ACCOUNT_BALANCE) {
+                gatewayBalanceSnapshotService.save("MPESA", "ERROR", List.of(), resultDesc,
+                        op.getConversationId(), op.getOriginatorConversationId(), op.getInitiatedBy());
+            }
+
             log.warn("M-Pesa {} operation failed: id={} conversationId={} reason={}",
                     op.getType(), op.getId(), conversationId, resultDesc);
             return;
