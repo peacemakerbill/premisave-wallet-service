@@ -10,6 +10,7 @@ import com.premisave.wallet.dto.QueryOrgInfoRequest;
 import com.premisave.wallet.dto.QueryOrgInfoResponse;
 import com.premisave.wallet.entity.Disbursement;
 import com.premisave.wallet.entity.Wallet;
+import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.enums.DisbursementStatus;
 import com.premisave.wallet.exception.InsufficientFundsException;
 import com.premisave.wallet.exception.PhoneNumberUnavailableException;
@@ -274,6 +275,7 @@ public class MpesaDisbursementService {
         String reference = request.getReference() != null ? request.getReference() : UUID.randomUUID().toString();
         idempotencyService.checkIdempotency(reference);
 
+
         if (request.getCurrency() != null && !request.getCurrency().isBlank()) {
             String requestedCurrency = request.getCurrency().toUpperCase();
             if ("USD".equals(requestedCurrency)) {
@@ -286,6 +288,9 @@ public class MpesaDisbursementService {
             }
         }
 
+        // Real KES figure, captured now (after any USD->KES conversion
+        // above, before Hakikisha or Safaricom ever run) — used for both
+        // nativeAmount below and the USD conversion for amount/currency.
         BigDecimal kesAmount = request.getAmount();
         BigDecimal b2bRate = exchangeRateService.getRate("KES", "USD");
         BigDecimal usdAmount = kesAmount.multiply(b2bRate).setScale(2, RoundingMode.HALF_UP);
@@ -426,6 +431,7 @@ public class MpesaDisbursementService {
                 transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmountUsd, d, d.getReference());
                 commissionService.recordGatewayCommissionFromDisbursement(d);
 
+
                 String exchangeRateInfo = "1 KES = " + exchangeRateService.getRate("KES", "USD").toPlainString() + " USD";
                 String senderName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
                 d.setSenderName(senderName);
@@ -434,6 +440,14 @@ public class MpesaDisbursementService {
                         d.getCurrency(), d.getDestination(), d.getReference(),
                         new EmailService.DisbursementDetails("M-Pesa", exchangeRateInfo,
                                 senderName, wallet.getAccountNumber(), wallet.getId()));
+            } else if ("B2B".equals(d.getChannel())) {
+                // Explicit request: "for b2b ensure it is tracked on the
+
+                disbursementRepository.save(d);
+                commissionService.recordCommission("COMPANY_DISBURSEMENT", d.getAmount().negate(), null, null,
+                        "DISBURSEMENT", d.getId(), d.getReference(), d.getUserId(),
+                        "Company-initiated MPESA B2B payment to " + d.getDestination(),
+                        Currency.valueOf(d.getCurrency()));
             } else {
                 disbursementRepository.save(d);
             }
