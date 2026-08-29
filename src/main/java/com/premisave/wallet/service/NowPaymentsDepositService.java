@@ -50,6 +50,7 @@ public class NowPaymentsDepositService {
     private final FxRateService fxRateService;
     private final DepositTransactionRecorder depositTransactionRecorder;
     private final EmailService emailService;
+    private final UserNameResolver userNameResolver;
 
     /**
      * Initiates a crypto deposit. TWO separate currency fields are in play
@@ -186,6 +187,8 @@ public class NowPaymentsDepositService {
 
         deposit.setStatus(DepositStatus.SUCCESS);
         deposit.setProviderReference(paymentId);
+        String recipientName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
+        deposit.setRecipientName(recipientName);
         depositRepository.save(deposit);
 
         depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), deposit.getAmount(),
@@ -205,7 +208,8 @@ public class NowPaymentsDepositService {
 
         emailService.sendDepositConfirmation(wallet.getAccountNumber(), deposit.getAmount().toPlainString(),
                 deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString(),
-                "NOWPayments", exchangeRateInfo, null, null);
+                new EmailService.DepositDetails("NOWPayments", exchangeRateInfo, null,
+                        null, paymentId, recipientName, wallet.getAccountNumber(), wallet.getId()));
 
         log.info("Wallet credited via NOWPayments: orderId={} amount={} paymentId={}", orderId, deposit.getAmount(), paymentId);
     }

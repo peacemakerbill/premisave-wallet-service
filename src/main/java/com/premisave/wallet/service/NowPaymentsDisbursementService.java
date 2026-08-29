@@ -29,6 +29,7 @@ public class NowPaymentsDisbursementService {
     private final DisbursementTransactionRecorder transactionRecorder;
     private final CommissionService commissionService;
     private final EmailService emailService;
+    private final UserNameResolver userNameResolver;
 
     /**
      * Converts the wallet's KES amount into the target crypto using
@@ -128,9 +129,13 @@ public class NowPaymentsDisbursementService {
                 transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmount, d, d.getReference());
                 commissionService.recordGatewayCommissionFromDisbursement(d);
 
+                String senderName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
+                d.setSenderName(senderName);
+                disbursementRepository.save(d);
                 emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
                         d.getCurrency(), d.getDestination(), d.getReference(),
-                        "NOWPayments", null);
+                        new EmailService.DisbursementDetails("NOWPayments", null,
+                                senderName, wallet.getAccountNumber(), wallet.getId()));
             } else {
                 disbursementRepository.save(d);
             }
@@ -144,10 +149,13 @@ public class NowPaymentsDisbursementService {
             disbursementRepository.save(d);
 
             if (d.getWalletId() != null) {
-                walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
-                        emailService.sendDisbursementFailed(wallet.getAccountNumber(),
-                                d.getAmount().toPlainString(), d.getCurrency(), failureReason,
-                                "NOWPayments", d.getDestination()));
+                walletRepository.findById(d.getWalletId()).ifPresent(wallet -> {
+                    String senderName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
+                    emailService.sendDisbursementFailed(wallet.getAccountNumber(),
+                            d.getAmount().toPlainString(), d.getCurrency(), failureReason, d.getDestination(),
+                            new EmailService.DisbursementDetails("NOWPayments", null,
+                                    senderName, wallet.getAccountNumber(), wallet.getId()));
+                });
             }
 
             log.warn("NOWPayments disbursement failed: id={} payoutId={} reason={}", d.getId(), payoutId, failureReason);

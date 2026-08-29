@@ -59,6 +59,7 @@ public class MpesaDepositService {
     private final MpesaService mpesaService;
     private final DepositTransactionRecorder depositTransactionRecorder;
     private final EmailService emailService;
+    private final UserNameResolver userNameResolver;
     private final ExchangeRateService exchangeRateService;
 
     // ─── M-Pesa STK Push ─────────────────────────────────────────────────────
@@ -142,6 +143,10 @@ public class MpesaDepositService {
         deposit.setPriceAmount(amount);
         deposit.setPriceCurrency("kes");
         deposit.setProviderReference(mpesaReceiptNumber);
+        // Self-deposit — sender and recipient are the same wallet owner,
+        // so senderName stays null; only recipientName is meaningful here.
+        String recipientName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
+        deposit.setRecipientName(recipientName);
         depositRepository.save(deposit);
 
         depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), usdAmount,
@@ -154,7 +159,8 @@ public class MpesaDepositService {
         String exchangeRateInfo = "1 KES = " + rate.toPlainString() + " USD";
         emailService.sendDepositConfirmation(wallet.getAccountNumber(), usdAmount.toPlainString(),
                 deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString(),
-                "M-Pesa", exchangeRateInfo, phoneNumber, null);
+                new EmailService.DepositDetails("M-Pesa", exchangeRateInfo, phoneNumber,
+                        null, mpesaReceiptNumber, recipientName, wallet.getAccountNumber(), wallet.getId()));
 
         log.info("Wallet credited via M-Pesa STK: checkoutRequestId={} kesAmount={} usdAmount={} rate={} receipt={}",
                 checkoutRequestId, amount, usdAmount, rate, mpesaReceiptNumber);

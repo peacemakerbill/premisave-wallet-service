@@ -66,6 +66,7 @@ public class MpesaDisbursementService {
     private final DisbursementTransactionRecorder transactionRecorder;
     private final CommissionService commissionService;
     private final EmailService emailService;
+    private final UserNameResolver userNameResolver;
     private final ExchangeRateService exchangeRateService;
 
     // ─── User-facing B2C withdrawal ──────────────────────────────────────────
@@ -356,12 +357,15 @@ public class MpesaDisbursementService {
                 // received, not the wallet-side USD debit — since that's
                 // the meaningful, externally-verifiable fact for the
                 // customer ("I successfully sent X KES to this phone").
-                // d.getDestination() is masked internally by EmailService,
-                // not here.
+                // d.getDestination() shown exactly as given, no masking.
                 String exchangeRateInfo = "1 KES = " + exchangeRateService.getRate("KES", "USD").toPlainString() + " USD";
+                String senderName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
+                d.setSenderName(senderName);
+                disbursementRepository.save(d);
                 emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
                         d.getCurrency(), d.getDestination(), d.getReference(),
-                        "M-Pesa", exchangeRateInfo);
+                        new EmailService.DisbursementDetails("M-Pesa", exchangeRateInfo,
+                                senderName, wallet.getAccountNumber(), wallet.getId()));
             } else {
                 disbursementRepository.save(d);
             }
@@ -382,10 +386,13 @@ public class MpesaDisbursementService {
             // d.getUserId() there is an admin identifier, not a real
             // customer's own email.
             if (d.getWalletId() != null) {
-                walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
-                        emailService.sendDisbursementFailed(wallet.getAccountNumber(),
-                                d.getAmount().toPlainString(), d.getCurrency(), resultDesc,
-                                "M-Pesa", d.getDestination()));
+                walletRepository.findById(d.getWalletId()).ifPresent(wallet -> {
+                    String senderName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
+                    emailService.sendDisbursementFailed(wallet.getAccountNumber(),
+                            d.getAmount().toPlainString(), d.getCurrency(), resultDesc, d.getDestination(),
+                            new EmailService.DisbursementDetails("M-Pesa", null,
+                                    senderName, wallet.getAccountNumber(), wallet.getId()));
+                });
             }
 
             log.warn("M-Pesa {} disbursement failed: id={} conversationId={} reason={}",

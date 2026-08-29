@@ -30,6 +30,7 @@ public class StripeDisbursementService {
     private final DisbursementTransactionRecorder transactionRecorder;
     private final CommissionService commissionService;
     private final EmailService emailService;
+    private final UserNameResolver userNameResolver;
 
     /**
      * Converts the wallet's KES amount to whatever currency the withdrawal
@@ -127,9 +128,13 @@ public class StripeDisbursementService {
                 transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmount, d, d.getReference());
                 commissionService.recordGatewayCommissionFromDisbursement(d);
 
+                String senderName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
+                d.setSenderName(senderName);
+                disbursementRepository.save(d);
                 emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
                         d.getCurrency(), d.getDestination(), d.getReference(),
-                        "Stripe", null);
+                        new EmailService.DisbursementDetails("Stripe", null,
+                                senderName, wallet.getAccountNumber(), wallet.getId()));
             } else {
                 disbursementRepository.save(d);
             }
@@ -141,10 +146,13 @@ public class StripeDisbursementService {
             disbursementRepository.save(d);
 
             if (d.getWalletId() != null) {
-                walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
-                        emailService.sendDisbursementFailed(wallet.getAccountNumber(),
-                                d.getAmount().toPlainString(), d.getCurrency(), failureReason,
-                                "Stripe", d.getDestination()));
+                walletRepository.findById(d.getWalletId()).ifPresent(wallet -> {
+                    String senderName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
+                    emailService.sendDisbursementFailed(wallet.getAccountNumber(),
+                            d.getAmount().toPlainString(), d.getCurrency(), failureReason, d.getDestination(),
+                            new EmailService.DisbursementDetails("Stripe", null,
+                                    senderName, wallet.getAccountNumber(), wallet.getId()));
+                });
             }
 
             log.error("Stripe Connect payout FAILED: id={} payoutId={} reason={} destinationAccount={} — " +

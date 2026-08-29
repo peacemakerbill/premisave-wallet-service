@@ -47,6 +47,7 @@ public class FlutterwaveDisbursementService {
     private final DisbursementTransactionRecorder transactionRecorder;
     private final CommissionService commissionService;
     private final EmailService emailService;
+    private final UserNameResolver userNameResolver;
     private final ExchangeRateService exchangeRateService;
 
     /**
@@ -253,7 +254,7 @@ public class FlutterwaveDisbursementService {
                 // the real native amount Flutterwave actually paid out,
                 // not the wallet-side USD debit — the meaningful,
                 // externally-verifiable fact for the customer.
-                // d.getDestination() is masked internally by EmailService.
+                // d.getDestination() shown exactly as given, no masking.
                 String exchangeRateInfo = null;
                 BigDecimal nativeDebitForRate = d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount();
                 if (nativeDebitForRate.compareTo(BigDecimal.ZERO) != 0 && d.getCurrency() != null
@@ -261,9 +262,13 @@ public class FlutterwaveDisbursementService {
                     BigDecimal impliedRate = debitAmountUsd.divide(nativeDebitForRate, 6, RoundingMode.HALF_UP);
                     exchangeRateInfo = "1 " + d.getCurrency() + " = " + impliedRate.toPlainString() + " USD";
                 }
+                String senderName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
+                d.setSenderName(senderName);
+                disbursementRepository.save(d);
                 emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
                         d.getCurrency(), d.getDestination(), d.getReference(),
-                        "Flutterwave", exchangeRateInfo);
+                        new EmailService.DisbursementDetails("Flutterwave", exchangeRateInfo,
+                                senderName, wallet.getAccountNumber(), wallet.getId()));
             } else {
                 disbursementRepository.save(d);
             }
@@ -277,10 +282,13 @@ public class FlutterwaveDisbursementService {
             disbursementRepository.save(d);
 
             if (d.getWalletId() != null) {
-                walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
-                        emailService.sendDisbursementFailed(wallet.getAccountNumber(),
-                                d.getAmount().toPlainString(), d.getCurrency(), statusDesc,
-                                "Flutterwave", d.getDestination()));
+                walletRepository.findById(d.getWalletId()).ifPresent(wallet -> {
+                    String senderName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
+                    emailService.sendDisbursementFailed(wallet.getAccountNumber(),
+                            d.getAmount().toPlainString(), d.getCurrency(), statusDesc, d.getDestination(),
+                            new EmailService.DisbursementDetails("Flutterwave", null,
+                                    senderName, wallet.getAccountNumber(), wallet.getId()));
+                });
             }
 
             log.warn("Flutterwave disbursement failed: id={} transferId={} reason={}", d.getId(), transferId, statusDesc);

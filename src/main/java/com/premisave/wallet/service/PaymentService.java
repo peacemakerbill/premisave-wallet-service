@@ -63,6 +63,7 @@ public class PaymentService {
     private final IdempotencyService idempotencyService;
     private final PaymentTransactionRecorder paymentTransactionRecorder;
     private final EmailService emailService;
+    private final UserNameResolver userNameResolver;
 
     @Transactional
     public PaymentResponse deductFromWallet(String userId, PaymentInitiateRequest request) {
@@ -99,7 +100,11 @@ public class PaymentService {
         payment.setWalletId(wallet.getId());
         payment.setEmail(wallet.getAccountNumber());
         payment.setAmount(amount);
-        payment.setCurrency(Currency.KES);
+        // Fixed: was hardcoded Currency.KES — same class of bug found and
+        // fixed elsewhere this session (DepositTransactionRecorder). This
+        // is an internal deduction from an always-USD wallet, not an
+        // external gateway transaction with its own native currency.
+        payment.setCurrency(Currency.USD);
         payment.setService(service);
         payment.setDescription(description);
         payment.setStatus(PaymentStatus.SUCCESS);
@@ -109,8 +114,15 @@ public class PaymentService {
 
         paymentTransactionRecorder.record(payment);
 
+        // senderName resolved but NOT persisted onto Payment — that would
+        // need a new field on that entity, which hasn't been shared/
+        // verified in this session; not guessed at here the same way
+        // Deposit/Disbursement's new fields weren't guessed at before
+        // those files were actually confirmed.
+        String senderName = userNameResolver.resolveNameSafely(payment.getEmail());
         emailService.sendPaymentConfirmation(payment.getEmail(), amount.toPlainString(),
-                payment.getCurrency().name(), service, reference);
+                payment.getCurrency().name(), service, reference,
+                senderName, payment.getEmail(), wallet.getId());
 
         log.info("Payment deducted successfully: userId={} | amount={} | service={} | ref={} | initiatedBy={}",
                 userId, amount, service, reference, initiatedBy);

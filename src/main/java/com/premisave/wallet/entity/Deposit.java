@@ -46,6 +46,25 @@ public class Deposit {
      */
     private String source;
 
+    /**
+     * The paying party's real name, when the gateway's own callback
+     * provides one — confirmed for M-Pesa C2B (Safaricom's confirmation
+     * payload includes FirstName/MiddleName/LastName for whoever paid).
+     * Null for a self-deposit (M-Pesa STK push — sender and recipient are
+     * the same wallet owner, so there's no separate identity to record
+     * here) and for gateways with no equivalent field in their own
+     * callback data (Stripe, PayPal, Flutterwave, NOWPayments).
+     */
+    private String senderName;
+
+    /**
+     * The wallet owner's (the recipient's) real name — resolved via the
+     * auth service (see UserNameResolver) at confirmation time, using
+     * Wallet.accountNumber (the owner's email) as the lookup key. Null if
+     * that lookup failed, or the account genuinely has no name on file.
+     */
+    private String recipientName;
+
     private String provider; // MPESA, STRIPE, PAYPAL, FLUTTERWAVE, NOWPAYMENTS
     private String channel;  // MPESA_STK, MPESA_TILL, STRIPE_CARD, NOWPAYMENTS_CRYPTO, etc.
 

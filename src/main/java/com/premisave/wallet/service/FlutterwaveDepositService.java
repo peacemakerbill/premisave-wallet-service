@@ -53,6 +53,7 @@ public class FlutterwaveDepositService {
     private final ExchangeRateService exchangeRateService;
     private final DepositTransactionRecorder depositTransactionRecorder;
     private final EmailService emailService;
+    private final UserNameResolver userNameResolver;
 
     /**
      * Initiates a Flutterwave mobile-money deposit via v4's General Flow.
@@ -236,6 +237,8 @@ public class FlutterwaveDepositService {
 
         deposit.setStatus(DepositStatus.SUCCESS);
         deposit.setProviderReference(providerReference);
+        String recipientName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
+        deposit.setRecipientName(recipientName);
         depositRepository.save(deposit);
 
         depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), deposit.getAmount(),
@@ -257,7 +260,8 @@ public class FlutterwaveDepositService {
 
         emailService.sendDepositConfirmation(wallet.getAccountNumber(), deposit.getAmount().toPlainString(),
                 deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString(),
-                "Flutterwave", exchangeRateInfo, deposit.getSource(), null);
+                new EmailService.DepositDetails("Flutterwave", exchangeRateInfo, deposit.getSource(),
+                        null, providerReference, recipientName, wallet.getAccountNumber(), wallet.getId()));
 
         log.info("Wallet credited via Flutterwave: txRef={} amount={} providerReference={} (from initiationRate)",
                 txRef, deposit.getAmount(), providerReference);

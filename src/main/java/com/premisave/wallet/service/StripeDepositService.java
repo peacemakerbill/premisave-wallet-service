@@ -59,6 +59,7 @@ public class StripeDepositService {
     private final StripeService stripeService;
     private final DepositTransactionRecorder depositTransactionRecorder;
     private final EmailService emailService;
+    private final UserNameResolver userNameResolver;
 
     // ─── Deposits ────────────────────────────────────────────────────────────
 
@@ -379,6 +380,8 @@ public class StripeDepositService {
         deposit.setAmount(amount);
         deposit.setCurrency(resolveCurrency(currency));
         deposit.setProviderReference(paymentIntentId);
+        String recipientName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
+        deposit.setRecipientName(recipientName);
         depositRepository.save(deposit);
 
         depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), amount,
@@ -386,7 +389,8 @@ public class StripeDepositService {
 
         emailService.sendDepositConfirmation(wallet.getAccountNumber(), amount.toPlainString(),
                 deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString(),
-                "Stripe", null, null, null);
+                new EmailService.DepositDetails("Stripe", null, null,
+                        null, paymentIntentId, recipientName, wallet.getAccountNumber(), wallet.getId()));
 
         log.info("Wallet credited via Stripe: reference={} amount={} piId={}", reference, amount, paymentIntentId);
     }

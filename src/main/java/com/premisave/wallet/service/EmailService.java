@@ -30,27 +30,23 @@ import java.util.Map;
  *
  * Templates use simple {{placeholder}} string substitution, not a real
  * templating engine — deliberate, see earlier reasoning. To still
- * support OPTIONAL detail rows (gateway, exchange rate used, sender
- * name, contact info) without a real conditional syntax, each template
- * has a single {{extraRows}} placeholder that this class populates with
- * zero or more pre-built <tr> HTML fragments — see row()/rows() below. A
- * row whose value is null/blank contributes nothing at all, so the
- * placeholder is simply empty when a piece of data doesn't apply (e.g.
- * no exchange rate for a USD-native gateway like Stripe/PayPal).
+ * support OPTIONAL detail rows (gateway, exchange rate, sender/recipient
+ * name, account info, provider receipt) without a real conditional
+ * syntax, each template has a single {{extraRows}} placeholder that this
+ * class populates with zero or more pre-built <tr> HTML fragments — see
+ * row()/rows() below. A row whose value is null/blank contributes
+ * nothing at all, so the placeholder is simply empty when a piece of
+ * data doesn't apply (e.g. no exchange rate for a USD-native gateway).
  *
  * NO MASKING — every value (phone number, email, contact info) is shown
- * in full, exactly as the caller supplies it. Masking was removed on
- * request; callers pass raw values directly into the template vars, no
- * transformation happens here anymore.
+ * in full, exactly as the caller supplies it.
  *
- * SENDER NAME: sendDepositConfirmation accepts a senderName parameter,
- * used specifically for M-Pesa C2B deposits — Safaricom's own callback
- * includes FirstName/MiddleName/LastName for the person who paid, and
- * this is the one confirmed case where a real name is genuinely
- * available without any extra lookup. Other gateways (Stripe, PayPal,
- * NOWPayments, Flutterwave) generally have no equivalent field to supply
- * here, so this stays null/blank for them and the row simply doesn't
- * render.
+ * NAMES: DepositDetails/DisbursementDetails below carry senderName and
+ * recipientName/senderName respectively, resolved via UserNameResolver
+ * (a thin wrapper over the auth service). Deliberately ONLY the resolved
+ * name is ever passed in here — never active, verified, or role from the
+ * auth service's response; those fields are never even seen by this
+ * class, let alone rendered in an email or saved anywhere via it.
  *
  * Every send is wrapped in try/catch and only logged on failure — a
  * failed email must NEVER fail the transaction it's notifying about.
@@ -76,6 +72,50 @@ public class EmailService {
                     + "<td style=\"padding: 10px 0; color:#1a1a1a; font-weight:600; text-align:right; border-bottom: 1px solid #F0F1F3;\">%s</td></tr>";
 
     /**
+     * Optional extra detail rows for a deposit confirmation — bundled
+     * into one record rather than a long, ever-growing positional
+     * parameter list. Any field left null simply doesn't render as a row.
+     *
+     * gateway: provider name (e.g. "M-Pesa") — null if not applicable.
+     * exchangeRateInfo: pre-formatted, e.g. "1 KES = 0.0077 USD" — null
+     * when no conversion applied (a USD-native gateway).
+     * rawSource: phone number / email the deposit came from, shown in
+     * full — null if not applicable.
+     * senderName: the PAYING party's name, when the gateway's own
+     * callback provides one (confirmed for M-Pesa C2B) — null for a
+     * self-deposit or a gateway with no equivalent field.
+     * providerReference: the gateway's OWN transaction id/receipt number
+     * — distinct from the "reference" argument, which is Premisave's own
+     * internal tracking id (for M-Pesa STK specifically, that's the long
+     * checkoutRequestId the customer never sees; this is the short
+     * receipt number their own M-Pesa SMS shows them).
+     * recipientName/accountNumber/accountId: the WALLET OWNER's own
+     * identity — resolved via UserNameResolver and read directly off the
+     * Wallet entity, respectively.
+     */
+    public record DepositDetails(
+            String gateway, String exchangeRateInfo, String rawSource,
+            String senderName, String providerReference,
+            String recipientName, String accountNumber, String accountId) {
+        public static DepositDetails empty() {
+            return new DepositDetails(null, null, null, null, null, null, null, null);
+        }
+    }
+
+    /**
+     * Optional extra detail rows for a disbursement email.
+     * senderName/accountNumber/accountId: the WALLET OWNER's own identity
+     * (they're the one sending money out, for a disbursement).
+     */
+    public record DisbursementDetails(
+            String gateway, String exchangeRateInfo,
+            String senderName, String accountNumber, String accountId) {
+        public static DisbursementDetails empty() {
+            return new DisbursementDetails(null, null, null, null, null);
+        }
+    }
+
+    /**
      * @Async here (and on every other public method in this class) — NOT
      * on the private send() helper below, since @Async only takes effect
      * on calls that go through Spring's proxy, and send() is only ever
@@ -83,77 +123,66 @@ public class EmailService {
      * bypasses the proxy entirely and would make @Async silently do
      * nothing). Requires AsyncConfig's @EnableAsync to actually take
      * effect at all.
-     *
-     * gateway: the provider name (e.g. "M-Pesa", "Flutterwave",
-     * "Stripe", "PayPal", "NOWPayments") — pass null/blank if not
-     * applicable.
-     * exchangeRateInfo: a pre-formatted string, e.g. "1 KES = 0.0077
-     * USD" — pass null/blank when no conversion applied (a USD-native
-     * gateway).
-     * rawSource: the phone number / email / identifier the deposit came
-     * from — shown exactly as given, no masking; pass null/blank if not
-     * applicable.
-     * senderName: the actual paying party's name, when the gateway's own
-     * callback provides one (confirmed for M-Pesa C2B) — null/blank for
-     * gateways with no equivalent field.
      */
     @Async
     public void sendDepositConfirmation(String toEmail, String amount, String currency,
-                                         String reference, String newBalance,
-                                         String gateway, String exchangeRateInfo, String rawSource,
-                                         String senderName) {
+                                         String reference, String newBalance, DepositDetails details) {
         Map<String, String> vars = new HashMap<>();
         vars.put("amount", amount);
         vars.put("currency", currency);
         vars.put("reference", reference);
         vars.put("newBalance", newBalance);
         vars.put("extraRows", rows(
-                "Payment Gateway", gateway,
-                "Exchange Rate Used", exchangeRateInfo,
-                "Sender Name", senderName,
-                "Paid From", rawSource
+                "Payment Gateway", details.gateway(),
+                "Exchange Rate Used", details.exchangeRateInfo(),
+                "Sender Name", details.senderName(),
+                "Paid From", details.rawSource(),
+                "Provider Receipt", details.providerReference(),
+                "Recipient Name", details.recipientName(),
+                "Account Number", details.accountNumber(),
+                "Account ID", details.accountId()
         ));
         send(toEmail, "Deposit Confirmation - Premisave", "deposit-confirmation-email.html", vars);
     }
 
-    /**
-     * destination: the destination (phone number, bank account, PayPal
-     * email, etc.) — shown exactly as given, no masking.
-     * gateway/exchangeRateInfo: same convention as sendDepositConfirmation above.
-     */
+    /** destination: shown exactly as given, no masking. */
     @Async
     public void sendDisbursementSuccess(String toEmail, String amount, String currency,
-                                         String destination, String reference,
-                                         String gateway, String exchangeRateInfo) {
+                                         String destination, String reference, DisbursementDetails details) {
         Map<String, String> vars = new HashMap<>();
         vars.put("amount", amount);
         vars.put("currency", currency);
         vars.put("destination", destination);
         vars.put("reference", reference);
         vars.put("extraRows", rows(
-                "Payment Gateway", gateway,
-                "Exchange Rate Used", exchangeRateInfo
+                "Payment Gateway", details.gateway(),
+                "Exchange Rate Used", details.exchangeRateInfo(),
+                "Sender Name", details.senderName(),
+                "Account Number", details.accountNumber(),
+                "Account ID", details.accountId()
         ));
         send(toEmail, "Withdrawal Successful - Premisave", "disbursement-success-email.html", vars);
     }
 
     /**
-     * gateway/destination added so a failure email still tells the
-     * customer WHICH withdrawal attempt this was about (which provider,
-     * to where) even though nothing was actually debited. destination
-     * shown exactly as given, no masking; either may be null/blank if
-     * not known at failure time.
+     * gateway/destination in DisbursementDetails let a failure email
+     * still tell the customer which withdrawal attempt this was about,
+     * even though nothing was actually debited. destination shown
+     * exactly as given, no masking.
      */
     @Async
     public void sendDisbursementFailed(String toEmail, String amount, String currency, String reason,
-                                        String gateway, String destination) {
+                                        String destination, DisbursementDetails details) {
         Map<String, String> vars = new HashMap<>();
         vars.put("amount", amount);
         vars.put("currency", currency);
         vars.put("reason", reason);
         vars.put("extraRows", rows(
-                "Payment Gateway", gateway,
-                "Intended Destination", destination
+                "Payment Gateway", details.gateway(),
+                "Intended Destination", destination,
+                "Sender Name", details.senderName(),
+                "Account Number", details.accountNumber(),
+                "Account ID", details.accountId()
         ));
         send(toEmail, "Disbursement Failed - Premisave", "disbursement-failed-email.html", vars);
     }
@@ -167,7 +196,7 @@ public class EmailService {
      *
      * counterpartyEmail shown exactly as given, no masking.
      * counterpartyName: the other party's full name, resolved via
-     * AuthServiceClient by the caller (TransferService) — may still be
+     * UserNameResolver by the caller (TransferService) — may still be
      * null/blank if that lookup failed or the account has no name on
      * file; the row simply doesn't render in that case.
      *
@@ -202,16 +231,29 @@ public class EmailService {
         send(toEmail, subject, "transfer-notification-email.html", vars);
     }
 
-    /** For a Payment (wallet deducted for a service — e.g. a booking fee), not a Disbursement — genuinely different wording, hence its own template rather than reusing disbursement-success-email.html's static "Withdrawal Successful" text. No gateway/exchange-rate/contact fields — this is an internal deduction with no external counterparty at all. */
+    /**
+     * For a Payment (wallet deducted for a service — e.g. a booking fee),
+     * not a Disbursement — genuinely different wording, hence its own
+     * template rather than reusing disbursement-success-email.html's
+     * static "Withdrawal Successful" text. No gateway/exchange-rate
+     * fields — this is an internal deduction with no external gateway
+     * involved. senderName/accountNumber/accountId are the wallet
+     * owner's own identity (they're the one paying).
+     */
     @Async
     public void sendPaymentConfirmation(String toEmail, String amount, String currency,
-                                         String service, String reference) {
+                                         String service, String reference,
+                                         String senderName, String accountNumber, String accountId) {
         Map<String, String> vars = new HashMap<>();
         vars.put("amount", amount);
         vars.put("currency", currency);
         vars.put("service", service);
         vars.put("reference", reference);
-        vars.put("extraRows", "");
+        vars.put("extraRows", rows(
+                "Sender Name", senderName,
+                "Account Number", accountNumber,
+                "Account ID", accountId
+        ));
         send(toEmail, "Payment Confirmation - Premisave", "payment-confirmation-email.html", vars);
     }
 

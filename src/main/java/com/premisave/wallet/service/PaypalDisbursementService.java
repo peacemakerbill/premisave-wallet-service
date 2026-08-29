@@ -31,6 +31,7 @@ public class PaypalDisbursementService {
     private final DisbursementTransactionRecorder transactionRecorder;
     private final CommissionService commissionService;
     private final EmailService emailService;
+    private final UserNameResolver userNameResolver;
 
     private static final List<String> PAYPAL_TERMINAL_FAILURE_STATUSES =
             List.of("FAILED", "DENIED", "BLOCKED", "RETURNED", "REFUNDED", "REVERSED", "CANCELED");
@@ -98,9 +99,13 @@ public class PaypalDisbursementService {
                 transactionRecorder.record(d.getUserId(), d.getWalletId(), debitAmount, d, d.getReference());
                 commissionService.recordGatewayCommissionFromDisbursement(d);
 
+                String senderName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
+                d.setSenderName(senderName);
+                disbursementRepository.save(d);
                 emailService.sendDisbursementSuccess(wallet.getAccountNumber(), d.getAmount().toPlainString(),
                         d.getCurrency(), d.getDestination(), d.getReference(),
-                        "PayPal", null);
+                        new EmailService.DisbursementDetails("PayPal", null,
+                                senderName, wallet.getAccountNumber(), wallet.getId()));
             } else {
                 disbursementRepository.save(d);
             }
@@ -116,10 +121,13 @@ public class PaypalDisbursementService {
             disbursementRepository.save(d);
 
             if (d.getWalletId() != null) {
-                walletRepository.findById(d.getWalletId()).ifPresent(wallet ->
-                        emailService.sendDisbursementFailed(wallet.getAccountNumber(),
-                                d.getAmount().toPlainString(), d.getCurrency(), reason,
-                                "PayPal", d.getDestination()));
+                walletRepository.findById(d.getWalletId()).ifPresent(wallet -> {
+                    String senderName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
+                    emailService.sendDisbursementFailed(wallet.getAccountNumber(),
+                            d.getAmount().toPlainString(), d.getCurrency(), reason, d.getDestination(),
+                            new EmailService.DisbursementDetails("PayPal", null,
+                                    senderName, wallet.getAccountNumber(), wallet.getId()));
+                });
             }
 
             log.warn("PayPal disbursement failed ({}): id={} payoutBatchId={} reason={}",

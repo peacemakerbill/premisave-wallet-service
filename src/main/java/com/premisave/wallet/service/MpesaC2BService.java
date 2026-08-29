@@ -41,6 +41,7 @@ public class MpesaC2BService {
     private final EmailService emailService;
     private final ExchangeRateService exchangeRateService;
     private final AuthServiceClient authServiceClient;
+    private final UserNameResolver userNameResolver;
 
     /**
      * Timeouts bumped up from OkHttp's 10s default, since Safaricom's
@@ -460,6 +461,10 @@ public class MpesaC2BService {
         walletRepository.save(wallet);
 
         String senderName = buildSenderName(req);
+        // Wallet owner's own name — resolved via the auth service, same
+        // as the sender's name Safaricom already gave us, but for the
+        // person on our own side of this transaction.
+        String recipientName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
 
         Deposit deposit = new Deposit();
         deposit.setUserId(wallet.getUserId());
@@ -471,6 +476,8 @@ public class MpesaC2BService {
         deposit.setProvider("MPESA");
         deposit.setChannel("MPESA_C2B");
         deposit.setSource(req.getMSISDN());
+        deposit.setSenderName(senderName);
+        deposit.setRecipientName(recipientName);
         deposit.setStatus(DepositStatus.SUCCESS);
         deposit.setReference(transId);
         deposit.setProviderReference(transId);
@@ -481,7 +488,8 @@ public class MpesaC2BService {
         String exchangeRateInfo = "1 KES = " + rate.toPlainString() + " USD";
         emailService.sendDepositConfirmation(wallet.getAccountNumber(), usdAmount.toPlainString(),
                 deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString(),
-                "M-Pesa", exchangeRateInfo, req.getMSISDN(), senderName);
+                new EmailService.DepositDetails("M-Pesa", exchangeRateInfo, req.getMSISDN(),
+                        senderName, transId, recipientName, wallet.getAccountNumber(), wallet.getId()));
         log.info("C2B deposit processed: accountNumber={} mpesaPhoneNumber={} kesAmount={} usdAmount={} rate={} " +
                         "transId={} sender={}",
                 wallet.getAccountNumber(), normalizedPhone, kesAmount, usdAmount, rate, transId, senderName);

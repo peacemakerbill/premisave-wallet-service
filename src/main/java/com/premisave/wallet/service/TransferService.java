@@ -1,8 +1,6 @@
 package com.premisave.wallet.service;
 
-import com.premisave.wallet.client.AuthServiceClient;
 import com.premisave.wallet.dto.InternalTransferRequest;
-import com.premisave.wallet.dto.client.UserDetailsDto;
 import com.premisave.wallet.dto.PaymentResponse;
 import com.premisave.wallet.dto.TransferRecordResponse;
 import com.premisave.wallet.dto.TransferRequest;
@@ -67,7 +65,7 @@ public class TransferService {
     private final TransferTransactionRecorder transferTransactionRecorder;
     private final CommissionService commissionService;
     private final EmailService emailService;
-    private final AuthServiceClient authServiceClient;
+    private final UserNameResolver userNameResolver;
 
     @Transactional
     public PaymentResponse transfer(String senderUserId, TransferRequest request) {
@@ -147,8 +145,8 @@ public class TransferService {
         // either can come back null (lookup failed, or the account has
         // no name fields set), and EmailService already treats that as
         // "omit this row", never as an error.
-        String recipientName = resolveNameSafely(recipient.getAccountNumber());
-        String senderName = resolveNameSafely(sender.getAccountNumber());
+        String recipientName = userNameResolver.resolveNameSafely(recipient.getAccountNumber());
+        String senderName = userNameResolver.resolveNameSafely(sender.getAccountNumber());
 
         emailService.sendTransferNotification(sender.getAccountNumber(), amount.toPlainString(),
                 transfer.getCurrency().name(), recipient.getAccountNumber(), recipientName, reference, true);
@@ -220,26 +218,6 @@ public class TransferService {
      */
     public Page<TransferRecordResponse> getAllTransfers(Pageable pageable) {
         return transferRepository.findAll(pageable).map(t -> toRecordResponse(t, null));
-    }
-
-    /**
-     * Best-effort name lookup via the auth service — a failed or missing
-     * lookup must NEVER break the transfer itself, same principle as
-     * email sending elsewhere in this codebase. Returns null on ANY
-     * failure (network error, timeout, the account not existing on the
-     * auth-service side, or simply having no name fields set at all) —
-     * EmailService already treats a null/blank counterpartyName as
-     * "omit that row" in the email, never as an error.
-     */
-    private String resolveNameSafely(String email) {
-        try {
-            return authServiceClient.getUserDetails(email)
-                    .map(UserDetailsDto::fullName)
-                    .orElse(null);
-        } catch (Exception e) {
-            log.warn("Name lookup failed for email={} — proceeding without it: {}", email, e.getMessage());
-            return null;
-        }
     }
 
     private static TransferRecordResponse toRecordResponse(Transfer t, String viewingUserId) {

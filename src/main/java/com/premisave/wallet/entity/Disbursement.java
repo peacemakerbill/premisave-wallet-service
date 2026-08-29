@@ -93,6 +93,19 @@ public class Disbursement {
     private BigDecimal commissionRate;
 
     private String destination; // phone number, paypal email, receiver shortcode, etc.
+
+    /**
+     * The wallet owner's (the sender's) real name — resolved via the
+     * auth service (see UserNameResolver) at confirmation time, using
+     * Wallet.accountNumber (the owner's email) as the lookup key. Null if
+     * that lookup failed, or the account genuinely has no name on file.
+     * Distinct from verifiedRecipientName below, which is the EXTERNAL
+     * receiving organization's name for a B2B payment (not a Premisave
+     * user at all) — this field is always about the wallet owner
+     * initiating the withdrawal.
+     */
+    private String senderName;
+
     private String provider;    // MPESA, PAYPAL, STRIPE, FLUTTERWAVE, NOWPAYMENTS
     private String channel;     // B2C, B2C_POCHI, B2B, B2C_TOPUP, PAYPAL_PAYOUT, STRIPE_PAYOUT, FLUTTERWAVE_BANK, FLUTTERWAVE_MOBILE_MONEY, NOWPAYMENTS_PAYOUT
 

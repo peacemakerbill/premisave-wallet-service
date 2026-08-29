@@ -46,6 +46,7 @@ public class PaypalDepositService {
     private final FxRateService fxRateService;
     private final DepositTransactionRecorder depositTransactionRecorder;
     private final EmailService emailService;
+    private final UserNameResolver userNameResolver;
 
     public PaymentResponse initiatePaypalDeposit(String userId, DepositRequest request,
                                                   Wallet wallet, String idempotencyKey) {
@@ -243,6 +244,8 @@ public class PaypalDepositService {
 
         deposit.setStatus(DepositStatus.SUCCESS);
         deposit.setProviderReference(captureResult.captureId());
+        String recipientName = userNameResolver.resolveNameSafely(wallet.getAccountNumber());
+        deposit.setRecipientName(recipientName);
         depositRepository.save(deposit);
 
         depositTransactionRecorder.record(deposit.getUserId(), deposit.getWalletId(), deposit.getAmount(),
@@ -250,7 +253,8 @@ public class PaypalDepositService {
 
         emailService.sendDepositConfirmation(wallet.getAccountNumber(), deposit.getAmount().toPlainString(),
                 deposit.getCurrency().name(), deposit.getReference(), wallet.getBalance().toPlainString(),
-                "PayPal", null, captureResult.payerEmail(), null);
+                new EmailService.DepositDetails("PayPal", null, captureResult.payerEmail(),
+                        null, captureResult.captureId(), recipientName, wallet.getAccountNumber(), wallet.getId()));
 
         log.info("Wallet credited via PayPal: orderId={} amount={} captureId={}",
                 deposit.getReference(), deposit.getAmount(), captureResult.captureId());
