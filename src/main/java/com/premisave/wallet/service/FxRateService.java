@@ -56,8 +56,8 @@ public class FxRateService {
 
     private static final String RATE_URL = "https://api.frankfurter.dev/v2/rate";
 
-    /** Bulk endpoint — returns EVERY quote currency Frankfurter supports against one base, in a single call. See getAllRates below. */
-    private static final String LATEST_URL = "https://api.frankfurter.dev/v2/latest";
+    /** Bulk endpoint — returns EVERY quote currency Frankfurter supports against one base, in a single call. See getAllRates below. Confirmed directly from Frankfurter's own docs (frankfurter.dev): "curl https://api.frankfurter.dev/v2/rates?base=USD" — NOT /v2/latest, which was an earlier, incorrect assumption that returned a genuine 404 from Frankfurter itself. */
+    private static final String RATES_URL = "https://api.frankfurter.dev/v2/rates";
 
     /** How long a previously-fetched rate remains usable as an emergency fallback. */
     private static final Duration FALLBACK_TTL = Duration.ofMinutes(2);
@@ -131,12 +131,17 @@ public class FxRateService {
 
     /**
      * Fetches EVERY quote currency Frankfurter supports against the given
-     * base, in ONE call — Frankfurter's /v2/latest?base=X endpoint, e.g.
+     * base, in ONE call — Frankfurter's /v2/rates?base=X endpoint, e.g.
      * base="USD" returns a rate for KES, EUR, GBP, and every other
-     * currency Frankfurter covers, all at once. Used specifically for
-     * bulk-populating the exchange rate database directly from the live
-     * API in a single admin-triggered action, rather than requiring one
-     * getRate() call — and one manually-typed entry — per currency.
+     * currency Frankfurter covers, all at once, as a flat JSON array of
+     * {"date": "...", "base": "USD", "quote": "KES", "rate": 129.37}
+     * objects — confirmed directly from a real response; NOT a single
+     * object with a "rates" map, which was this method's original,
+     * untested assumption and returned a parse error against the real
+     * API. Used specifically for bulk-populating the exchange rate
+     * database directly from the live API in a single admin-triggered
+     * action, rather than requiring one getRate() call — and one
+     * manually-typed entry — per currency.
      *
      * Deliberately does NOT use the last-known-good fallback cache
      * getRate() has: this is a bulk, admin-triggered action outside any
@@ -144,11 +149,11 @@ public class FxRateService {
      * rather than silently serve stale bulk data under a different name.
      *
      * @throws IllegalStateException if Frankfurter is unreachable, returns
-     *         a non-2xx response, or the response is missing the expected
-     *         "rates" object.
+     *         a non-2xx response, or the response isn't the expected
+     *         array shape.
      */
     public Map<String, BigDecimal> getAllRates(String base) {
-        HttpUrl parsedBase = HttpUrl.parse(LATEST_URL);
+        HttpUrl parsedBase = HttpUrl.parse(RATES_URL);
         if (parsedBase == null) {
             throw new IllegalStateException("Failed to build Frankfurter URL for base=" + base);
         }
@@ -164,15 +169,34 @@ public class FxRateService {
                         "Frankfurter bulk rate lookup failed (" + response.code() + ") for base=" + base + ": " + body);
             }
 
+            // Confirmed directly from a real response: /v2/rates?base=X
+            // returns a FLAT ARRAY of {"date":"...", "base":"USD",
+            // "quote":"KES", "rate":129.37} objects — one per supported
+            // quote currency — NOT a single object with a "rates" map
+            // the way the older v1 API (and this method's original,
+            // untested assumption) worked. Each entry's own "date" is
+            // ignored here — the point of this bulk fetch is the current
+            // rate for each currency, and per-entry dates can genuinely
+            // differ by a day or two depending on each market's last
+            // trading/publishing day, which isn't something this method
+            // needs to reconcile.
             JsonNode node = objectMapper.readTree(body);
-            JsonNode ratesNode = node.path("rates");
-            if (!ratesNode.isObject()) {
+            if (!node.isArray()) {
                 throw new IllegalStateException(
-                        "Frankfurter response missing 'rates' object for base=" + base + ": " + body);
+                        "Frankfurter response was not the expected array shape for base=" + base + ": " + body);
             }
 
             Map<String, BigDecimal> rates = new LinkedHashMap<>();
-            ratesNode.fields().forEachRemaining(entry -> rates.put(entry.getKey(), entry.getValue().decimalValue()));
+            for (JsonNode entry : node) {
+                JsonNode quoteNode = entry.path("quote");
+                JsonNode rateNode = entry.path("rate");
+                if (quoteNode.isMissingNode() || !quoteNode.isTextual()
+                        || rateNode.isMissingNode() || !rateNode.isNumber()) {
+                    log.warn("Skipping malformed entry in Frankfurter bulk response for base={}: {}", base, entry);
+                    continue;
+                }
+                rates.put(quoteNode.asText(), rateNode.decimalValue());
+            }
 
             log.info("Frankfurter bulk rates fetched for base={}: {} currencies", base, rates.size());
             return rates;
