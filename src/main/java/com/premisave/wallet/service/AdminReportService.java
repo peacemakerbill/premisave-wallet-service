@@ -42,6 +42,39 @@ import java.util.stream.Collectors;
  * and verify correct than the more verbose Aggregation/GroupOperation
  * API. Worth revisiting if daily volume ever grows large enough for that
  * tradeoff to flip.
+ *
+ * CURRENCY NORMALIZATION (added): explicit request — "the reports should
+ * also be showing data in USD, if there were any records saved in
+ * different currencies before, conversion should take place." Applied
+ * selectively, not uniformly, since blindly converting every
+ * currency-labeled field would be WRONG for some entities:
+ *
+ * - Deposit.amount / Disbursement.amount+totalDebited: converted per-
+ *   record using that record's OWN currency field, which reliably
+ *   describes what amount is actually denominated in throughout its
+ *   history (this was never a pure mislabeling bug for these two — the
+ *   stored NUMBER itself was genuinely native-currency-magnitude before
+ *   the fixes made earlier this session).
+ *
+ * - Transfer.amount / Payment.amount: deliberately NEVER converted.
+ *   These were ALWAYS computed directly against the sender/payer's USD
+ *   wallet balance (confirmed by reading TransferService/PaymentService's
+ *   actual debit code) — the only bug was a hardcoded "KES" LABEL on an
+ *   already-correct USD number. Converting based on that stale label
+ *   would introduce a NEW error (shrinking an already-correct figure),
+ *   not fix one.
+ *
+ * - CompanyLedgerEntry: see ledgerEntryAmountUsd's own javadoc — the most
+ *   nuanced case, since its historical currency label's reliability
+ *   depends on which type of entry it is.
+ *
+ * All conversions use TODAY's live exchange rate, not the rate actually
+ * in effect when a historical record was created (not preserved on most
+ * of these fields) — an approximation, not a byte-for-byte historical
+ * reconstruction. Disbursement.totalDebitedUsd is the one exception:
+ * where present, it's used directly (it locks in the real
+ * initiation-time rate), rather than re-converting totalDebited with
+ * today's rate.
  */
 @Service
 @RequiredArgsConstructor
@@ -49,6 +82,7 @@ public class AdminReportService {
 
     private final MongoTemplate mongoTemplate;
     private final WalletRepository walletRepository;
+    private final ExchangeRateService exchangeRateService;
 
     public DailyFinanceReportResponse getDailyReport(LocalDate date) {
         Criteria dayRange = DateRangeCriteriaUtil.applyDateRange(new Criteria(), "createdAt", date, date);
@@ -64,39 +98,46 @@ public class AdminReportService {
 
         // ─── Deposits ───
         report.setDepositCount(deposits.size());
-        report.setTotalDepositAmount(sumAmounts(deposits, Deposit::getAmount));
-        report.setDepositAmountByProvider(groupAndSum(deposits, Deposit::getProvider, Deposit::getAmount));
+        report.setTotalDepositAmount(sumAmounts(deposits, this::depositAmountUsd));
+        report.setDepositAmountByProvider(groupAndSum(deposits, Deposit::getProvider, this::depositAmountUsd));
         report.setDepositCountByStatus(deposits.stream()
                 .collect(Collectors.groupingBy(d -> d.getStatus().name(), Collectors.counting())));
 
         // ─── Disbursements ───
         report.setDisbursementCount(disbursements.size());
-        report.setTotalDisbursementAmount(sumAmounts(disbursements, Disbursement::getAmount));
-        report.setTotalDisbursementDebited(sumAmounts(disbursements,
-                d -> d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount()));
-        report.setDisbursementAmountByProvider(groupAndSum(disbursements, Disbursement::getProvider, Disbursement::getAmount));
+        report.setTotalDisbursementAmount(sumAmounts(disbursements, this::disbursementAmountUsd));
+        report.setTotalDisbursementDebited(sumAmounts(disbursements, this::disbursementDebitedUsd));
+        report.setDisbursementAmountByProvider(groupAndSum(disbursements, Disbursement::getProvider, this::disbursementAmountUsd));
         report.setDisbursementCountByStatus(disbursements.stream()
                 .collect(Collectors.groupingBy(d -> d.getStatus().name(), Collectors.counting())));
 
-        // ─── Transfers ───
+        // ─── Transfers ─── (never converted -- see class javadoc)
         report.setTransferCount(transfers.size());
         report.setTotalTransferAmount(sumAmounts(transfers, Transfer::getAmount));
         report.setTotalTransferCommission(sumAmounts(transfers,
                 t -> t.getTotalDebited() != null ? t.getTotalDebited().subtract(t.getAmount()) : BigDecimal.ZERO));
 
-        // ─── Payments ───
+        // ─── Payments ─── (never converted -- see class javadoc)
         report.setPaymentCount(payments.size());
         report.setTotalPaymentAmount(sumAmounts(payments, Payment::getAmount));
         report.setPaymentAmountByService(groupAndSum(payments, Payment::getService, Payment::getAmount));
 
         // ─── Company revenue — the actual "how much did we make today" answer ───
+        // Targeted query for exactly the Disbursements these ledger
+        // entries reference, rather than reusing the day-scoped
+        // `disbursements` list above — a disbursement can be INITIATED
+        // on one day and have its commission RECORDED on a later day
+        // (async webhook completion), so the source disbursement isn't
+        // guaranteed to fall within this same day's range.
+        Map<String, Disbursement> disbursementsById = fetchDisbursementSources(ledgerEntries);
+
         BigDecimal commissionFromTransfers = ledgerEntries.stream()
                 .filter(e -> "COMMISSION_TRANSFER".equals(e.getType()))
-                .map(CompanyLedgerEntry::getAmount)
+                .map(e -> ledgerEntryAmountUsd(e, disbursementsById))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal commissionFromDisbursements = ledgerEntries.stream()
                 .filter(e -> "COMMISSION_DISBURSEMENT".equals(e.getType()))
-                .map(CompanyLedgerEntry::getAmount)
+                .map(e -> ledgerEntryAmountUsd(e, disbursementsById))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         report.setTotalCommissionFromTransfers(commissionFromTransfers);
@@ -144,9 +185,10 @@ public class AdminReportService {
         r.setWalletsWithFlutterwaveLinked(wallets.stream().filter(w -> w.getFlutterwaveCustomerId() != null).count());
 
         List<CompanyLedgerEntry> allLedgerEntries = mongoTemplate.findAll(CompanyLedgerEntry.class);
+        Map<String, Disbursement> disbursementsById = fetchDisbursementSources(allLedgerEntries);
         BigDecimal totalRevenue = allLedgerEntries.stream()
-                .map(CompanyLedgerEntry::getAmount)
-                .filter(Objects::nonNull)
+                .filter(e -> e.getAmount() != null)
+                .map(e -> ledgerEntryAmountUsd(e, disbursementsById))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         r.setTotalCommissionRevenueAllTime(totalRevenue);
 
@@ -199,41 +241,41 @@ public class AdminReportService {
 
         // Deposits
         s.setTotalDepositCount(deposits.size());
-        s.setTotalDepositVolume(sumAmounts(deposits, Deposit::getAmount));
+        s.setTotalDepositVolume(sumAmounts(deposits, this::depositAmountUsd));
         s.setDepositCountByStatus(deposits.stream()
                 .collect(Collectors.groupingBy(d -> d.getStatus().name(), Collectors.counting())));
-        s.setDepositVolumeByProvider(groupAndSum(deposits, Deposit::getProvider, Deposit::getAmount));
+        s.setDepositVolumeByProvider(groupAndSum(deposits, Deposit::getProvider, this::depositAmountUsd));
 
         // Disbursements
         s.setTotalDisbursementCount(disbursements.size());
-        s.setTotalDisbursementVolume(sumAmounts(disbursements, Disbursement::getAmount));
-        s.setTotalDisbursementDebited(sumAmounts(disbursements,
-                d -> d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount()));
+        s.setTotalDisbursementVolume(sumAmounts(disbursements, this::disbursementAmountUsd));
+        s.setTotalDisbursementDebited(sumAmounts(disbursements, this::disbursementDebitedUsd));
         s.setDisbursementCountByStatus(disbursements.stream()
                 .collect(Collectors.groupingBy(d -> d.getStatus().name(), Collectors.counting())));
-        s.setDisbursementVolumeByProvider(groupAndSum(disbursements, Disbursement::getProvider, Disbursement::getAmount));
+        s.setDisbursementVolumeByProvider(groupAndSum(disbursements, Disbursement::getProvider, this::disbursementAmountUsd));
 
-        // Transfers
+        // Transfers (never converted -- see class javadoc)
         s.setTotalTransferCount(transfers.size());
         s.setTotalTransferVolume(sumAmounts(transfers, Transfer::getAmount));
         s.setTotalTransferCommission(sumAmounts(transfers,
                 t -> t.getTotalDebited() != null ? t.getTotalDebited().subtract(t.getAmount()) : BigDecimal.ZERO));
 
-        // Payments
+        // Payments (never converted -- see class javadoc)
         s.setTotalPaymentCount(payments.size());
         s.setTotalPaymentVolume(sumAmounts(payments, Payment::getAmount));
         s.setPaymentVolumeByService(groupAndSum(payments, Payment::getService, Payment::getAmount));
 
-        // Company revenue
+        // Company revenue -- disbursements already fetched all-time above, reused directly for the lookup map
+        Map<String, Disbursement> disbursementsById = disbursements.stream()
+                .filter(d -> d.getId() != null)
+                .collect(Collectors.toMap(Disbursement::getId, d -> d, (a, b) -> a));
         BigDecimal commissionFromTransfers = ledgerEntries.stream()
-                .filter(e -> "COMMISSION_TRANSFER".equals(e.getType()))
-                .map(CompanyLedgerEntry::getAmount)
-                .filter(Objects::nonNull)
+                .filter(e -> "COMMISSION_TRANSFER".equals(e.getType()) && e.getAmount() != null)
+                .map(e -> ledgerEntryAmountUsd(e, disbursementsById))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal commissionFromDisbursements = ledgerEntries.stream()
-                .filter(e -> "COMMISSION_DISBURSEMENT".equals(e.getType()))
-                .map(CompanyLedgerEntry::getAmount)
-                .filter(Objects::nonNull)
+                .filter(e -> "COMMISSION_DISBURSEMENT".equals(e.getType()) && e.getAmount() != null)
+                .map(e -> ledgerEntryAmountUsd(e, disbursementsById))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         s.setTotalCommissionFromTransfers(commissionFromTransfers);
         s.setTotalCommissionFromDisbursements(commissionFromDisbursements);
@@ -262,5 +304,100 @@ public class AdminReportService {
                 .filter(item -> keyFn.apply(item) != null)
                 .collect(Collectors.groupingBy(keyFn,
                         Collectors.reducing(BigDecimal.ZERO, amountFn, BigDecimal::add)));
+    }
+
+    // ─── Currency normalization ──────────────────────────────────────────────
+
+    /** Deposit.amount, normalized to USD using Deposit's own (reliable) currency field. See class javadoc for the approximation caveat. */
+    private BigDecimal depositAmountUsd(Deposit d) {
+        if (d.getAmount() == null) return BigDecimal.ZERO;
+        return toUsd(d.getAmount(), d.getCurrency() != null ? d.getCurrency().name() : null);
+    }
+
+    /** Disbursement.amount, normalized to USD using Disbursement's own (reliable) currency field. */
+    private BigDecimal disbursementAmountUsd(Disbursement d) {
+        if (d.getAmount() == null) return BigDecimal.ZERO;
+        return toUsd(d.getAmount(), d.getCurrency());
+    }
+
+    /**
+     * Disbursement.totalDebited, normalized to USD — prefers the
+     * already-locked-in, historically-accurate totalDebitedUsd when
+     * present (set at initiation, see Disbursement.totalDebitedUsd's own
+     * javadoc) over re-converting totalDebited with TODAY's live rate,
+     * which is only a fallback for a genuinely legacy record created
+     * before that field existed.
+     */
+    private BigDecimal disbursementDebitedUsd(Disbursement d) {
+        if (d.getTotalDebitedUsd() != null) {
+            return d.getTotalDebitedUsd();
+        }
+        BigDecimal totalDebited = d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount();
+        if (totalDebited == null) return BigDecimal.ZERO;
+        return toUsd(totalDebited, d.getCurrency());
+    }
+
+    /** Targeted query for exactly the Disbursements referenced by these ledger entries' sourceId — see getDailyReport's own comment for why this can't just reuse an already-day-scoped disbursements list. */
+    private Map<String, Disbursement> fetchDisbursementSources(List<CompanyLedgerEntry> entries) {
+        List<String> sourceIds = entries.stream()
+                .filter(e -> "COMMISSION_DISBURSEMENT".equals(e.getType()) && e.getSourceId() != null)
+                .map(CompanyLedgerEntry::getSourceId)
+                .distinct()
+                .toList();
+        if (sourceIds.isEmpty()) {
+            return Map.of();
+        }
+        return mongoTemplate.find(new Query(Criteria.where("_id").in(sourceIds)), Disbursement.class)
+                .stream().collect(Collectors.toMap(Disbursement::getId, d -> d, (a, b) -> a));
+    }
+
+    /**
+     * Normalizes a single CompanyLedgerEntry's amount to USD — see class
+     * javadoc's overview. "Intelligence" here means NOT blindly trusting
+     * this entry's own stored currency field, which was hardcoded to
+     * Currency.KES unconditionally before an earlier fix this session,
+     * regardless of whether the actual commissionAmount was ever
+     * genuinely KES-denominated.
+     *
+     * COMMISSION_TRANSFER: NEVER converted — always genuinely USD.
+     * COMMISSION_DISBURSEMENT: uses the SOURCE Disbursement's own
+     * currency field (via disbursementsById) instead of this entry's —
+     * that reliably describes what actually determined this commission
+     * figure's real magnitude at recording time. Falls back to this
+     * entry's own currency if the source can't be found.
+     * Any other type: trusts this entry's own currency field directly.
+     */
+    private BigDecimal ledgerEntryAmountUsd(CompanyLedgerEntry e, Map<String, Disbursement> disbursementsById) {
+        BigDecimal amount = e.getAmount();
+        if (amount == null) return BigDecimal.ZERO;
+
+        if ("COMMISSION_TRANSFER".equals(e.getType())) {
+            return amount;
+        }
+
+        if ("COMMISSION_DISBURSEMENT".equals(e.getType())) {
+            Disbursement source = e.getSourceId() != null ? disbursementsById.get(e.getSourceId()) : null;
+            if (source != null) {
+                return toUsd(amount, source.getCurrency());
+            }
+        }
+
+        return toUsd(amount, e.getCurrency() != null ? e.getCurrency().name() : null);
+    }
+
+    /**
+     * Converts a native-currency figure to USD using the LIVE, current
+     * exchange rate — not the rate that was actually applied when the
+     * original record was created (not preserved for these fields the
+     * way Disbursement.totalDebitedUsd locks in the initiation-time
+     * rate). An approximation for historical non-USD data, not a
+     * byte-for-byte reconstruction — the best available given what's
+     * actually stored.
+     */
+    private BigDecimal toUsd(BigDecimal amount, String currencyCode) {
+        if (amount == null) return BigDecimal.ZERO;
+        if (currencyCode == null || "USD".equalsIgnoreCase(currencyCode)) return amount;
+        BigDecimal rate = exchangeRateService.getRate(currencyCode.toUpperCase(), "USD");
+        return amount.multiply(rate).setScale(2, RoundingMode.HALF_UP);
     }
 }

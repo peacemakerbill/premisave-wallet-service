@@ -20,4 +20,5 @@ package com.premisave.wallet.service;
  * and one this codebase has deliberately avoided everywhere else.
  */
 public record ProviderResult(boolean success, String message, String providerRef) {
+	
 }
