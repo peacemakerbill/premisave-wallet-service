@@ -53,5 +53,7 @@ public class SystemSummaryResponse {
     // ─── Company revenue (all-time) ──────────────────────────────────
     private BigDecimal totalCommissionFromTransfers;
     private BigDecimal totalCommissionFromDisbursements;
+    /** Sum of CompanyLedgerEntry rows with sourceType="PAYMENT" (ad subscriptions, booking fees, etc.) — the FULL amount, not a rate cut, since a Payment IS company revenue directly */
+    private BigDecimal totalRevenueFromPayments;
     private BigDecimal totalCommissionRevenue;
 }

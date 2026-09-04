@@ -139,10 +139,20 @@ public class AdminReportService {
                 .filter(e -> "COMMISSION_DISBURSEMENT".equals(e.getType()))
                 .map(e -> ledgerEntryAmountUsd(e, disbursementsById))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+        // Filtered by sourceType, not type — type itself varies per
+        // Payment.service category ("AD_SUBSCRIPTION", "BOOKING_FEE",
+        // etc., see PaymentService.executePayment), while sourceType is
+        // the one reliable, constant discriminator every payment-derived
+        // ledger entry shares.
+        BigDecimal revenueFromPayments = ledgerEntries.stream()
+                .filter(e -> "PAYMENT".equals(e.getSourceType()))
+                .map(e -> ledgerEntryAmountUsd(e, disbursementsById))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         report.setTotalCommissionFromTransfers(commissionFromTransfers);
         report.setTotalCommissionFromDisbursements(commissionFromDisbursements);
-        report.setTotalCommissionRevenue(commissionFromTransfers.add(commissionFromDisbursements));
+        report.setTotalRevenueFromPayments(revenueFromPayments);
+        report.setTotalCommissionRevenue(commissionFromTransfers.add(commissionFromDisbursements).add(revenueFromPayments));
 
         return report;
     }
@@ -277,9 +287,14 @@ public class AdminReportService {
                 .filter(e -> "COMMISSION_DISBURSEMENT".equals(e.getType()) && e.getAmount() != null)
                 .map(e -> ledgerEntryAmountUsd(e, disbursementsById))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal revenueFromPayments = ledgerEntries.stream()
+                .filter(e -> "PAYMENT".equals(e.getSourceType()) && e.getAmount() != null)
+                .map(e -> ledgerEntryAmountUsd(e, disbursementsById))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
         s.setTotalCommissionFromTransfers(commissionFromTransfers);
         s.setTotalCommissionFromDisbursements(commissionFromDisbursements);
-        s.setTotalCommissionRevenue(commissionFromTransfers.add(commissionFromDisbursements));
+        s.setTotalRevenueFromPayments(revenueFromPayments);
+        s.setTotalCommissionRevenue(commissionFromTransfers.add(commissionFromDisbursements).add(revenueFromPayments));
 
         return s;
     }

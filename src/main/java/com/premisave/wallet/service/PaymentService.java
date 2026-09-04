@@ -64,6 +64,7 @@ public class PaymentService {
     private final PaymentTransactionRecorder paymentTransactionRecorder;
     private final EmailService emailService;
     private final UserNameResolver userNameResolver;
+    private final CommissionService commissionService;
 
     @Transactional
     public PaymentResponse deductFromWallet(String userId, PaymentInitiateRequest request) {
@@ -107,10 +108,6 @@ public class PaymentService {
         payment.setWalletId(wallet.getId());
         payment.setEmail(wallet.getAccountNumber());
         payment.setAmount(amount);
-        // Fixed: was hardcoded Currency.KES — same class of bug found and
-        // fixed elsewhere this session (DepositTransactionRecorder). This
-        // is an internal deduction from an always-USD wallet, not an
-        // external gateway transaction with its own native currency.
         payment.setCurrency(Currency.USD);
         payment.setService(service);
         payment.setDescription(description);
@@ -125,6 +122,19 @@ public class PaymentService {
         paymentRepository.save(payment);
 
         paymentTransactionRecorder.record(payment);
+
+        // A Payment IS company revenue directly (see class javadoc), so
+        // the full amount is recorded with no rate/grossAmount — both
+        // null, matching CompanyLedgerEntry.rateApplied's own javadoc:
+        // "the whole amount IS the revenue." type is payment.getService()
+        // itself (e.g. "AD_SUBSCRIPTION", "BOOKING_FEE") rather than one
+        // generic label, for the same reporting-granularity reason
+        // gateway commission is split by provider.
+        commissionService.recordCommission(payment.getService(), payment.getAmount(), null, null,
+                "PAYMENT", payment.getId(), payment.getReference(), payment.getUserId(),
+                "Payment for " + payment.getService()
+                        + (payment.getDescription() != null ? ": " + payment.getDescription() : ""),
+                payment.getCurrency());
 
         emailService.sendPaymentConfirmation(payment.getEmail(), amount.toPlainString(),
                 payment.getCurrency().name(), service, reference,
