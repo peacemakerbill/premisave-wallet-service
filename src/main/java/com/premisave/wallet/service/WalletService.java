@@ -28,6 +28,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -56,20 +57,39 @@ public class WalletService {
      * sequentially. Pagination bounds the damage per request, but a
      * genuinely large page size would make this endpoint noticeably
      * slower than the other, name-free endpoints in this class.
+     *
+     * Uses UserNameResolver.resolveNameWithReachability rather than the
+     * simpler resolveNameSafely every other caller in this codebase
+     * uses — this is the one place that actually needs to tell "name
+     * genuinely absent" apart from "auth-service is down", so the
+     * controller can say so instead of silently returning a page full
+     * of null fullName values with no explanation. If ANY wallet in the
+     * page hits an unreachable result, the whole page is flagged —
+     * during a real outage every call would fail the same way, so one
+     * unreachable result is already a strong enough signal without
+     * needing all of them to agree.
      */
-    public Page<AccountDetailsResponse> getAllAccountDetails(Pageable pageable) {
+    public record AccountDetailsPage(Page<AccountDetailsResponse> page, boolean authServiceReachable) {}
+
+    public AccountDetailsPage getAllAccountDetails(Pageable pageable) {
         Page<Wallet> wallets = walletRepository.findAll(pageable);
+        AtomicBoolean authServiceReachable = new AtomicBoolean(true);
         List<AccountDetailsResponse> content = wallets.getContent().stream()
-                .map(this::mapToAccountDetailsResponse)
+                .map(wallet -> mapToAccountDetailsResponse(wallet, authServiceReachable))
                 .toList();
-        return new PageImpl<>(content, pageable, wallets.getTotalElements());
+        Page<AccountDetailsResponse> page = new PageImpl<>(content, pageable, wallets.getTotalElements());
+        return new AccountDetailsPage(page, authServiceReachable.get());
     }
 
-    private AccountDetailsResponse mapToAccountDetailsResponse(Wallet wallet) {
+    private AccountDetailsResponse mapToAccountDetailsResponse(Wallet wallet, AtomicBoolean authServiceReachable) {
         AccountDetailsResponse r = new AccountDetailsResponse();
         r.setUserId(wallet.getUserId());
         r.setAccountNumber(wallet.getAccountNumber());
-        r.setFullName(userNameResolver.resolveNameSafely(wallet.getAccountNumber()));
+        UserNameResolver.NameResolution resolution = userNameResolver.resolveNameWithReachability(wallet.getAccountNumber());
+        r.setFullName(resolution.fullName());
+        if (!resolution.authServiceReachable()) {
+            authServiceReachable.set(false);
+        }
         r.setFrozen(wallet.isFrozen());
         r.setMpesaPhoneNumber(wallet.getMpesaPhoneNumber());
         r.setPochiPhoneNumber(wallet.getPochiPhoneNumber());

@@ -60,11 +60,24 @@ public class InternalController {
      * performance cost of a large page size before choosing one: name
      * resolution costs one auth-service call PER wallet in the page,
      * with no batch lookup available.
+     *
+     * When any name lookup in the page indicates auth-service itself is
+     * unreachable (not just "this account has no name"), the response
+     * message says so explicitly and every fullName in that page is
+     * null — still returned as success=true, since the wallet data
+     * itself (phone numbers, PayPal email, payment-method linkage) is
+     * still completely valid and useful even without names. The caller
+     * decides what to do with a page of null names, rather than this
+     * endpoint failing outright and withholding data that's still good.
      */
     @GetMapping("/accounts")
     public ResponseEntity<ApiResponse<PagedModel<AccountDetailsResponse>>> accounts(Pageable pageable) {
-        PagedModel<AccountDetailsResponse> body = new PagedModel<>(walletService.getAllAccountDetails(pageable));
-        return ResponseEntity.ok(ApiResponse.success("Account details retrieved", body));
+        WalletService.AccountDetailsPage result = walletService.getAllAccountDetails(pageable);
+        PagedModel<AccountDetailsResponse> body = new PagedModel<>(result.page());
+        String message = result.authServiceReachable()
+                ? "Account details retrieved"
+                : "Account details retrieved, but auth-service appears unreachable — names in this page could not be resolved";
+        return ResponseEntity.ok(ApiResponse.success(message, body));
     }
 
     /**
