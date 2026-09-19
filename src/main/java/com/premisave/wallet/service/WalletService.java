@@ -16,6 +16,9 @@ import com.premisave.wallet.repository.WalletRepository;
 import com.stripe.model.BankAccount;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,6 +39,49 @@ public class WalletService {
     private final TransactionRepository transactionRepository;
     private final MpesaService mpesaService;
     private final StripeService stripeService;
+    private final UserNameResolver userNameResolver;
+
+    /**
+     * GET /internal/accounts — the wallet-owner directory another
+     * Premisave service can page through, resolving name/phone/payment-
+     * method details in one call rather than needing its own separate
+     * lookups against auth-service for everything except the name.
+     *
+     * Performance note, worth knowing before this is called with a large
+     * page size: fullName resolution is ONE UserNameResolver call
+     * (itself one HTTP round-trip to auth-service) PER wallet in the
+     * page — there's no batch/multi-email lookup capability in
+     * AuthServiceClient to fold these into a single call. A page of 20
+     * wallets means 20 separate auth-service calls made here,
+     * sequentially. Pagination bounds the damage per request, but a
+     * genuinely large page size would make this endpoint noticeably
+     * slower than the other, name-free endpoints in this class.
+     */
+    public Page<AccountDetailsResponse> getAllAccountDetails(Pageable pageable) {
+        Page<Wallet> wallets = walletRepository.findAll(pageable);
+        List<AccountDetailsResponse> content = wallets.getContent().stream()
+                .map(this::mapToAccountDetailsResponse)
+                .toList();
+        return new PageImpl<>(content, pageable, wallets.getTotalElements());
+    }
+
+    private AccountDetailsResponse mapToAccountDetailsResponse(Wallet wallet) {
+        AccountDetailsResponse r = new AccountDetailsResponse();
+        r.setUserId(wallet.getUserId());
+        r.setAccountNumber(wallet.getAccountNumber());
+        r.setFullName(userNameResolver.resolveNameSafely(wallet.getAccountNumber()));
+        r.setFrozen(wallet.isFrozen());
+        r.setMpesaPhoneNumber(wallet.getMpesaPhoneNumber());
+        r.setPochiPhoneNumber(wallet.getPochiPhoneNumber());
+        r.setPaypalEmail(wallet.getPaypalEmail());
+        r.setPaypalConnectedEmail(wallet.getPaypalConnectedEmail());
+        r.setStripeConnected(wallet.getStripeConnectedAccountId() != null);
+        r.setStripePayoutsEnabled(wallet.isStripePayoutsEnabled());
+        r.setFlutterwavePaymentMethodNetwork(wallet.getFlutterwavePaymentMethodNetwork());
+        r.setFlutterwavePaymentMethodPhone(wallet.getFlutterwavePaymentMethodPhone());
+        r.setCreatedAt(wallet.getCreatedAt());
+        return r;
+    }
 
     /**
      * Get wallet by account number (email)

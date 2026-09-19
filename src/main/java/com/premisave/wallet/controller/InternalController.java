@@ -1,14 +1,19 @@
 package com.premisave.wallet.controller;
 
+import com.premisave.wallet.dto.AccountDetailsResponse;
 import com.premisave.wallet.dto.ApiResponse;
 import com.premisave.wallet.dto.InternalPaymentRequest;
 import com.premisave.wallet.dto.InternalTransferRequest;
 import com.premisave.wallet.dto.PaymentResponse;
 import com.premisave.wallet.service.PaymentService;
 import com.premisave.wallet.service.TransferService;
+import com.premisave.wallet.service.WalletService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PagedModel;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -36,6 +41,31 @@ public class InternalController {
 
     private final TransferService transferService;
     private final PaymentService paymentService;
+    private final WalletService walletService;
+
+    /**
+     * The wallet-owner directory another Premisave service (e.g.
+     * property-service) can page through — name, phone numbers
+     * (M-Pesa/Pochi), PayPal email, and payment-method linkage status
+     * for every account, without each caller needing its own separate
+     * lookups against auth-service for everything except the name.
+     * Deliberately public to any authenticated internal service, not
+     * admin-role-gated — this is directory/contact data, not a
+     * financial or admin-only report (balances are intentionally left
+     * out — see AccountDetailsResponse's own javadoc).
+     *
+     * Paginated rather than returning everything in one response —
+     * standard ?page=&size=&sort= query params. Worth reading
+     * WalletService.getAllAccountDetails's own javadoc on the
+     * performance cost of a large page size before choosing one: name
+     * resolution costs one auth-service call PER wallet in the page,
+     * with no batch lookup available.
+     */
+    @GetMapping("/accounts")
+    public ResponseEntity<ApiResponse<PagedModel<AccountDetailsResponse>>> accounts(Pageable pageable) {
+        PagedModel<AccountDetailsResponse> body = new PagedModel<>(walletService.getAllAccountDetails(pageable));
+        return ResponseEntity.ok(ApiResponse.success("Account details retrieved", body));
+    }
 
     /**
      * Triggers a wallet-to-wallet transfer on behalf of another Premisave
