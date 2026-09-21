@@ -284,6 +284,20 @@ exchange-rate:
 notifications:
   b2b-recipients: ${B2B_NOTIFICATION_RECIPIENTS:}
 
+# ─── SpringDoc / Swagger UI ─────────────────────────────────────────────────
+# Disabled outright — SecurityConfig's permitAll() list still names these
+# paths, but with the endpoints themselves off there's nothing left at
+# them to expose either way. Also silences springdoc's own startup
+# warning about these being publicly reachable by default (springdoc
+# logs it unconditionally regardless of this property's value — a known,
+# still-open springdoc-openapi issue, not something this setting can
+# suppress on its own; disabling the endpoints for real is what removes it).
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
 logging:
   level:
     "[com.premisave]": DEBUG
