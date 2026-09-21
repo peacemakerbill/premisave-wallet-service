@@ -1,8 +1,8 @@
 package com.premisave.wallet.service;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import com.premisave.wallet.config.NowPaymentsConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,8 +42,9 @@ public class NowPaymentsService {
     // USE_BIG_DECIMAL_FOR_FLOATS avoids float-rounding artifacts on amount
     // fields (price_amount, actually_paid, etc.) when parsing IPN bodies for
     // signature verification — see verifyIpnSignature's javadoc.
-    private final ObjectMapper objectMapper = new ObjectMapper()
-            .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true);
+    private final JsonMapper objectMapper = JsonMapper.builder()
+            .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
+            .build();
 
     // Cached payout JWT — obtained via POST /v1/auth, valid 5 minutes.
     // Refreshed with a 30-second safety margin rather than waiting for an
@@ -122,11 +123,11 @@ public class NowPaymentsService {
 
                 JsonNode node = objectMapper.readTree(responseBody);
                 CreatePaymentResult result = new CreatePaymentResult(true,
-                        node.path("payment_id").asText(null),
-                        node.path("pay_address").asText(null),
-                        node.path("pay_amount").asText(null),
-                        node.path("pay_currency").asText(null),
-                        node.path("payment_status").asText(null),
+                        node.path("payment_id").asString(null),
+                        node.path("pay_address").asString(null),
+                        node.path("pay_amount").asString(null),
+                        node.path("pay_currency").asString(null),
+                        node.path("payment_status").asString(null),
                         "Payment created");
                 log.info("NOWPayments payment created: paymentId={} orderId={} payAddress={} payAmount={} {} status={}",
                         result.paymentId(), orderId, result.payAddress(), result.payAmount(), result.payCurrency(), result.paymentStatus());
@@ -158,8 +159,8 @@ public class NowPaymentsService {
 
                 JsonNode node = objectMapper.readTree(responseBody);
                 return new PaymentStatusResult(true,
-                        node.path("payment_status").asText(null),
-                        node.path("actually_paid").asText(null),
+                        node.path("payment_status").asString(null),
+                        node.path("actually_paid").asString(null),
                         "OK");
             }
         } catch (Exception e) {
@@ -202,7 +203,7 @@ public class NowPaymentsService {
                 }
                 JsonNode node = objectMapper.readTree(responseBody);
                 BigDecimal estimatedAmount = node.has("estimated_amount")
-                        ? new BigDecimal(node.get("estimated_amount").asText())
+                        ? new BigDecimal(node.get("estimated_amount").asString())
                         : null;
                 if (estimatedAmount == null) {
                     return new EstimateResult(false, null, "NOWPayments estimate response missing 'estimated_amount': " + responseBody);
@@ -249,7 +250,7 @@ public class NowPaymentsService {
                 throw new java.io.IOException("NOWPayments auth failed (" + response.code() + "): " + responseBody);
             }
             JsonNode node = objectMapper.readTree(responseBody);
-            String token = node.path("token").asText(null);
+            String token = node.path("token").asString(null);
             if (token == null) {
                 throw new java.io.IOException("NOWPayments auth response missing 'token' field: " + responseBody);
             }
@@ -317,8 +318,8 @@ public class NowPaymentsService {
                         ? node.path("withdrawals").get(0)
                         : node;
 
-                String payoutId = first.path("id").asText(null);
-                String status = first.path("status").asText(null);
+                String payoutId = first.path("id").asString(null);
+                String status = first.path("status").asString(null);
 
                 log.info("NOWPayments payout created: payoutId={} uniqueExternalId={} address={} amount={} {} status={}",
                         payoutId, uniqueExternalId, address, amount, currency, status);
@@ -388,7 +389,7 @@ public class NowPaymentsService {
                             "NOWPayments getPayoutStatus failed (" + response.code() + "): " + responseBody);
                 }
                 JsonNode node = objectMapper.readTree(responseBody);
-                return new PayoutStatusResult(true, node.path("status").asText(null), "OK");
+                return new PayoutStatusResult(true, node.path("status").asString(null), "OK");
             }
         } catch (Exception e) {
             log.error("NOWPayments getPayoutStatus error: payoutId={} {}", payoutId, e.getMessage(), e);
@@ -505,13 +506,11 @@ public class NowPaymentsService {
                 // Defensive parse — tries the most likely shapes without
                 // assuming one specific structure, since this wasn't
                 // confirmed against real docs the way other endpoints were.
-                java.util.Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
-                while (fields.hasNext()) {
-                    Map.Entry<String, JsonNode> field = fields.next();
+                for (Map.Entry<String, JsonNode> field : node.properties()) {
                     JsonNode value = field.getValue();
-                    if (value.isNumber() || (value.isTextual() && value.asText().matches("-?\\d+(\\.\\d+)?"))) {
+                    if (value.isNumber() || (value.isString() && value.asString().matches("-?\\d+(\\.\\d+)?"))) {
                         Map<String, BigDecimal> amounts = new java.util.LinkedHashMap<>();
-                        amounts.put("balance", new BigDecimal(value.asText()));
+                        amounts.put("balance", new BigDecimal(value.asString()));
                         result.add(new CurrencyBalanceEntry(field.getKey().toUpperCase(), amounts));
                     }
                 }

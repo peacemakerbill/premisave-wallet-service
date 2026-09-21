@@ -15,7 +15,7 @@ public class RateLimiterConfig {
     private int requestsPerMinute;
 
     @Bean
-    public Bucket rateLimiterBucket() {
+    Bucket rateLimiterBucket() {
         Bandwidth limit = Bandwidth.builder()
                 .capacity(requestsPerMinute)
                 .refillIntervally(requestsPerMinute, Duration.ofMinutes(1))

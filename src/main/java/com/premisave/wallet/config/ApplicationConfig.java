@@ -13,7 +13,7 @@ public class ApplicationConfig {
      * authentication is delegated entirely to the Auth Service via JWT.
      */
     @Bean
-    public ModelMapper modelMapper() {
+    ModelMapper modelMapper() {
         return new ModelMapper();
     }
 }

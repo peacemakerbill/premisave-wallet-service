@@ -1,7 +1,7 @@
 package com.premisave.wallet.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.Dns;
 import okhttp3.HttpUrl;
@@ -92,7 +92,7 @@ public class FxRateService {
             .retryOnConnectionFailure(true)
             .build();
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final JsonMapper objectMapper = JsonMapper.builder().build();
 
     private record CachedRate(BigDecimal rate, Instant fetchedAt) {}
     private final ConcurrentHashMap<String, CachedRate> lastKnownGood = new ConcurrentHashMap<>();
@@ -190,12 +190,12 @@ public class FxRateService {
             for (JsonNode entry : node) {
                 JsonNode quoteNode = entry.path("quote");
                 JsonNode rateNode = entry.path("rate");
-                if (quoteNode.isMissingNode() || !quoteNode.isTextual()
+                if (quoteNode.isMissingNode() || !quoteNode.isString()
                         || rateNode.isMissingNode() || !rateNode.isNumber()) {
                     log.warn("Skipping malformed entry in Frankfurter bulk response for base={}: {}", base, entry);
                     continue;
                 }
-                rates.put(quoteNode.asText(), rateNode.decimalValue());
+                rates.put(quoteNode.asString(), rateNode.decimalValue());
             }
 
             log.info("Frankfurter bulk rates fetched for base={}: {} currencies", base, rates.size());

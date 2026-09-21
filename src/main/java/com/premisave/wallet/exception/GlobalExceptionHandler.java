@@ -41,7 +41,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InsufficientFundsException.class)
     public ResponseEntity<ApiResponse<Void>> handleInsufficientFunds(InsufficientFundsException ex) {
-        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT)
                 .body(ApiResponse.error(ex.getMessage()));
     }
 
@@ -100,13 +100,13 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(PhoneNumberUnavailableException.class)
     public ResponseEntity<ApiResponse<Void>> handlePhoneNumberUnavailable(PhoneNumberUnavailableException ex) {
-        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT)
                 .body(ApiResponse.error(ex.getMessage()));
     }
 
     @ExceptionHandler(PaypalCaptureException.class)
     public ResponseEntity<ApiResponse<Void>> handlePaypalCapture(PaypalCaptureException ex) {
-        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT)
                 .body(ApiResponse.error(ex.getMessage()));
     }
 
@@ -200,9 +200,9 @@ public class GlobalExceptionHandler {
             org.springframework.http.converter.HttpMessageNotReadableException ex) {
         String message = "Request body could not be parsed";
         Throwable cause = ex.getCause();
-        if (cause instanceof com.fasterxml.jackson.databind.exc.InvalidFormatException ife) {
+        if (cause instanceof tools.jackson.databind.exc.InvalidFormatException ife) {
             String field = ife.getPath().isEmpty() ? "unknown"
-                    : ife.getPath().get(ife.getPath().size() - 1).getFieldName();
+                    : ife.getPath().get(ife.getPath().size() - 1).getPropertyName();
             message = "Invalid value '" + ife.getValue() + "' for field '" + field
                     + "' — expected " + ife.getTargetType().getSimpleName();
         }

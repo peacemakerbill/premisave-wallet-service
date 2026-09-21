@@ -1,7 +1,7 @@
 package com.premisave.wallet.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import com.premisave.wallet.config.MpesaConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -43,7 +43,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class MpesaTokenService {
 
     private final MpesaConfig config;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final JsonMapper objectMapper = JsonMapper.builder().build();
 
     /**
      * Explicit timeouts, rather than OkHttp's defaults — those defaults
@@ -182,7 +182,7 @@ public class MpesaTokenService {
             try (Response response = http.newCall(request).execute()) {
                 String body = response.body().string();
                 JsonNode node = objectMapper.readTree(body);
-                String token = node.path("access_token").asText();
+                String token = node.path("access_token").asString();
                 int expiresIn = node.path("expires_in").asInt(3599);
 
                 if (token.isBlank()) {

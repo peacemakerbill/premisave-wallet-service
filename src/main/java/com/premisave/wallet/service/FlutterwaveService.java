@@ -1,7 +1,7 @@
 package com.premisave.wallet.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import com.premisave.wallet.config.FlutterwaveConfig;
 import com.premisave.wallet.exception.FlutterwaveTransferException;
 import lombok.RequiredArgsConstructor;
@@ -61,7 +61,7 @@ public class FlutterwaveService {
     private static final long TOKEN_REFRESH_MARGIN_MILLIS = 60_000L;
 
     private final FlutterwaveConfig config;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final JsonMapper objectMapper = JsonMapper.builder().build();
     private final OkHttpClient http = new OkHttpClient();
 
     private final ReentrantLock tokenLock = new ReentrantLock();
@@ -100,7 +100,7 @@ public class FlutterwaveService {
                 }
 
                 JsonNode node = objectMapper.readTree(body);
-                String accessToken = node.path("access_token").asText(null);
+                String accessToken = node.path("access_token").asString(null);
                 long expiresIn = node.path("expires_in").asLong(600);
 
                 if (accessToken == null || accessToken.isBlank()) {
@@ -173,13 +173,13 @@ public class FlutterwaveService {
             String pmResponse = post("/payment-methods", pmBody, reference + "-paymentmethod");
             JsonNode pmNode = objectMapper.readTree(pmResponse);
 
-            if (!"success".equals(pmNode.path("status").asText(""))) {
-                String msg = pmNode.path("message").asText("Failed to create payment method");
+            if (!"success".equals(pmNode.path("status").asString(""))) {
+                String msg = pmNode.path("message").asString("Failed to create payment method");
                 log.warn("Flutterwave payment-method creation failed: reference={} message={}", reference, msg);
                 return new CheckoutResult(false, null, reference, null, null, null, msg);
             }
 
-            String paymentMethodId = pmNode.path("data").path("id").asText(null);
+            String paymentMethodId = pmNode.path("data").path("id").asString(null);
 
             // Step 3: Create charge
             Map<String, Object> chargeBody = new HashMap<>();
@@ -199,28 +199,28 @@ public class FlutterwaveService {
             log.info("Flutterwave charge response: reference={} body={}", reference, chargeResponse);
             JsonNode chargeNode = objectMapper.readTree(chargeResponse);
 
-            String envelopeStatus = chargeNode.path("status").asText("");
+            String envelopeStatus = chargeNode.path("status").asString("");
             if (!"success".equals(envelopeStatus) && !"pending".equals(envelopeStatus)) {
-                String msg = chargeNode.path("message").asText("Unknown Flutterwave error");
+                String msg = chargeNode.path("message").asString("Unknown Flutterwave error");
                 log.warn("Flutterwave charge rejected: reference={} message={}", reference, msg);
                 return new CheckoutResult(false, null, reference, null, null, null, msg);
             }
 
             JsonNode data = chargeNode.path("data");
-            String chargeId = data.path("id").asText(null);
+            String chargeId = data.path("id").asString(null);
             JsonNode nextAction = data.path("next_action");
-            String nextActionType = nextAction.path("type").asText(null);
+            String nextActionType = nextAction.path("type").asString(null);
 
             // "redirect_url" next_action
             String redirectUrl = null;
             if ("redirect_url".equals(nextActionType)) {
-                redirectUrl = nextAction.path("redirect_url").path("url").asText(null);
+                redirectUrl = nextAction.path("redirect_url").path("url").asString(null);
             }
 
             // "payment_instruction" next_action
             String instructionNote = null;
             if ("payment_instruction".equals(nextActionType)) {
-                instructionNote = nextAction.path("payment_instruction").path("note").asText(null);
+                instructionNote = nextAction.path("payment_instruction").path("note").asString(null);
             }
 
             log.info("Flutterwave charge created: reference={} chargeId={} nextAction={}",
@@ -263,11 +263,11 @@ public class FlutterwaveService {
         String responseBody = post("/customers", body, idempotencyKey + "-customer");
         JsonNode node = objectMapper.readTree(responseBody);
 
-        if (!"success".equals(node.path("status").asText(""))) {
+        if (!"success".equals(node.path("status").asString(""))) {
             throw new IllegalStateException("Failed to create Flutterwave customer: " + responseBody);
         }
 
-        return node.path("data").path("id").asText(null);
+        return node.path("data").path("id").asString(null);
     }
 
     // ─── Verify a charge ──────────────────────────────────────────────────────
@@ -288,18 +288,18 @@ public class FlutterwaveService {
             log.info("Flutterwave verify charge: chargeId={} response={}", chargeId, responseBody);
             JsonNode node = objectMapper.readTree(responseBody);
 
-            if (!"success".equals(node.path("status").asText(""))) {
-                String msg = node.path("message").asText("Unknown error");
+            if (!"success".equals(node.path("status").asString(""))) {
+                String msg = node.path("message").asString("Unknown error");
                 return new VerifyResult(false, null, chargeId, null, null, null, null, msg);
             }
 
             JsonNode data = node.path("data");
-            String status = data.path("status").asText("");
-            String reference = data.path("reference").asText(null);
+            String status = data.path("status").asString("");
+            String reference = data.path("reference").asString(null);
             BigDecimal amount = data.path("amount").isMissingNode() ? null
                     : data.path("amount").decimalValue();
-            String currency = data.path("currency").asText(null);
-            String customerEmail = data.path("customer").path("email").asText(null);
+            String currency = data.path("currency").asString(null);
+            String customerEmail = data.path("customer").path("email").asString(null);
 
             boolean success = "succeeded".equalsIgnoreCase(status);
             return new VerifyResult(success, status, chargeId, reference, amount, currency,
@@ -395,15 +395,15 @@ public class FlutterwaveService {
             log.info("Flutterwave direct-transfer response: reference={} body={}", reference, responseBody);
             JsonNode node = objectMapper.readTree(responseBody);
 
-            String envelopeStatus = node.path("status").asText("");
+            String envelopeStatus = node.path("status").asString("");
             if (!"success".equals(envelopeStatus)) {
-                String msg = node.path("message").asText("Unknown transfer error");
+                String msg = node.path("message").asString("Unknown transfer error");
                 log.warn("Flutterwave transfer rejected: reference={} message={}", reference, msg);
                 return new TransferResult(false, msg, null, reference);
             }
 
             JsonNode data = node.path("data");
-            String transferId = data.path("id").asText(null);
+            String transferId = data.path("id").asString(null);
             // Status is always "NEW" on creation — final status via webhook
             log.info("Flutterwave transfer initiated: reference={} transferId={}", reference, transferId);
             return new TransferResult(true, "Transfer initiated", transferId, reference);
@@ -499,14 +499,14 @@ public class FlutterwaveService {
             log.info("Flutterwave bank-transfer response: reference={} body={}", reference, responseBody);
             JsonNode node = objectMapper.readTree(responseBody);
 
-            String envelopeStatus = node.path("status").asText("");
+            String envelopeStatus = node.path("status").asString("");
             if (!"success".equals(envelopeStatus)) {
-                String msg = node.path("message").asText("Unknown transfer error");
+                String msg = node.path("message").asString("Unknown transfer error");
                 log.warn("Flutterwave bank transfer rejected: reference={} message={}", reference, msg);
                 return new TransferResult(false, msg, null, reference);
             }
 
-            String transferId = node.path("data").path("id").asText(null);
+            String transferId = node.path("data").path("id").asString(null);
             log.info("Flutterwave bank transfer initiated: reference={} transferId={}", reference, transferId);
             return new TransferResult(true, "Transfer initiated", transferId, reference);
 
@@ -528,14 +528,14 @@ public class FlutterwaveService {
             log.info("Flutterwave transfer status: transferId={} response={}", transferId, responseBody);
             JsonNode node = objectMapper.readTree(responseBody);
 
-            if (!"success".equals(node.path("status").asText(""))) {
+            if (!"success".equals(node.path("status").asString(""))) {
                 return new TransferResult(false,
-                        node.path("message").asText("Unknown error"), transferId, null);
+                        node.path("message").asString("Unknown error"), transferId, null);
             }
 
             JsonNode data = node.path("data");
-            String status = data.path("status").asText("");
-            String reference = data.path("reference").asText(null);
+            String status = data.path("status").asString("");
+            String reference = data.path("reference").asString(null);
 
             boolean success = "SUCCESSFUL".equalsIgnoreCase(status);
             return new TransferResult(success, "Transfer status: " + status, transferId, reference);
@@ -611,17 +611,17 @@ public class FlutterwaveService {
             log.info("Flutterwave balance response: {}", responseBody);
             JsonNode node = objectMapper.readTree(responseBody);
 
-            if (!"success".equals(node.path("status").asText(""))) {
-                String msg = node.path("error").path("message").asText(null);
+            if (!"success".equals(node.path("status").asString(""))) {
+                String msg = node.path("error").path("message").asString(null);
                 if (msg == null || msg.isBlank()) {
-                    msg = node.path("message").asText("Unknown error");
+                    msg = node.path("message").asString("Unknown error");
                 }
                 return new BalanceResult(false, List.of(), "Flutterwave getBalance failed: " + msg);
             }
 
             List<CurrencyBalanceEntry> result = new ArrayList<>();
             for (JsonNode wallet : node.path("data")) {
-                String currency = wallet.path("currency").asText(null);
+                String currency = wallet.path("currency").asString(null);
                 if (currency == null) {
                     continue;
                 }

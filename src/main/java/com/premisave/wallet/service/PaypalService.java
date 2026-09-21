@@ -1,7 +1,7 @@
 package com.premisave.wallet.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import com.premisave.wallet.exception.PaypalCaptureException;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
@@ -49,7 +49,7 @@ public class PaypalService {
     private String cancelUrl;
 
     private final OkHttpClient http = new OkHttpClient();
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final JsonMapper objectMapper = JsonMapper.builder().build();
 
     private String baseUrl() {
         return "sandbox".equalsIgnoreCase(environment)
@@ -84,7 +84,7 @@ public class PaypalService {
         try (Response response = http.newCall(request).execute()) {
             String responseBody = response.body().string();
             JsonNode node = objectMapper.readTree(responseBody);
-            String token = node.path("access_token").asText();
+            String token = node.path("access_token").asString();
             int expiresIn = node.path("expires_in").asInt(32400);
 
             if (!response.isSuccessful() || token.isBlank()) {
@@ -196,12 +196,12 @@ public class PaypalService {
                     throw new RuntimeException("PayPal createOrder failed (" + response.code() + "): " + responseBody);
                 }
 
-                String orderId = node.path("id").asText();
+                String orderId = node.path("id").asString();
                 String approveUrl = null;
                 for (JsonNode link : node.path("links")) {
-                    String rel = link.path("rel").asText();
+                    String rel = link.path("rel").asString();
                     if ("approve".equals(rel) || "payer-action".equals(rel)) {
-                        approveUrl = link.path("href").asText();
+                        approveUrl = link.path("href").asString();
                         break;
                     }
                 }
@@ -210,7 +210,7 @@ public class PaypalService {
                     throw new RuntimeException("PayPal createOrder response missing id: " + responseBody);
                 }
 
-                String status = node.path("status").asText(null);
+                String status = node.path("status").asString(null);
                 String captureId = null;
                 String vaultId = null;
                 String customerId = null;
@@ -222,15 +222,15 @@ public class PaypalService {
                     if (purchaseUnits.isArray() && purchaseUnits.size() > 0) {
                         JsonNode captures = purchaseUnits.get(0).path("payments").path("captures");
                         if (captures.isArray() && captures.size() > 0) {
-                            captureId = captures.get(0).path("id").asText(null);
+                            captureId = captures.get(0).path("id").asString(null);
                         }
                     }
                     JsonNode paypalSource = node.path("payment_source").path("paypal");
                     JsonNode vaultNode = paypalSource.path("attributes").path("vault");
-                    vaultId = vaultNode.path("id").asText(null);
-                    vaultStatus = vaultNode.path("status").asText(null);
-                    customerId = vaultNode.path("customer").path("id").asText(null);
-                    payerEmail = paypalSource.path("email_address").asText(null);
+                    vaultId = vaultNode.path("id").asString(null);
+                    vaultStatus = vaultNode.path("status").asString(null);
+                    customerId = vaultNode.path("customer").path("id").asString(null);
+                    payerEmail = paypalSource.path("email_address").asString(null);
                 }
 
                 log.info("PayPal Order created: id={} status={} vaultReused={} approveRequired={} autoCaptured={}",
@@ -262,7 +262,7 @@ public class PaypalService {
                 String issue = "";
                 JsonNode details = node.path("details");
                 if (details.isArray() && details.size() > 0) {
-                    issue = details.get(0).path("issue").asText("");
+                    issue = details.get(0).path("issue").asString("");
                 }
                 throw new PaypalCaptureException(orderId, issue, responseBody);
             }
@@ -272,14 +272,14 @@ public class PaypalService {
                 throw new RuntimeException("PayPal capture response missing captures array: " + responseBody);
             }
 
-            String captureId = captures.get(0).path("id").asText();
+            String captureId = captures.get(0).path("id").asString();
 
             JsonNode paypalSource = node.path("payment_source").path("paypal");
             JsonNode vaultNode = paypalSource.path("attributes").path("vault");
-            String vaultId = vaultNode.path("id").asText(null);
-            String vaultStatus = vaultNode.path("status").asText(null);
-            String customerId = vaultNode.path("customer").path("id").asText(null);
-            String payerEmail = paypalSource.path("email_address").asText(null);
+            String vaultId = vaultNode.path("id").asString(null);
+            String vaultStatus = vaultNode.path("status").asString(null);
+            String customerId = vaultNode.path("customer").path("id").asString(null);
+            String payerEmail = paypalSource.path("email_address").asString(null);
 
             log.info("PayPal Order captured: orderId={} captureId={} vaultId={} vaultStatus={}",
                     orderId, captureId, vaultId, vaultStatus);
@@ -317,14 +317,14 @@ public class PaypalService {
                 throw new RuntimeException("PayPal getOrder: order " + orderId + " has no captures yet: " + responseBody);
             }
 
-            String captureId = captures.get(0).path("id").asText(null);
+            String captureId = captures.get(0).path("id").asString(null);
 
             JsonNode paypalSource = node.path("payment_source").path("paypal");
             JsonNode vaultNode = paypalSource.path("attributes").path("vault");
-            String vaultId = vaultNode.path("id").asText(null);
-            String vaultStatus = vaultNode.path("status").asText(null);
-            String customerId = vaultNode.path("customer").path("id").asText(null);
-            String payerEmail = paypalSource.path("email_address").asText(null);
+            String vaultId = vaultNode.path("id").asString(null);
+            String vaultStatus = vaultNode.path("status").asString(null);
+            String customerId = vaultNode.path("customer").path("id").asString(null);
+            String payerEmail = paypalSource.path("email_address").asString(null);
 
             log.info("PayPal Order fetched for reconciliation: orderId={} captureId={} vaultStatus={}",
                     orderId, captureId, vaultStatus);
@@ -389,11 +389,11 @@ public class PaypalService {
                     throw new RuntimeException("PayPal createSetupToken failed (" + response.code() + "): " + responseBody);
                 }
 
-                String setupTokenId = node.path("id").asText();
+                String setupTokenId = node.path("id").asString();
                 String approveUrl = null;
                 for (JsonNode link : node.path("links")) {
-                    if ("approve".equals(link.path("rel").asText())) {
-                        approveUrl = link.path("href").asText();
+                    if ("approve".equals(link.path("rel").asString())) {
+                        approveUrl = link.path("href").asString();
                         break;
                     }
                 }
@@ -474,9 +474,9 @@ public class PaypalService {
                     throw new RuntimeException("PayPal createPaymentToken failed (" + response.code() + "): " + responseBody);
                 }
 
-                String vaultId = node.path("id").asText(null);
-                String customerId = node.path("customer").path("id").asText(null);
-                String payerEmail = node.path("payment_source").path("paypal").path("email_address").asText(null);
+                String vaultId = node.path("id").asString(null);
+                String customerId = node.path("customer").path("id").asString(null);
+                String payerEmail = node.path("payment_source").path("paypal").path("email_address").asString(null);
 
                 if (vaultId == null || vaultId.isBlank()) {
                     throw new RuntimeException("PayPal createPaymentToken response missing id: " + responseBody);
@@ -533,7 +533,7 @@ public class PaypalService {
                     throw new RuntimeException("PayPal payout failed (" + response.code() + "): " + responseBody);
                 }
 
-                String payoutBatchId = node.path("batch_header").path("payout_batch_id").asText();
+                String payoutBatchId = node.path("batch_header").path("payout_batch_id").asString();
                 if (payoutBatchId.isBlank()) {
                     throw new RuntimeException("PayPal payout response missing payout_batch_id: " + responseBody);
                 }
@@ -596,22 +596,22 @@ public class PaypalService {
 
             List<CurrencyBalanceEntry> result = new ArrayList<>();
             for (JsonNode balanceNode : node.path("balances")) {
-                String currency = balanceNode.path("currency").asText(null);
+                String currency = balanceNode.path("currency").asString(null);
                 Map<String, BigDecimal> amounts = new LinkedHashMap<>();
                 if (balanceNode.has("total_balance")) {
-                    amounts.put("total", new BigDecimal(balanceNode.path("total_balance").path("value").asText("0")));
+                    amounts.put("total", new BigDecimal(balanceNode.path("total_balance").path("value").asString("0")));
                 }
                 if (balanceNode.has("available_balance")) {
-                    amounts.put("available", new BigDecimal(balanceNode.path("available_balance").path("value").asText("0")));
+                    amounts.put("available", new BigDecimal(balanceNode.path("available_balance").path("value").asString("0")));
                 }
                 if (balanceNode.has("withheld_balance")) {
-                    amounts.put("withheld", new BigDecimal(balanceNode.path("withheld_balance").path("value").asText("0")));
+                    amounts.put("withheld", new BigDecimal(balanceNode.path("withheld_balance").path("value").asString("0")));
                 }
                 result.add(new CurrencyBalanceEntry(currency, amounts));
             }
 
             log.info("PayPal balance retrieved: {} currencies asOfTime={}",
-                    result.size(), node.path("as_of_time").asText(null));
+                    result.size(), node.path("as_of_time").asString(null));
             return new BalanceResult(true, result,
                     "OK — data may be up to 3 hours old (PayPal reporting limitation, not a bug here)");
         } catch (Exception e) {
@@ -668,7 +668,7 @@ public class PaypalService {
                 }
 
                 JsonNode node = objectMapper.readTree(responseBody);
-                String status = node.path("verification_status").asText("");
+                String status = node.path("verification_status").asString("");
                 boolean valid = "SUCCESS".equals(status);
 
                 if (!valid) {

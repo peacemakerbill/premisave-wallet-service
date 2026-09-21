@@ -32,7 +32,7 @@ public class AuthServiceFeignConfig {
     private String apiKey;
 
     @Bean
-    public RequestInterceptor apiKeyInterceptor() {
+    RequestInterceptor apiKeyInterceptor() {
         return new RequestInterceptor() {
             @Override
             public void apply(RequestTemplate template) {

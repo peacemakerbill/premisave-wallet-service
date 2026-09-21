@@ -3,7 +3,7 @@ package com.premisave.wallet.config;
 import com.premisave.wallet.dto.ApiResponse;
 import com.premisave.wallet.security.InternalApiKeyFilter;
 import com.premisave.wallet.security.JwtAuthenticationFilter;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -29,13 +29,13 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
     private final InternalApiKeyFilter internalApiKeyFilter;
-    private final ObjectMapper objectMapper;
+    private final JsonMapper objectMapper;
 
     @Value("${frontend.url:http://localhost:3000}")
     private String frontendUrl;
 
     public SecurityConfig(JwtAuthenticationFilter jwtAuthFilter, InternalApiKeyFilter internalApiKeyFilter,
-                           ObjectMapper objectMapper) {
+                           JsonMapper objectMapper) {
         this.jwtAuthFilter = jwtAuthFilter;
         this.internalApiKeyFilter = internalApiKeyFilter;
         this.objectMapper = objectMapper;
@@ -50,7 +50,7 @@ public class SecurityConfig {
      * the API, so callers get an actual message to act on.
      */
     @Bean
-    public AccessDeniedHandler accessDeniedHandler() {
+    AccessDeniedHandler accessDeniedHandler() {
         return (request, response, accessDeniedException) -> {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
@@ -66,7 +66,7 @@ public class SecurityConfig {
      * instead of an empty default body.
      */
     @Bean
-    public AuthenticationEntryPoint authenticationEntryPoint() {
+    AuthenticationEntryPoint authenticationEntryPoint() {
         return (request, response, authException) -> {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
@@ -76,7 +76,7 @@ public class SecurityConfig {
     }
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .csrf(csrf -> csrf.disable())
@@ -161,7 +161,7 @@ public class SecurityConfig {
     }
 
     @Bean
-    public CorsConfigurationSource corsConfigurationSource() {
+    CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(List.of(frontendUrl));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));

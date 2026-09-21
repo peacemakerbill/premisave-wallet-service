@@ -36,5 +36,5 @@ public interface AuthServiceClient {
      * Returns: { "valid": true/false, "reason": "NOT_FOUND|INACTIVE|UNVERIFIED|ARCHIVED|" }
      */
     @GetMapping("/internal/users/validate-email/{email}")
-    Map<String, Object> validateEmail(@PathVariable("email") String email);
+    Map<String, Object> validateEmail(@PathVariable String email);
 }

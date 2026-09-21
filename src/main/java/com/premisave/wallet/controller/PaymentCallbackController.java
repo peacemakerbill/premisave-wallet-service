@@ -1,7 +1,7 @@
 package com.premisave.wallet.controller;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import com.premisave.wallet.dto.ApiResponse;
 import com.premisave.wallet.dto.FlutterwaveWebhookRequest;
 import com.premisave.wallet.dto.MpesaResultCallbackRequest;
@@ -89,7 +89,7 @@ public class PaymentCallbackController {
 	private final PaypalService paypalService;
 	private final FlutterwaveService flutterwaveService;
 	private final NowPaymentsService nowPaymentsService;
-	private final ObjectMapper objectMapper = new ObjectMapper();
+	private final JsonMapper objectMapper = JsonMapper.builder().build();
 
 	@Value("${stripe.webhook-secret:}")
 	private String stripeWebhookSecret;
@@ -551,7 +551,7 @@ public class PaymentCallbackController {
 				// body directly instead.
 				JsonNode capturePayload = objectMapper.readTree(rawBody);
 				String orderId = capturePayload.path("resource").path("supplementary_data").path("related_ids")
-						.path("order_id").asText(null);
+						.path("order_id").asString(null);
 
 				if (orderId != null && !orderId.isBlank()) {
 					paypalDepositService.confirmPaypalDeposit(orderId);
@@ -567,11 +567,11 @@ public class PaymentCallbackController {
 				// backstop above.
 				JsonNode payoutPayload = objectMapper.readTree(rawBody);
 				JsonNode resource = payoutPayload.path("resource");
-				String payoutBatchId = resource.path("payout_batch_id").asText(null);
-				String payoutItemId = resource.path("payout_item_id").asText(null);
-				String paypalTransactionId = resource.path("transaction_id").asText(null);
-				String transactionStatus = resource.path("transaction_status").asText(null);
-				String errorMessage = resource.path("errors").path("message").asText(null);
+				String payoutBatchId = resource.path("payout_batch_id").asString(null);
+				String payoutItemId = resource.path("payout_item_id").asString(null);
+				String paypalTransactionId = resource.path("transaction_id").asString(null);
+				String transactionStatus = resource.path("transaction_status").asString(null);
+				String errorMessage = resource.path("errors").path("message").asString(null);
 
 				log.info(
 						"PayPal payout item webhook: eventType={} payoutBatchId={} payoutItemId={} transactionStatus={}",
@@ -630,9 +630,9 @@ public class PaymentCallbackController {
 			log.info("Flutterwave webhook received (verified): event={}", event);
 
 			if ("charge.completed".equals(event) && data != null) {
-				String txRef = data.path("reference").asText(null);
-				String chargeId = data.path("id").asText(null);
-				String status = data.path("status").asText(""); // v4: "succeeded" | "failed" | "pending"
+				String txRef = data.path("reference").asString(null);
+				String chargeId = data.path("id").asString(null);
+				String status = data.path("status").asString(""); // v4: "succeeded" | "failed" | "pending"
 
 				if (txRef == null || txRef.isBlank()) {
 					log.warn("Flutterwave charge.completed webhook missing data.reference — cannot reconcile");
@@ -644,20 +644,20 @@ public class PaymentCallbackController {
 					flutterwaveDepositService.markFlutterwaveTransactionFailed(txRef, "Flutterwave reported status=" + status);
 				}
 			} else if ("transfer.disburse".equals(event) && data != null) {
-				String transferId = data.path("id").asText(null);
-				String status = data.path("status").asText(""); // SUCCESSFUL | FAILED
+				String transferId = data.path("id").asString(null);
+				String status = data.path("status").asString(""); // SUCCESSFUL | FAILED
 
 				// NOTE: no documented FAILED transfer.disburse payload was found in
 				// Flutterwave's v4 docs (only SUCCESSFUL samples, which carry no error
 				// field at all). Falling back across a few plausible field names —
 				// confirm the actual field against a real failed-transfer webhook in
 				// sandbox before relying on this for anything user-facing.
-				String failureMessage = data.path("failure_reason").asText(null);
+				String failureMessage = data.path("failure_reason").asString(null);
 				if (failureMessage == null || failureMessage.isBlank()) {
-					failureMessage = data.path("message").asText(null);
+					failureMessage = data.path("message").asString(null);
 				}
 				if (failureMessage == null || failureMessage.isBlank()) {
-					failureMessage = data.path("error").path("message").asText(null);
+					failureMessage = data.path("error").path("message").asString(null);
 				}
 
 				if (transferId == null || transferId.isBlank()) {
@@ -734,9 +734,9 @@ public class PaymentCallbackController {
 
 			if (data.has("payment_id")) {
 				// ── Deposit callback — confirmed shape ──
-				String orderId = data.path("order_id").asText(null);
-				String paymentId = data.path("payment_id").asText(null);
-				String status = data.path("payment_status").asText("");
+				String orderId = data.path("order_id").asString(null);
+				String paymentId = data.path("payment_id").asString(null);
+				String status = data.path("payment_status").asString("");
 
 				log.info("NOWPayments deposit webhook received (verified): orderId={} paymentId={} status={}",
 						orderId, paymentId, status);
@@ -756,15 +756,15 @@ public class PaymentCallbackController {
 				// ── Payout callback — field names NOT independently
 				// confirmed, see javadoc above. Falls back across a few
 				// plausible names for the payout id.
-				String payoutId = data.path("id").asText(null);
+				String payoutId = data.path("id").asString(null);
 				if (payoutId == null || payoutId.isBlank()) {
-					payoutId = data.path("payout_id").asText(null);
+					payoutId = data.path("payout_id").asString(null);
 				}
 				if (payoutId == null || payoutId.isBlank()) {
-					payoutId = data.path("withdrawal_id").asText(null);
+					payoutId = data.path("withdrawal_id").asString(null);
 				}
 
-				String status = data.path("status").asText("");
+				String status = data.path("status").asString("");
 
 				log.info("NOWPayments payout webhook received (verified): payoutId={} status={}", payoutId, status);
 

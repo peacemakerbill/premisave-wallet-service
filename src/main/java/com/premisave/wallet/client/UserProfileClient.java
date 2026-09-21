@@ -25,10 +25,10 @@ public interface UserProfileClient {
     // ── Profile ──────────────────────────────────────────────────────────────
 
     @GetMapping("/profile/user/{userId}")
-    Map<String, Object> getPublicProfile(@PathVariable("userId") String userId);
+    Map<String, Object> getPublicProfile(@PathVariable String userId);
 
     @GetMapping("/profile/search")
-    List<Map<String, Object>> searchUsers(@RequestParam("query") String query);
+    List<Map<String, Object>> searchUsers(@RequestParam String query);
 
     @GetMapping("/profile/all")
     List<Map<String, Object>> getAllUsers();
@@ -39,7 +39,7 @@ public interface UserProfileClient {
     Map<String, Object> likeUser(@RequestBody Map<String, String> request);
 
     @DeleteMapping("/social/unlike/{targetId}")
-    Map<String, Object> unlikeUser(@PathVariable("targetId") String targetId);
+    Map<String, Object> unlikeUser(@PathVariable String targetId);
 
     @GetMapping("/social/my-likes")
     List<Map<String, Object>> getMyLikes();
@@ -50,7 +50,7 @@ public interface UserProfileClient {
     Map<String, Object> followUser(@RequestBody Map<String, String> request);
 
     @DeleteMapping("/social/unfollow/{targetId}")
-    Map<String, Object> unfollowUser(@PathVariable("targetId") String targetId);
+    Map<String, Object> unfollowUser(@PathVariable String targetId);
 
     @GetMapping("/social/my-following")
     List<Map<String, Object>> getMyFollowing();
@@ -64,18 +64,18 @@ public interface UserProfileClient {
     Map<String, Object> editReview(@RequestBody Map<String, Object> request);
 
     @DeleteMapping("/social/review/{reviewId}")
-    Map<String, Object> deleteReview(@PathVariable("reviewId") String reviewId);
+    Map<String, Object> deleteReview(@PathVariable String reviewId);
 
     @GetMapping("/social/reviews/{targetId}")
-    List<Map<String, Object>> getUserReviews(@PathVariable("targetId") String targetId);
+    List<Map<String, Object>> getUserReviews(@PathVariable String targetId);
 
     @GetMapping("/social/stats/{userId}")
-    Map<String, Object> getUserStats(@PathVariable("userId") String userId);
+    Map<String, Object> getUserStats(@PathVariable String userId);
 
     // ── Profile Views ────────────────────────────────────────────────────────
 
     @PostMapping("/profile/views/{targetId}")
-    Map<String, Object> recordProfileView(@PathVariable("targetId") String targetId);
+    Map<String, Object> recordProfileView(@PathVariable String targetId);
 
     @GetMapping("/profile/views/who-viewed-me")
     List<Map<String, Object>> getWhoViewedMe();
@@ -87,7 +87,7 @@ public interface UserProfileClient {
     Map<String, Object> getMyViewStats();
 
     @GetMapping("/profile/views/stats/{userId}")
-    Map<String, Object> getUserViewStats(@PathVariable("userId") String userId);
+    Map<String, Object> getUserViewStats(@PathVariable String userId);
 
     // ── Inbound: who liked / follows / reviewed me ────────────────────────────
 
@@ -106,14 +106,14 @@ public interface UserProfileClient {
     // ── Relationship status checks ────────────────────────────────────────────
 
     @GetMapping("/social/like/status/{targetId}")
-    Map<String, Object> getLikeStatus(@PathVariable("targetId") String targetId);
+    Map<String, Object> getLikeStatus(@PathVariable String targetId);
 
     @GetMapping("/social/follow/status/{targetId}")
-    Map<String, Object> getFollowStatus(@PathVariable("targetId") String targetId);
+    Map<String, Object> getFollowStatus(@PathVariable String targetId);
 
     @GetMapping("/social/review/status/{targetId}")
-    Map<String, Object> getReviewStatus(@PathVariable("targetId") String targetId);
+    Map<String, Object> getReviewStatus(@PathVariable String targetId);
 
     @GetMapping("/social/follow/mutual/{targetId}")
-    Map<String, Object> getMutualFollowStatus(@PathVariable("targetId") String targetId);
+    Map<String, Object> getMutualFollowStatus(@PathVariable String targetId);
 }

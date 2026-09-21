@@ -33,7 +33,7 @@ public class StripeConfig {
     private final Connect connect = new Connect();
 
     @Bean
-    public StripeClient stripeClient() {
+    StripeClient stripeClient() {
         return new StripeClient(secretKey);
     }
 

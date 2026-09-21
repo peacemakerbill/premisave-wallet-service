@@ -13,7 +13,7 @@ import java.util.Optional;
 public class MongoAuditingConfig {
 
     @Bean
-    public DateTimeProvider dateTimeProvider() {
+    DateTimeProvider dateTimeProvider() {
         return () -> Optional.of(LocalDateTime.now());
     }
 }

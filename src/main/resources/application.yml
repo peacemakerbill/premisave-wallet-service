@@ -2,9 +2,10 @@ spring:
   application:
     name: premisave-wallet-service
 
+  mongodb:
+    uri: ${MONGODB_URI:mongodb://localhost:27017/premisave-wallet}
+
   data:
-    mongodb:
-      uri: ${MONGODB_URI:mongodb://localhost:27017/premisave-wallet}
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
@@ -96,8 +97,7 @@ mpesa:
       max-amount: 150000
 
     # ── B2B (Business to Business) ──
-    # NOTE: B2B is a permissioned API — confirm it's enabled for your
-    # shortcode with Safaricom (account manager / Daraja portal) before
+    # code with Safaricom (account manager / Daraja portal) before
     # relying on this in production. commandId here defaults BusinessPayBill /
     # BusinessBuyGoods / etc. calls that don't specify their own commandId.
     b2b:
@@ -146,7 +146,7 @@ mpesa:
 
     # ── Reversal API ──
     # Reverses a completed C2B transaction (refunds the customer, debits our
-    # shortcode). NOTE: B2C payouts cannot be reversed via API — portal only.
+    # shortcode). B2C payouts cannot be reversed via API — portal only.
     # https://developer.safaricom.co.ke/apis/Reversal
     reversal:
       initiator-name: ${MPESA_REVERSAL_INITIATOR_NAME}

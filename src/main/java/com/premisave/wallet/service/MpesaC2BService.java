@@ -1,7 +1,7 @@
 package com.premisave.wallet.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import com.premisave.wallet.client.AuthServiceClient;
 import com.premisave.wallet.config.MpesaConfig;
 import com.premisave.wallet.dto.MpesaC2BCallbackRequest;
@@ -65,7 +65,7 @@ public class MpesaC2BService {
             .retryOnConnectionFailure(true)
             .build();
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final JsonMapper objectMapper = JsonMapper.builder().build();
 
     // ─── URL Registration ─────────────────────────────────────────────────────
 
@@ -193,9 +193,9 @@ public class MpesaC2BService {
         JsonNode node = objectMapper.readTree(respBody);
 
         // ── Rejection shape: {requestId, errorCode, errorMessage} ──────
-        String errorCode = node.path("errorCode").asText(null);
+        String errorCode = node.path("errorCode").asString(null);
         if (errorCode != null && !errorCode.isBlank()) {
-            String errorMessage = node.path("errorMessage").asText("Unknown C2B registration error");
+            String errorMessage = node.path("errorMessage").asString("Unknown C2B registration error");
             log.warn("C2B URL registration rejected by Safaricom: errorCode={} errorMessage={}",
                     errorCode, errorMessage);
 
@@ -213,8 +213,8 @@ public class MpesaC2BService {
         }
 
         // ── Acceptance shape ─────────────────────────────────────────
-        String responseCode = node.path("ResponseCode").asText("");
-        String description  = node.path("ResponseDescription").asText("");
+        String responseCode = node.path("ResponseCode").asString("");
+        String description  = node.path("ResponseDescription").asString("");
 
         boolean codeIndicatesSuccess = !responseCode.isBlank()
                 && responseCode.chars().allMatch(c -> c == '0');
@@ -239,7 +239,7 @@ public class MpesaC2BService {
                 "message",             friendlyMessage,
                 "ResponseCode",        responseCode,
                 "ResponseDescription", description,
-                "CustomerMessage",     node.path("CustomerMessage").asText()
+                "CustomerMessage",     node.path("CustomerMessage").asString()
         );
     }
 
@@ -322,23 +322,23 @@ public class MpesaC2BService {
     private Map<String, Object> parseSimulateResponse(String respBody) throws Exception {
         JsonNode node = objectMapper.readTree(respBody);
 
-        String errorCode = node.path("errorCode").asText(null);
+        String errorCode = node.path("errorCode").asString(null);
         if (errorCode != null && !errorCode.isBlank()) {
-            String errorMessage = node.path("errorMessage").asText("Unknown C2B simulate error");
+            String errorMessage = node.path("errorMessage").asString("Unknown C2B simulate error");
             log.warn("C2B simulate rejected by Safaricom: errorCode={} errorMessage={}",
                     errorCode, errorMessage);
             throw new RuntimeException("C2B simulate failed (" + errorCode + "): " + errorMessage);
         }
 
-        String responseDescription = node.path("ResponseDescription").asText("");
+        String responseDescription = node.path("ResponseDescription").asString("");
         log.info("C2B simulate accepted: {}", responseDescription);
 
         return Map.of(
                 "success", true,
                 "message", "Simulated payment accepted by Safaricom — check application logs for the "
                         + "validation/confirmation callback, then verify the wallet balance.",
-                "ConversationID",           node.path("ConversationID").asText(""),
-                "OriginatorConversationID", node.path("OriginatorConversationID").asText(""),
+                "ConversationID",           node.path("ConversationID").asString(""),
+                "OriginatorConversationID", node.path("OriginatorConversationID").asString(""),
                 "ResponseDescription",      responseDescription
         );
     }

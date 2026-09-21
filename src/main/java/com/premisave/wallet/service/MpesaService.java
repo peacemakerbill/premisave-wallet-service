@@ -1,7 +1,7 @@
 package com.premisave.wallet.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import com.premisave.wallet.config.MpesaConfig;
 import com.premisave.wallet.dto.B2PochiRequest;
 import com.premisave.wallet.dto.MpesaAsyncResponse;
@@ -39,7 +39,7 @@ public class MpesaService {
     private final MpesaConfig config;
     private final MpesaSecurityCredentialService securityCredentialService;
     private final MpesaTokenService mpesaTokenService;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final JsonMapper objectMapper = JsonMapper.builder().build();
     private final OkHttpClient http = new OkHttpClient();
 
     // ─── OAuth ────────────────────────────────────────────────────────────
@@ -84,19 +84,19 @@ public class MpesaService {
             log.info("STK Push response: {}", respBody);
             JsonNode node = objectMapper.readTree(respBody);
 
-            String errorCode = node.path("errorCode").asText(null);
+            String errorCode = node.path("errorCode").asString(null);
             if (errorCode != null && !errorCode.isBlank()) {
-                String errorMessage = node.path("errorMessage").asText("Unknown STK Push error");
+                String errorMessage = node.path("errorMessage").asString("Unknown STK Push error");
                 log.warn("STK Push rejected by Safaricom: errorCode={} errorMessage={}", errorCode, errorMessage);
                 return new StkPushResult(false, null, null, null, null,
                         errorCode + ": " + errorMessage);
             }
 
-            String checkoutId        = node.path("CheckoutRequestID").asText();
-            String merchantRequestId = node.path("MerchantRequestID").asText();
-            String responseCode      = node.path("ResponseCode").asText();
-            String responseDesc      = node.path("ResponseDescription").asText();
-            String customerMessage   = node.path("CustomerMessage").asText();
+            String checkoutId        = node.path("CheckoutRequestID").asString();
+            String merchantRequestId = node.path("MerchantRequestID").asString();
+            String responseCode      = node.path("ResponseCode").asString();
+            String responseDesc      = node.path("ResponseDescription").asString();
+            String customerMessage   = node.path("CustomerMessage").asString();
 
             boolean accepted = "0".equals(responseCode) && !checkoutId.isBlank();
             if (!accepted) {
@@ -148,17 +148,17 @@ public class MpesaService {
             log.info("B2C response: {}", respBody);
             JsonNode node = objectMapper.readTree(respBody);
 
-            String errorCode = node.path("errorCode").asText(null);
+            String errorCode = node.path("errorCode").asString(null);
             if (errorCode != null && !errorCode.isBlank()) {
-                String errorMessage = node.path("errorMessage").asText("Unknown B2C error");
+                String errorMessage = node.path("errorMessage").asString("Unknown B2C error");
                 log.warn("B2C rejected by Safaricom: errorCode={} errorMessage={}", errorCode, errorMessage);
                 return new MpesaB2CResponse(false, errorCode + ": " + errorMessage, null, null);
             }
 
-            boolean accepted = "0".equals(node.path("ResponseCode").asText("1"));
-            String conversationId = node.path("ConversationID").asText("");
-            String originatorId   = node.path("OriginatorConversationID").asText("");
-            String message        = node.path("ResponseDescription").asText("Unknown");
+            boolean accepted = "0".equals(node.path("ResponseCode").asString("1"));
+            String conversationId = node.path("ConversationID").asString("");
+            String originatorId   = node.path("OriginatorConversationID").asString("");
+            String message        = node.path("ResponseDescription").asString("Unknown");
 
             return new MpesaB2CResponse(accepted, message, conversationId, originatorId);
         } catch (Exception e) {
@@ -206,17 +206,17 @@ public class MpesaService {
             // initiator info, locked/invalid SecurityCredential) has no
             // ResponseCode/ResponseDescription at all. Checked first so a
             // rejection isn't misread as an "Unknown" acceptance.
-            String errorCode = node.path("errorCode").asText(null);
+            String errorCode = node.path("errorCode").asString(null);
             if (errorCode != null && !errorCode.isBlank()) {
-                String errorMessage = node.path("errorMessage").asText("Unknown B2B error");
+                String errorMessage = node.path("errorMessage").asString("Unknown B2B error");
                 log.warn("B2B rejected by Safaricom: errorCode={} errorMessage={}", errorCode, errorMessage);
                 return new MpesaB2BResponse(false, errorCode + ": " + errorMessage, null, null);
             }
 
-            boolean accepted = "0".equals(node.path("ResponseCode").asText("1"));
-            String conversationId = node.path("ConversationID").asText("");
-            String originatorId   = node.path("OriginatorConversationID").asText("");
-            String message        = node.path("ResponseDescription").asText("Unknown");
+            boolean accepted = "0".equals(node.path("ResponseCode").asString("1"));
+            String conversationId = node.path("ConversationID").asString("");
+            String originatorId   = node.path("OriginatorConversationID").asString("");
+            String message        = node.path("ResponseDescription").asString("Unknown");
 
             return new MpesaB2BResponse(accepted, message, conversationId, originatorId);
         } catch (Exception e) {
@@ -389,8 +389,8 @@ public class MpesaService {
             String status = firstNonBlank(node, "ResponseStatus", "Response Status");
             boolean success = "1000".equals(status) || "1001".equals(status);
             String message = firstNonBlankOrDefault(node, "Unknown", "ResponseDescription", "Response Description");
-            String refId = node.path("ResponseRefID").asText("");
-            String shortCode = node.path("ShortCode").asText("");
+            String refId = node.path("ResponseRefID").asString("");
+            String shortCode = node.path("ShortCode").asString("");
 
             return new PullTransactionResponse(success, message, refId, shortCode, null, null, null, null);
         } catch (Exception e) {
@@ -428,7 +428,7 @@ public class MpesaService {
         String responseCode = firstNonBlank(node, "ResponseCode", "ResponseStatus", "Response Status");
         boolean success = "0".equals(responseCode) || "1000".equals(responseCode);
         String message = firstNonBlankOrDefault(node, "Unknown", "ResponseMessage", "ResponseDescription", "Response Description");
-        String refId = node.path("ResponseRefID").asText("");
+        String refId = node.path("ResponseRefID").asString("");
 
         List<PullTransactionRecord> records = new ArrayList<>();
         JsonNode txArray = node.path("Response");
@@ -464,18 +464,18 @@ public class MpesaService {
             log.info("Query Org Info response: {}", respBody);
             JsonNode node = objectMapper.readTree(respBody);
 
-            String organizationName = node.path("OrganizationName").asText("");
+            String organizationName = node.path("OrganizationName").asString("");
             boolean success = !organizationName.isBlank();
 
             return new QueryOrgInfoResponse(
                     success,
-                    node.path("ConversationID").asText(""),
-                    node.path("ResponseCode").asText(""),
-                    node.path("ResponseMessage").asText("Unknown"),
-                    node.path("DetailedMessage").asText(""),
-                    node.path("OrganizationShortCode").asText(""),
+                    node.path("ConversationID").asString(""),
+                    node.path("ResponseCode").asString(""),
+                    node.path("ResponseMessage").asString("Unknown"),
+                    node.path("DetailedMessage").asString(""),
+                    node.path("OrganizationShortCode").asString(""),
                     organizationName,
-                    node.path("ChargeProfileID").asText("")
+                    node.path("ChargeProfileID").asString("")
             );
         } catch (Exception e) {
             log.error("Query Org Info failed", e);
@@ -489,17 +489,17 @@ public class MpesaService {
     private MpesaAsyncResponse parseAsyncAck(String respBody, String apiName) throws Exception {
         JsonNode node = objectMapper.readTree(respBody);
 
-        String errorCode = node.path("errorCode").asText(null);
+        String errorCode = node.path("errorCode").asString(null);
         if (errorCode != null && !errorCode.isBlank()) {
-            String errorMessage = node.path("errorMessage").asText("Unknown " + apiName + " error");
+            String errorMessage = node.path("errorMessage").asString("Unknown " + apiName + " error");
             log.warn("{} rejected by Safaricom: errorCode={} errorMessage={}", apiName, errorCode, errorMessage);
             return new MpesaAsyncResponse(false, errorCode + ": " + errorMessage, null, null);
         }
 
-        boolean accepted = "0".equals(node.path("ResponseCode").asText("1"));
-        String conversationId = node.path("ConversationID").asText("");
-        String originatorId   = node.path("OriginatorConversationID").asText("");
-        String message        = node.path("ResponseDescription").asText(apiName + " request submitted");
+        boolean accepted = "0".equals(node.path("ResponseCode").asString("1"));
+        String conversationId = node.path("ConversationID").asString("");
+        String originatorId   = node.path("OriginatorConversationID").asString("");
+        String message        = node.path("ResponseDescription").asString(apiName + " request submitted");
 
         if (!accepted) {
             log.warn("{} not accepted: responseDesc={} raw={}", apiName, message, respBody);
@@ -536,7 +536,7 @@ public class MpesaService {
 
     private String firstNonBlank(JsonNode node, String... keys) {
         for (String key : keys) {
-            String value = node.path(key).asText("");
+            String value = node.path(key).asString("");
             if (!value.isBlank()) {
                 return value;
             }

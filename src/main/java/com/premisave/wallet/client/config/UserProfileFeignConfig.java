@@ -17,7 +17,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 public class UserProfileFeignConfig {
 
     @Bean
-    public RequestInterceptor jwtForwardingInterceptor() {
+    RequestInterceptor jwtForwardingInterceptor() {
         return template -> {
             ServletRequestAttributes attrs =
                     (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
