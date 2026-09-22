@@ -45,9 +45,17 @@
 - [Overview](#overview)
 - [Key Features](#key-features)
 - [Supported Payment Providers](#supported-payment-providers)
+- [Core Concepts](#core-concepts)
+  - [The Unified USD Wallet Model](#the-unified-usd-wallet-model)
+  - [Live Currency Conversion](#live-currency-conversion)
+  - [Commission & Company Ledger](#commission----company-ledger)
+  - [Idempotency Guarantee](#idempotency-guarantee)
 - [Tech Stack](#tech-stack)
 - [Architecture](#architecture)
+  - [Deposit Flow (All Providers)](#deposit-flow-all-providers)
+  - [Disbursement / Withdrawal Flow (All Providers)](#disbursement--withdrawal-flow-all-providers)
   - [Example Integration: C2B Hakikisha Name Lookup](#example-integration-c2b-hakikisha-name-lookup)
+- [Admin & Financial Reporting](#admin----financial-reporting)
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
@@ -56,6 +64,7 @@
 - [API Overview](#api-overview)
 - [Security](#security)
 - [Project Structure](#project-structure)
+- [Frequently Asked Questions](#frequently-asked-questions)
 - [Contributing](#contributing)
 - [Author](#author)
 - [License](#license)
@@ -68,7 +77,9 @@
 
 Every deposit, disbursement, transfer, and payment flows through one normalized ledger, with automatic real-time currency conversion, commission accounting, idempotent transaction processing, and full webhook-driven reconciliation — so the rest of the Premisave ecosystem never has to think about the differences between M-Pesa's STK Push, Stripe's PaymentIntents, or PayPal's Orders API.
 
-If you're exploring **Spring Boot microservice architecture**, **fintech payment integration in Java**, **M-Pesa Daraja API integration**, **multi-currency wallet systems**, or **payment gateway orchestration patterns**, this repository is a real-world reference implementation of all of the above.
+This service exists to solve a problem every multi-provider fintech platform eventually hits: **each payment gateway has its own currency conventions, its own callback shape, its own idea of what "success" means, and its own asynchronous timing.** Rather than letting that complexity leak into every other Premisave microservice, this project absorbs it entirely — presenting one wallet, one currency, one set of transaction states, and one webhook-reconciliation pattern, regardless of which of the five providers actually moved the money.
+
+If you're exploring **Spring Boot microservice architecture**, **fintech payment integration in Java**, **M-Pesa Daraja API integration**, **multi-currency wallet systems**, **payment gateway orchestration patterns**, or how to build a **reconciliation-safe webhook handler**, this repository is a real-world reference implementation of all of the above.
 
 ---
 
@@ -97,6 +108,32 @@ If you're exploring **Spring Boot microservice architecture**, **fintech payment
 | **PayPal** | Yes | Yes | Orders API, vaulted payment methods, Payouts API |
 | **Flutterwave (v4)** | Yes | Yes | Charges and Transfers |
 | **NOWPayments** | Yes | Yes | Cryptocurrency deposits and payouts |
+
+---
+
+## Core Concepts
+
+Understanding these four ideas is the fastest way to understand how this service is put together — every provider integration, controller, and service class in this repository is built around them.
+
+### The Unified USD Wallet Model
+
+Every `Wallet` document holds its balance in **USD, always** — regardless of whether the underlying transaction happened in KES (M-Pesa), a Stripe-supported settlement currency, or a cryptocurrency via NOWPayments. Conversion happens once, at the point money enters or leaves the system, using the exchange rate in effect at that moment. This means:
+
+- A user's balance is always comparable and summable across every provider they've ever used.
+- Admin reporting never has to reconcile mixed-currency totals — everything is already USD.
+- Adding a sixth payment provider in the future only requires converting *that provider's* native currency to USD at the integration boundary — nothing else in the system changes.
+
+### Live Currency Conversion
+
+Exchange rates are sourced from the [Frankfurter API](https://www.frankfurter.app/) (backed by the European Central Bank's reference rates), refreshed on a scheduled background job, and cached in both Redis (fast path) and MongoDB (durable fallback and historical record). Over 160 currency pairs are tracked. Every previously-used currency pair is proactively refreshed on each cycle, so a rate is virtually never fetched cold on the request path.
+
+### Commission & Company Ledger
+
+Every money-moving operation that generates company revenue — gateway-bound disbursement commissions, internal transfer commissions, and direct payment revenue (e.g. subscription or booking-fee style payments where the *entire* amount is revenue, not a percentage cut) — is recorded as a `CompanyLedgerEntry`, always normalized to USD regardless of the originating transaction's currency. This is what powers the admin financial reports: a single, queryable source of truth for "how much did the platform actually make," broken down by source (transfers, disbursement commissions, or direct payment revenue).
+
+### Idempotency Guarantee
+
+Every deposit, disbursement, transfer, and payment carries a `reference` — either supplied by the caller or auto-generated as a UUID — which is checked *before* any money movement happens. Combined with the webhook-driven reconciliation model (see [Architecture](#architecture) below), this means a payment provider retrying a webhook delivery, or a client retrying a failed-looking request that actually succeeded, can never result in double-crediting or double-debiting a wallet.
 
 ---
 
@@ -134,9 +171,64 @@ Premisave Wallet Service is one microservice within the larger **Premisave** pla
 └──────────────┘                └────────────────────────┘      └─────────────┘
 ```
 
+Both money-moving directions — deposits and disbursements — follow the same fundamental shape across all five providers: an initiation call, an asynchronous processing period on the provider's side, and a signed webhook (or Safaricom ResultURL) callback that this service verifies and reconciles against the original transaction by its `reference`.
+
+### Deposit Flow (All Providers)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant WS as Wallet Service
+    participant P as Payment Provider
+    participant DB as MongoDB
+
+    U->>WS: POST deposit request (provider-specific endpoint)
+    WS->>P: Initiate payment
+    P-->>WS: Pending reference (checkout ID, order ID, payment ID, etc.)
+    WS-->>U: Reference / next action (STK prompt, redirect URL, QR code, etc.)
+
+    Note over U,P: User completes payment on the provider's own side
+
+    P->>WS: Signed webhook / callback
+    WS->>WS: Verify signature (HMAC, ResultURL allowlist, or Verify Webhook Signature API)
+    WS->>DB: Match by reference, credit wallet (converted to USD)
+    WS->>U: Email confirmation
+```
+
+This single shape covers M-Pesa STK Push, Stripe PaymentIntents, PayPal Orders, Flutterwave Charges, and NOWPayments crypto deposits — only the provider-specific initiation call and callback payload shape differ; the reconciliation pattern itself does not.
+
+### Disbursement / Withdrawal Flow (All Providers)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant WS as Wallet Service
+    participant P as Payment Provider
+    participant DB as MongoDB
+
+    U->>WS: POST /disbursements
+    WS->>DB: Debit wallet (USD), record disbursement as PENDING
+    WS->>P: Initiate payout (B2C, Stripe Connect payout, PayPal Payouts, Transfer, etc.)
+    P-->>WS: Accepted / queued
+
+    Note over WS,P: Provider processes the payout asynchronously
+
+    P->>WS: Webhook / ResultURL callback
+    alt Success
+        WS->>DB: Mark disbursement SUCCESS
+    else Failure
+        WS->>DB: Mark disbursement FAILED, reverse the debit
+    end
+    WS->>U: Email confirmation
+```
+
+This same shape covers M-Pesa B2C/B2Pochi/B2B, Stripe Connect payouts, PayPal Payouts, Flutterwave Transfers, and NOWPayments payouts — the wallet is debited optimistically at initiation and only ever refunded if the provider later reports failure, never left in an ambiguous state.
+
 ### Example Integration: C2B Hakikisha Name Lookup
 
-A concrete example of the `/internal/**` API in action: the sibling **C2B Hakikisha** service (Safaricom's M-Pesa name-lookup API) polls this service's `GET /internal/accounts` endpoint to keep its own copy of M-Pesa/Pochi phone numbers in sync, then answers Safaricom's name-lookup requests entirely from its own local database — this service is never called synchronously in that hot path.
+A concrete example of the `/internal/**` API in action, beyond the generic flows above: the sibling **C2B Hakikisha** service (Safaricom's M-Pesa name-lookup API) polls this service's `GET /internal/accounts` endpoint to keep its own copy of M-Pesa/Pochi phone numbers in sync, then answers Safaricom's name-lookup requests entirely from its own local database — this service is never called synchronously in that hot path.
 
 ```mermaid
 sequenceDiagram
@@ -158,6 +250,22 @@ sequenceDiagram
     S->>DB: Find by normalised M-Pesa number
     S-->>SAF: accountName
 ```
+
+---
+
+## Admin & Financial Reporting
+
+Beyond the core wallet API, the service exposes a dedicated admin surface (role-gated: `ADMIN`, `FINANCE`, `OPERATIONS`) for platform-level financial visibility:
+
+| Capability | What it answers |
+|---|---|
+| **Daily Finance Report** | Deposits, disbursements, transfers, and payment volume for a given day — plus that day's commission and direct-revenue breakdown, all in USD. |
+| **System Summary** | All-time platform totals: cumulative volume per transaction type, total commission revenue, and total direct payment revenue since launch. |
+| **Balance Overview** | Total wallet liability across every user, plus which wallets have which payment methods linked (M-Pesa, Pochi, PayPal, Stripe, Flutterwave). |
+| **Gateway Reconciliation** | A paginated, filterable audit trail of every M-Pesa API operation (Account Balance, Transaction Status, Reversal, etc.) — including which ones never received a ResultURL callback and need manual follow-up. |
+| **Manual Wallet Adjustments** | Admin-initiated balance corrections, fully audit-logged as their own ledger entry type — never a silent database edit. |
+
+Every figure across every one of these reports is normalized to USD, even where the underlying stored records span multiple provider currencies or predate a currency-handling fix — so a report generated today reads consistently regardless of when the underlying data was originally written.
 
 ---
 
@@ -198,15 +306,29 @@ AUTH_SERVICE_URL=http://localhost:8080
 MPESA_CONSUMER_KEY=...
 MPESA_CONSUMER_SECRET=...
 MPESA_SHORTCODE=...
+MPESA_PASSKEY=...
+MPESA_CALLBACK_URL=...
 
-# Stripe / PayPal / Flutterwave / NOWPayments
+# Stripe
 STRIPE_SECRET_KEY=...
+STRIPE_WEBHOOK_SECRET=...
+
+# PayPal
 PAYPAL_CLIENT_ID=...
+PAYPAL_CLIENT_SECRET=...
+PAYPAL_WEBHOOK_ID=...
+
+# Flutterwave
 FLUTTERWAVE_CLIENT_ID=...
+FLUTTERWAVE_CLIENT_SECRET=...
+FLUTTERWAVE_WEBHOOK_SECRET_HASH=...
+
+# NOWPayments
 NOWPAYMENTS_API_KEY=...
+NOWPAYMENTS_IPN_SECRET=...
 ```
 
-> See `application.yml` for the complete, documented list of environment variables and their defaults.
+> See `application.yml` for the complete, documented list of environment variables and their defaults — every property there carries an inline comment explaining what it's for and where to obtain it.
 
 ### Running the Service
 
@@ -265,6 +387,25 @@ premisave-wallet-service/
 
 ---
 
+## Frequently Asked Questions
+
+**Why does the wallet always store balances in USD instead of the user's local currency?**
+Because five different providers settle in five different ways (KES for M-Pesa, a settlement currency for Stripe, crypto for NOWPayments), a single ground-truth currency is what makes balances comparable, summable, and reportable without per-provider special-casing. See [Core Concepts](#core-concepts).
+
+**How does this service know a webhook hasn't already been processed?**
+Every transaction carries a `reference` that's checked before any wallet mutation happens — a duplicate webhook delivery for an already-reconciled transaction is a no-op, not a double-credit.
+
+**What happens if a disbursement's provider callback never arrives?**
+Admin's Gateway Reconciliation report surfaces exactly this case for M-Pesa (see [Admin & Financial Reporting](#admin----financial-reporting)) — operations with no ResultURL response are visible for manual follow-up via Safaricom's Transaction Status API.
+
+**Can I add a sixth payment provider?**
+Yes — the deposit and disbursement flows are already provider-agnostic at the wallet-crediting/debiting level (see the [Deposit](#deposit-flow-all-providers) and [Disbursement](#disbursement--withdrawal-flow-all-providers) diagrams). A new provider needs its own initiation call, webhook signature verification, and a currency-to-USD conversion at the boundary — nothing else changes.
+
+**Is this project open source?**
+No — see [License](#license). This repository is shared publicly as a portfolio/reference implementation of the patterns involved, not as an installable open-source library.
+
+---
+
 ## Contributing
 
 This is a proprietary service for the Premisave platform. If you've been granted access to contribute:
@@ -297,11 +438,6 @@ Enterprise systems developer and API integration specialist, working across back
   <a href="https://github.com/peacemakerbill/premisave-wallet-service"><img src="https://img.shields.io/badge/Project-premisave--wallet--service-6DB33F?style=for-the-badge&logo=springboot&logoColor=white" alt="Project"></a>
 </p>
 
-<p align="center">
-  <img src="https://github-readme-stats.vercel.app/api?username=peacemakerbill&show_icons=true&theme=default&hide_title=true&count_private=true" alt="peacemakerbill's GitHub stats" width="48%">
-  <img src="https://github-readme-streak-stats.demolab.com/?user=peacemakerbill&theme=default" alt="peacemakerbill's GitHub streak" width="48%">
-</p>
-
 ---
 
 ## License
@@ -321,9 +457,13 @@ This project is **proprietary** software developed for the Premisave platform. A
 </p>
 
 <!--
-SEO Keywords: Spring Boot microservice, Java fintech, digital wallet API, M-Pesa Daraja integration, 
-Stripe Java integration, PayPal API Java, Flutterwave API, NOWPayments crypto payments, multi-currency 
-wallet system, payment gateway orchestration, MongoDB Spring Boot, Redis rate limiting, JWT authentication 
-Spring Security, microservice architecture Java, fintech backend Java, mobile money API, payment reconciliation 
-system, wallet-as-a-service, Premisave, Kenya fintech, East Africa payments
+SEO Keywords: Spring Boot microservice, Java fintech backend, digital wallet API Java, multi-currency wallet
+system, payment gateway orchestration, payment reconciliation system, wallet-as-a-service, M-Pesa Daraja API
+integration Java, Safaricom Daraja Spring Boot, M-Pesa STK Push Java, M-Pesa B2C API, M-Pesa B2Pochi, M-Pesa
+Hakikisha, mobile money API Kenya, Stripe Java integration, Stripe Connect payouts, PayPal API Java, PayPal
+Payouts API, Flutterwave API v4 Java, NOWPayments crypto payments API, cryptocurrency payment gateway Java,
+MongoDB Spring Boot microservice, Redis rate limiting Bucket4j, JWT authentication Spring Security 7,
+microservice architecture Java, webhook signature verification, idempotent payment processing, fintech
+backend Kenya, East Africa payments infrastructure, Premisave, financial ledger accounting system, commission
+tracking system, admin financial reporting Spring Boot
 -->
