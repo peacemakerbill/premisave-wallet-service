@@ -6,6 +6,8 @@ import com.premisave.wallet.entity.ExchangeRate;
 import com.premisave.wallet.repository.ExchangeRateRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -14,8 +16,10 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
@@ -47,6 +51,15 @@ import java.util.regex.Pattern;
  * failure would propagate straight out of getRate() and never even reach
  * the DB fallback it's supposed to have.
  *
+ * REFRESH: on every application start, and then every
+ * exchange-rate.refresh-interval-ms (default 10 minutes), the full set of
+ * rates for the configured base currency (default USD) is fetched from
+ * Frankfurter in one bulk call and written to MongoDB and Redis,
+ * overwriting whatever was stored before, whether or not any pair was ever
+ * requested. Pairs that were saved earlier but are not covered by that bulk
+ * call (for example KES->USD, which the wallet needs for conversion to its
+ * USD ground truth) are then refreshed individually.
+ *
  * LOGGING: one INFO line per unit of work, never one per pair. A scheduled
  * refresh, a bulk import, and a newly seeded pair each produce exactly one
  * summary line. Anything that went wrong (failed pairs, Redis write
@@ -76,6 +89,9 @@ public class ExchangeRateService {
 
     /** Outcome of persisting a batch: how many rates were written and how many Redis cache writes failed along the way. */
     private record PersistResult(int saved, int cacheFailures, String firstCacheError) {}
+
+    /** Outcome of one bulk Frankfurter import: the entries written, any quote codes skipped as malformed, and the persistence result. */
+    private record BulkImport(List<ExchangeRateEntry> entries, List<String> skipped, PersistResult persisted) {}
 
     /**
      * Reads a rate — Redis first, then MongoDB (populating Redis on a DB
@@ -179,11 +195,9 @@ public class ExchangeRateService {
     /**
      * Fetches EVERY available rate for the given base currency directly
      * from Frankfurter in ONE call (see FxRateService.getAllRates) and
-     * saves all of them — the array comes from Frankfurter itself. This
-     * is now the ONLY way rates enter the system directly at an admin's
-     * request (the manual typed-payload endpoint was removed) — every
-     * other rate arrives either through this, or through the scheduled
-     * background refresh.
+     * saves all of them, overwriting any existing row for the same pair.
+     * Used by the admin endpoint; the startup and scheduled refresh use the
+     * same import internally (see runRefreshCycle).
      *
      * Skips any quote currency that doesn't pass the same 3-letter
      * sanity check as everything else here — defensive; shouldn't happen
@@ -195,6 +209,24 @@ public class ExchangeRateService {
     public List<ExchangeRateEntry> fetchAndSaveAllRates(String base) {
         long startedAt = System.nanoTime();
         String validatedBase = validate(base);
+        BulkImport bulk = importBulk(validatedBase);
+        long tookMs = elapsedMillis(startedAt);
+
+        StringBuilder problems = new StringBuilder();
+        appendBulkProblems(problems, bulk);
+
+        if (problems.length() == 0) {
+            log.info("Exchange rates imported from Frankfurter: base={}, saved={}, took={} ms",
+                    validatedBase, bulk.persisted().saved(), tookMs);
+        } else {
+            log.warn("Exchange rates imported from Frankfurter with problems: base={}, saved={}, took={} ms{}",
+                    validatedBase, bulk.persisted().saved(), tookMs, problems);
+        }
+        return bulk.entries();
+    }
+
+    /** Fetches and persists every Frankfurter rate for one base. Silent: callers own the log line. */
+    private BulkImport importBulk(String validatedBase) {
         Map<String, BigDecimal> rates = fxRateService.getAllRates(validatedBase);
 
         List<ExchangeRateEntry> entries = new ArrayList<>();
@@ -208,120 +240,184 @@ public class ExchangeRateService {
             entries.add(new ExchangeRateEntry(validatedBase, quote, entry.getValue()));
         }
 
-        PersistResult result = persistRates(entries);
-        long tookMs = elapsedMillis(startedAt);
+        return new BulkImport(entries, skipped, persistRates(entries));
+    }
 
-        StringBuilder problems = new StringBuilder();
-        if (!skipped.isEmpty()) {
-            problems.append("; skipped ").append(skipped.size())
-                    .append(" unexpected quote code(s): ").append(preview(skipped));
+    private void appendBulkProblems(StringBuilder problems, BulkImport bulk) {
+        if (!bulk.skipped().isEmpty()) {
+            problems.append("; skipped ").append(bulk.skipped().size())
+                    .append(" unexpected quote code(s): ").append(preview(bulk.skipped()));
         }
-        if (result.cacheFailures() > 0) {
-            problems.append("; Redis cache writes failed: ").append(result.cacheFailures())
-                    .append(", first cause: ").append(result.firstCacheError());
+        if (bulk.persisted().cacheFailures() > 0) {
+            problems.append("; Redis cache writes failed: ").append(bulk.persisted().cacheFailures())
+                    .append(", first cause: ").append(bulk.persisted().firstCacheError());
         }
-
-        if (problems.length() == 0) {
-            log.info("Exchange rates imported from Frankfurter: base={}, saved={}, took={} ms",
-                    validatedBase, result.saved(), tookMs);
-        } else {
-            log.warn("Exchange rates imported from Frankfurter with problems: base={}, saved={}, took={} ms{}",
-                    validatedBase, result.saved(), tookMs, problems);
-        }
-        return entries;
     }
 
     /**
-     * Refreshes EVERY pair that has ever been saved or organically
-     * requested — no hardcoded list. Up to config.getMaxRetries()
-     * attempts per pair on failure; one pair failing doesn't stop the
-     * others from refreshing.
+     * Runs one refresh cycle as soon as the application is ready, so the
+     * database holds current rates from the first minute regardless of
+     * what was stored before. Failures are logged, never propagated: a
+     * Frankfurter outage at boot must not stop the application from
+     * starting, and the stored rates from the previous run stay in use.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void refreshOnStartup() {
+        try {
+            runRefreshCycle("startup");
+        } catch (Exception e) {
+            log.error("Exchange rate refresh on startup failed: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Repeats the refresh every exchange-rate.refresh-interval-ms. The
+     * first scheduled run waits one full interval because refreshOnStartup
+     * has already covered the moment of boot.
+     */
+    @Scheduled(
+            initialDelayString = "${exchange-rate.refresh-interval-ms:600000}",
+            fixedDelayString = "${exchange-rate.refresh-interval-ms:600000}")
+    public void scheduledRefresh() {
+        runRefreshCycle("scheduled");
+    }
+
+    /**
+     * One refresh cycle:
+     *  1. Bulk import of every rate for the configured base currency,
+     *     overwriting stored rows (up to config.getMaxRetries() attempts).
+     *  2. Individual refresh of every other saved pair the bulk call did
+     *     not cover, with the same retry limit per pair. One pair failing
+     *     does not stop the others. Skipped when step 1 failed on every
+     *     attempt, since Frankfurter is then almost certainly unreachable
+     *     and retrying each pair would only stall the cycle on timeouts.
      *
      * Produces exactly one summary line per cycle:
-     *  - INFO when every pair refreshed and every cache write succeeded.
-     *  - WARN when some pairs failed or cache writes failed, naming the
-     *    failed pairs and the first cause in the same line.
-     *  - ERROR when nothing at all could be refreshed.
+     *  - INFO when everything succeeded.
+     *  - WARN when something failed, naming the failed pairs and the first
+     *    cause in the same line.
+     *  - ERROR when nothing at all could be saved.
      * Per-attempt detail is logged at TRACE.
      */
-    @Scheduled(fixedDelayString = "${exchange-rate.refresh-interval-ms:1200000}")
-    public void scheduledRefresh() {
+    private void runRefreshCycle(String trigger) {
         long startedAt = System.nanoTime();
-        List<ExchangeRate> existingPairs = exchangeRateRepository.findAll();
-        if (existingPairs.isEmpty()) {
-            log.info("Exchange rate refresh skipped: no pairs have been saved or requested yet");
-            return;
-        }
-
+        String baseCurrency = validate(config.getBaseCurrency());
         int maxRetries = config.getMaxRetries();
-        int refreshed = 0;
+
         int retried = 0;
         int cacheFailures = 0;
         String firstCacheError = null;
+
+        BulkImport bulk = null;
+        String bulkError = null;
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                bulk = importBulk(baseCurrency);
+                if (attempt > 1) {
+                    retried++;
+                }
+                break;
+            } catch (Exception e) {
+                bulkError = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                log.trace("Bulk exchange rate import attempt {}/{} failed for base={}: {}",
+                        attempt, maxRetries, baseCurrency, bulkError);
+            }
+        }
+
+        Set<String> covered = new HashSet<>();
+        int bulkSaved = 0;
+        if (bulk != null) {
+            bulkSaved = bulk.persisted().saved();
+            cacheFailures += bulk.persisted().cacheFailures();
+            firstCacheError = bulk.persisted().firstCacheError();
+            for (ExchangeRateEntry entry : bulk.entries()) {
+                covered.add(entry.getBaseCurrency() + "->" + entry.getQuoteCurrency());
+            }
+        }
+
+        int individuallyRefreshed = 0;
         List<String> failedPairs = new ArrayList<>();
         String firstFailure = null;
 
-        for (ExchangeRate pair : existingPairs) {
-            String base = pair.getBaseCurrency();
-            String quote = pair.getQuoteCurrency();
-            boolean success = false;
-            String lastError = null;
+        if (bulk != null) {
+            List<ExchangeRate> otherPairs = exchangeRateRepository.findAll().stream()
+                    .filter(pair -> !covered.contains(pair.getBaseCurrency() + "->" + pair.getQuoteCurrency()))
+                    .toList();
 
-            for (int attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                    BigDecimal rate = fxRateService.getRate(base, quote);
-                    PersistResult result = persistRates(List.of(new ExchangeRateEntry(base, quote, rate)));
-                    cacheFailures += result.cacheFailures();
-                    if (firstCacheError == null) {
-                        firstCacheError = result.firstCacheError();
+            for (ExchangeRate pair : otherPairs) {
+                String base = pair.getBaseCurrency();
+                String quote = pair.getQuoteCurrency();
+                boolean success = false;
+                String lastError = null;
+
+                for (int attempt = 1; attempt <= maxRetries; attempt++) {
+                    try {
+                        BigDecimal rate = fxRateService.getRate(base, quote);
+                        PersistResult result = persistRates(List.of(new ExchangeRateEntry(base, quote, rate)));
+                        cacheFailures += result.cacheFailures();
+                        if (firstCacheError == null) {
+                            firstCacheError = result.firstCacheError();
+                        }
+                        if (attempt > 1) {
+                            retried++;
+                        }
+                        success = true;
+                        break;
+                    } catch (Exception e) {
+                        lastError = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                        log.trace("Exchange rate refresh attempt {}/{} failed for {}->{}: {}",
+                                attempt, maxRetries, base, quote, lastError);
                     }
-                    if (attempt > 1) {
-                        retried++;
-                    }
-                    success = true;
-                    break;
-                } catch (Exception e) {
-                    lastError = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-                    log.trace("Exchange rate refresh attempt {}/{} failed for {}->{}: {}",
-                            attempt, maxRetries, base, quote, lastError);
                 }
-            }
 
-            if (success) {
-                refreshed++;
-            } else {
-                failedPairs.add(base + "->" + quote);
-                if (firstFailure == null) {
-                    firstFailure = base + "->" + quote + ": " + lastError;
+                if (success) {
+                    individuallyRefreshed++;
+                } else {
+                    failedPairs.add(base + "->" + quote);
+                    if (firstFailure == null) {
+                        firstFailure = base + "->" + quote + ": " + lastError;
+                    }
                 }
             }
         }
 
         long tookMs = elapsedMillis(startedAt);
-        int failed = failedPairs.size();
+        int saved = bulkSaved + individuallyRefreshed;
+        boolean bulkFailed = bulk == null;
+        boolean hasProblems = bulkFailed || !failedPairs.isEmpty() || cacheFailures > 0
+                || (bulk != null && !bulk.skipped().isEmpty());
 
-        if (failed == 0 && cacheFailures == 0) {
-            log.info("Exchange rate refresh complete: pairs={}, refreshed={}, failed=0, retried={}, took={} ms",
-                    existingPairs.size(), refreshed, retried, tookMs);
+        if (!hasProblems) {
+            log.info("Exchange rate refresh complete ({}): base={}, saved={} (bulk={}, individual={}), failed=0, retried={}, took={} ms",
+                    trigger, baseCurrency, saved, bulkSaved, individuallyRefreshed, retried, tookMs);
             return;
         }
 
         StringBuilder problems = new StringBuilder();
-        if (failed > 0) {
-            problems.append("; failed pairs (last saved rate kept): ").append(preview(failedPairs))
-                    .append("; first failure: ").append(firstFailure);
+        if (bulkFailed) {
+            problems.append("; bulk import of ").append(baseCurrency).append(" failed after ").append(maxRetries)
+                    .append(" attempt(s): ").append(bulkError)
+                    .append("; individual pairs not refreshed, last saved rates kept");
+        } else if (!bulk.skipped().isEmpty()) {
+            problems.append("; skipped ").append(bulk.skipped().size())
+                    .append(" unexpected quote code(s): ").append(preview(bulk.skipped()));
         }
         if (cacheFailures > 0) {
             problems.append("; Redis cache writes failed: ").append(cacheFailures)
                     .append(", first cause: ").append(firstCacheError);
         }
+        if (!failedPairs.isEmpty()) {
+            problems.append("; failed pairs (last saved rate kept): ").append(preview(failedPairs))
+                    .append("; first failure: ").append(firstFailure);
+        }
 
-        if (refreshed == 0) {
-            log.error("Exchange rate refresh failed for every pair: pairs={}, refreshed=0, failed={}, retried={}, took={} ms{}",
-                    existingPairs.size(), failed, retried, tookMs, problems);
+        String line = "Exchange rate refresh {} ({}): base={}, saved={} (bulk={}, individual={}), failed={}, retried={}, took={} ms{}";
+        if (saved == 0) {
+            log.error(line, "failed", trigger, baseCurrency, saved, bulkSaved, individuallyRefreshed,
+                    failedPairs.size(), retried, tookMs, problems);
         } else {
-            log.warn("Exchange rate refresh finished with problems: pairs={}, refreshed={}, failed={}, retried={}, took={} ms{}",
-                    existingPairs.size(), refreshed, failed, retried, tookMs, problems);
+            log.warn(line, "finished with problems", trigger, baseCurrency, saved, bulkSaved, individuallyRefreshed,
+                    failedPairs.size(), retried, tookMs, problems);
         }
     }
 

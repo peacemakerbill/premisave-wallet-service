@@ -270,9 +270,12 @@ frontend:
 # See ExchangeRateService — refreshIntervalMs is read directly by the
 # @Scheduled annotation itself via a property placeholder, not through
 # this properties class at annotation-processing time; both are kept in
-# sync with the same default (20 minutes) regardless.
+# sync with the same default (10 minutes) regardless. On every startup, and
+# then every interval, all rates for base-currency are fetched from
+# Frankfurter and overwrite what is stored.
 exchange-rate:
-  refresh-interval-ms: ${EXCHANGE_RATE_REFRESH_INTERVAL_MS:1200000}
+  refresh-interval-ms: ${EXCHANGE_RATE_REFRESH_INTERVAL_MS:600000}
+  base-currency: ${EXCHANGE_RATE_BASE_CURRENCY:USD}
   max-retries: ${EXCHANGE_RATE_MAX_RETRIES:3}
 
 # ─── Notifications ─────────────────────────────────────────────────────────

@@ -566,8 +566,14 @@
 		{
 			"name": "exchange-rate.refresh-interval-ms",
 			"type": "java.lang.Long",
-			"description": "How often (in milliseconds) ExchangeRateService's scheduled job re-fetches every previously-saved currency pair from Frankfurter and refreshes the Redis/MongoDB cache. Read directly by the @Scheduled annotation itself via this same property placeholder, not through a properties class at annotation-processing time — kept in sync with the same default (20 minutes) regardless.",
-			"defaultValue": 1200000
+			"description": "How often (in milliseconds) ExchangeRateService re-imports every rate for the base currency from Frankfurter and re-fetches any other previously-saved pair, overwriting the stored MongoDB rows and refreshing the Redis cache. The same refresh also runs once on every application start. Read directly by the @Scheduled annotation itself via this same property placeholder, not through a properties class at annotation-processing time; kept in sync with the same default (10 minutes) regardless.",
+			"defaultValue": 600000
+		},
+		{
+			"name": "exchange-rate.base-currency",
+			"type": "java.lang.String",
+			"description": "Currency whose full rate table (every quote Frankfurter supports) is bulk-imported on startup and on every scheduled refresh. USD is the wallet's ground-truth currency.",
+			"defaultValue": "USD"
 		},
 		{
 			"name": "exchange-rate.max-retries",
