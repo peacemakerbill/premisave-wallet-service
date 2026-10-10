@@ -16,6 +16,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /**
@@ -45,6 +46,12 @@ import java.util.regex.Pattern;
  * through to the MongoDB check — without that guard, a Redis connection
  * failure would propagate straight out of getRate() and never even reach
  * the DB fallback it's supposed to have.
+ *
+ * LOGGING: one INFO line per unit of work, never one per pair. A scheduled
+ * refresh, a bulk import, and a newly seeded pair each produce exactly one
+ * summary line. Anything that went wrong (failed pairs, Redis write
+ * failures) is folded into that same line at WARN or ERROR level. Per-pair
+ * detail is available at TRACE for developers.
  */
 @Slf4j
 @Service
@@ -63,6 +70,12 @@ public class ExchangeRateService {
 
     /** Loose sanity check — 3 uppercase letters, matching ISO 4217's own format. Catches an obvious typo before it's saved, WITHOUT maintaining a closed list of "valid" codes. */
     private static final Pattern CURRENCY_CODE_PATTERN = Pattern.compile("^[A-Z]{3}$");
+
+    /** Maximum number of pairs named in a single log line before the rest are summarised as "and N more". */
+    private static final int LOG_PAIR_PREVIEW_LIMIT = 10;
+
+    /** Outcome of persisting a batch: how many rates were written and how many Redis cache writes failed along the way. */
+    private record PersistResult(int saved, int cacheFailures, String firstCacheError) {}
 
     /**
      * Reads a rate — Redis first, then MongoDB (populating Redis on a DB
@@ -93,7 +106,7 @@ public class ExchangeRateService {
                 return cached instanceof BigDecimal bd ? bd : new BigDecimal(cached.toString());
             }
         } catch (Exception redisFailure) {
-            log.warn("Redis read failed for exchange rate {}->{} — falling back to MongoDB directly. Cause: {}",
+            log.warn("Redis read failed for exchange rate {}->{}, falling back to MongoDB directly. Cause: {}",
                     base, quote, redisFailure.getMessage());
         }
 
@@ -103,9 +116,16 @@ public class ExchangeRateService {
             return saved.get().getRate();
         }
 
-        log.info("No saved rate for {}->{} yet — fetching live once and saving for future use", base, quote);
+        log.debug("No saved rate for {}->{} yet, fetching live once", base, quote);
         BigDecimal rate = fxRateService.getRate(base, quote);
-        saveOrUpdateRates(List.of(new ExchangeRateEntry(base, quote, rate)));
+        PersistResult result = persistRates(List.of(new ExchangeRateEntry(base, quote, rate)));
+
+        if (result.cacheFailures() > 0) {
+            log.warn("New exchange rate pair saved: {}->{} = {} (Redis cache write failed, MongoDB save succeeded). Cause: {}",
+                    base, quote, rate, result.firstCacheError());
+        } else {
+            log.info("New exchange rate pair saved: {}->{} = {}", base, quote, rate);
+        }
         return rate;
     }
 
@@ -117,8 +137,15 @@ public class ExchangeRateService {
      * exposed as a manual-entry endpoint (removed on request); every
      * saved rate now originates from Frankfurter itself, never a
      * hand-typed number.
+     *
+     * Deliberately silent at INFO: each caller owns the single summary line
+     * for its own unit of work, so a refresh of many pairs does not turn
+     * into many log lines. Per-pair detail is logged at TRACE only.
      */
-    private void saveOrUpdateRates(List<ExchangeRateEntry> entries) {
+    private PersistResult persistRates(List<ExchangeRateEntry> entries) {
+        int cacheFailures = 0;
+        String firstCacheError = null;
+
         for (ExchangeRateEntry entry : entries) {
             String base = validate(entry.getBaseCurrency());
             String quote = validate(entry.getQuoteCurrency());
@@ -131,9 +158,18 @@ public class ExchangeRateService {
             rate.setUpdatedAt(LocalDateTime.now());
             exchangeRateRepository.save(rate);
 
-            cacheInRedisBestEffort(cacheKey(base, quote), entry.getRate());
+            String cacheError = cacheInRedisBestEffort(cacheKey(base, quote), entry.getRate());
+            if (cacheError != null) {
+                cacheFailures++;
+                if (firstCacheError == null) {
+                    firstCacheError = cacheError;
+                }
+            }
+
+            log.trace("Exchange rate persisted: {}->{} = {}", base, quote, entry.getRate());
         }
-        log.info("Saved/updated {} exchange rate(s)", entries.size());
+
+        return new PersistResult(entries.size(), cacheFailures, firstCacheError);
     }
 
     public List<ExchangeRate> getAllRates() {
@@ -153,24 +189,45 @@ public class ExchangeRateService {
      * sanity check as everything else here — defensive; shouldn't happen
      * with a genuine Frankfurter response, but guards against silently
      * saving something malformed if the response shape ever changes.
+     *
+     * Logs one summary line for the whole import.
      */
     public List<ExchangeRateEntry> fetchAndSaveAllRates(String base) {
+        long startedAt = System.nanoTime();
         String validatedBase = validate(base);
         Map<String, BigDecimal> rates = fxRateService.getAllRates(validatedBase);
 
         List<ExchangeRateEntry> entries = new ArrayList<>();
+        List<String> skipped = new ArrayList<>();
         for (Map.Entry<String, BigDecimal> entry : rates.entrySet()) {
             String quote = entry.getKey().toUpperCase();
             if (!CURRENCY_CODE_PATTERN.matcher(quote).matches()) {
-                log.warn("Skipping unexpected quote currency '{}' from Frankfurter bulk response for base={}",
-                        entry.getKey(), validatedBase);
+                skipped.add(entry.getKey());
                 continue;
             }
             entries.add(new ExchangeRateEntry(validatedBase, quote, entry.getValue()));
         }
 
-        saveOrUpdateRates(entries);
-        log.info("Fetched and saved {} rate(s) from Frankfurter for base={}", entries.size(), validatedBase);
+        PersistResult result = persistRates(entries);
+        long tookMs = elapsedMillis(startedAt);
+
+        StringBuilder problems = new StringBuilder();
+        if (!skipped.isEmpty()) {
+            problems.append("; skipped ").append(skipped.size())
+                    .append(" unexpected quote code(s): ").append(preview(skipped));
+        }
+        if (result.cacheFailures() > 0) {
+            problems.append("; Redis cache writes failed: ").append(result.cacheFailures())
+                    .append(", first cause: ").append(result.firstCacheError());
+        }
+
+        if (problems.length() == 0) {
+            log.info("Exchange rates imported from Frankfurter: base={}, saved={}, took={} ms",
+                    validatedBase, result.saved(), tookMs);
+        } else {
+            log.warn("Exchange rates imported from Frankfurter with problems: base={}, saved={}, took={} ms{}",
+                    validatedBase, result.saved(), tookMs, problems);
+        }
         return entries;
     }
 
@@ -179,58 +236,125 @@ public class ExchangeRateService {
      * requested — no hardcoded list. Up to config.getMaxRetries()
      * attempts per pair on failure; one pair failing doesn't stop the
      * others from refreshing.
+     *
+     * Produces exactly one summary line per cycle:
+     *  - INFO when every pair refreshed and every cache write succeeded.
+     *  - WARN when some pairs failed or cache writes failed, naming the
+     *    failed pairs and the first cause in the same line.
+     *  - ERROR when nothing at all could be refreshed.
+     * Per-attempt detail is logged at TRACE.
      */
     @Scheduled(fixedDelayString = "${exchange-rate.refresh-interval-ms:1200000}")
     public void scheduledRefresh() {
+        long startedAt = System.nanoTime();
         List<ExchangeRate> existingPairs = exchangeRateRepository.findAll();
         if (existingPairs.isEmpty()) {
-            log.info("Exchange rate refresh skipped — no pairs have been saved/requested yet");
+            log.info("Exchange rate refresh skipped: no pairs have been saved or requested yet");
             return;
         }
 
-        log.info("Starting scheduled exchange rate refresh for {} previously-used pair(s)", existingPairs.size());
-        int refreshed = 0, failed = 0;
+        int maxRetries = config.getMaxRetries();
+        int refreshed = 0;
+        int retried = 0;
+        int cacheFailures = 0;
+        String firstCacheError = null;
+        List<String> failedPairs = new ArrayList<>();
+        String firstFailure = null;
 
         for (ExchangeRate pair : existingPairs) {
             String base = pair.getBaseCurrency();
             String quote = pair.getQuoteCurrency();
             boolean success = false;
+            String lastError = null;
 
-            for (int attempt = 1; attempt <= config.getMaxRetries(); attempt++) {
+            for (int attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
                     BigDecimal rate = fxRateService.getRate(base, quote);
-                    saveOrUpdateRates(List.of(new ExchangeRateEntry(base, quote, rate)));
+                    PersistResult result = persistRates(List.of(new ExchangeRateEntry(base, quote, rate)));
+                    cacheFailures += result.cacheFailures();
+                    if (firstCacheError == null) {
+                        firstCacheError = result.firstCacheError();
+                    }
+                    if (attempt > 1) {
+                        retried++;
+                    }
                     success = true;
                     break;
                 } catch (Exception e) {
-                    log.warn("Exchange rate refresh failed for {}->{} (attempt {}/{}): {}",
-                            base, quote, attempt, config.getMaxRetries(), e.getMessage());
+                    lastError = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                    log.trace("Exchange rate refresh attempt {}/{} failed for {}->{}: {}",
+                            attempt, maxRetries, base, quote, lastError);
                 }
             }
 
             if (success) {
                 refreshed++;
             } else {
-                failed++;
-                log.error("Exchange rate refresh permanently failed for {}->{} after {} attempts — " +
-                        "keeping the last saved rate (if any) in both MongoDB and Redis", base, quote, config.getMaxRetries());
+                failedPairs.add(base + "->" + quote);
+                if (firstFailure == null) {
+                    firstFailure = base + "->" + quote + ": " + lastError;
+                }
             }
         }
 
-        log.info("Exchange rate refresh complete: {} refreshed, {} failed", refreshed, failed);
+        long tookMs = elapsedMillis(startedAt);
+        int failed = failedPairs.size();
+
+        if (failed == 0 && cacheFailures == 0) {
+            log.info("Exchange rate refresh complete: pairs={}, refreshed={}, failed=0, retried={}, took={} ms",
+                    existingPairs.size(), refreshed, retried, tookMs);
+            return;
+        }
+
+        StringBuilder problems = new StringBuilder();
+        if (failed > 0) {
+            problems.append("; failed pairs (last saved rate kept): ").append(preview(failedPairs))
+                    .append("; first failure: ").append(firstFailure);
+        }
+        if (cacheFailures > 0) {
+            problems.append("; Redis cache writes failed: ").append(cacheFailures)
+                    .append(", first cause: ").append(firstCacheError);
+        }
+
+        if (refreshed == 0) {
+            log.error("Exchange rate refresh failed for every pair: pairs={}, refreshed=0, failed={}, retried={}, took={} ms{}",
+                    existingPairs.size(), failed, retried, tookMs, problems);
+        } else {
+            log.warn("Exchange rate refresh finished with problems: pairs={}, refreshed={}, failed={}, retried={}, took={} ms{}",
+                    existingPairs.size(), refreshed, failed, retried, tookMs, problems);
+        }
     }
 
-    private void cacheInRedisBestEffort(String key, BigDecimal rate) {
+    /**
+     * Best-effort Redis write. Returns null on success, or a short cause
+     * description on failure. Never logs by itself: callers aggregate
+     * failures into their own summary line so a Redis outage does not
+     * produce one warning per pair.
+     */
+    private String cacheInRedisBestEffort(String key, BigDecimal rate) {
         try {
             redisTemplate.opsForValue().set(key, rate, CACHE_TTL);
+            return null;
         } catch (Exception redisFailure) {
-            log.warn("Redis write failed for exchange rate cache key={} — MongoDB save still succeeded. Cause: {}",
-                    key, redisFailure.getMessage());
+            log.trace("Redis write failed for exchange rate cache key={}: {}", key, redisFailure.getMessage());
+            return redisFailure.getMessage() != null ? redisFailure.getMessage() : redisFailure.getClass().getSimpleName();
         }
     }
 
     private String cacheKey(String base, String quote) {
         return CACHE_KEY_PREFIX + base + "-" + quote;
+    }
+
+    private static long elapsedMillis(long startedAtNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
+    }
+
+    private static String preview(List<String> items) {
+        if (items.size() <= LOG_PAIR_PREVIEW_LIMIT) {
+            return String.join(", ", items);
+        }
+        return String.join(", ", items.subList(0, LOG_PAIR_PREVIEW_LIMIT))
+                + " and " + (items.size() - LOG_PAIR_PREVIEW_LIMIT) + " more";
     }
 
     private String validate(String currency) {

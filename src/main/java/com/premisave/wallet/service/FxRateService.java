@@ -187,18 +187,27 @@ public class FxRateService {
             }
 
             Map<String, BigDecimal> rates = new LinkedHashMap<>();
+            int malformed = 0;
+            JsonNode firstMalformed = null;
             for (JsonNode entry : node) {
                 JsonNode quoteNode = entry.path("quote");
                 JsonNode rateNode = entry.path("rate");
                 if (quoteNode.isMissingNode() || !quoteNode.isString()
                         || rateNode.isMissingNode() || !rateNode.isNumber()) {
-                    log.warn("Skipping malformed entry in Frankfurter bulk response for base={}: {}", base, entry);
+                    malformed++;
+                    if (firstMalformed == null) {
+                        firstMalformed = entry;
+                    }
                     continue;
                 }
                 rates.put(quoteNode.asString(), rateNode.decimalValue());
             }
 
-            log.info("Frankfurter bulk rates fetched for base={}: {} currencies", base, rates.size());
+            if (malformed > 0) {
+                log.warn("Skipped {} malformed entr{} in Frankfurter bulk response for base={}. First one: {}",
+                        malformed, malformed == 1 ? "y" : "ies", base, firstMalformed);
+            }
+            log.debug("Frankfurter bulk response parsed for base={}: {} currencies", base, rates.size());
             return rates;
         } catch (IOException e) {
             throw new IllegalStateException("Failed to reach Frankfurter FX service for base=" + base, e);
@@ -229,7 +238,7 @@ public class FxRateService {
             }
 
             BigDecimal rate = rateNode.decimalValue();
-            log.info("Frankfurter live rate fetched: {} -> {} = {}", base, quote, rate);
+            log.trace("Frankfurter live rate fetched: {}->{} = {}", base, quote, rate);
             return rate;
         } catch (IOException e) {
             throw new IllegalStateException(
