@@ -17,6 +17,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -222,7 +223,32 @@ public class ExchangeRateService {
             log.warn("Exchange rates imported from Frankfurter with problems: base={}, saved={}, took={} ms{}",
                     validatedBase, bulk.persisted().saved(), tookMs, problems);
         }
+
+        Map<String, BigDecimal> importedRates = new LinkedHashMap<>();
+        for (ExchangeRateEntry entry : bulk.entries()) {
+            importedRates.put(entry.getBaseCurrency() + "->" + entry.getQuoteCurrency(), entry.getRate());
+        }
+        logSavedRates("import", importedRates);
         return bulk.entries();
+    }
+
+    /**
+     * Logs every rate written in a batch on ONE line at DEBUG, for example
+     * "USD->KES=129.37, USD->EUR=0.86, ...". Kept off the INFO summary so
+     * operators get a short line and developers can still see exact values.
+     */
+    private void logSavedRates(String label, Map<String, BigDecimal> rates) {
+        if (rates.isEmpty() || !log.isDebugEnabled()) {
+            return;
+        }
+        StringBuilder line = new StringBuilder();
+        for (Map.Entry<String, BigDecimal> rate : rates.entrySet()) {
+            if (line.length() > 0) {
+                line.append(", ");
+            }
+            line.append(rate.getKey()).append('=').append(rate.getValue().stripTrailingZeros().toPlainString());
+        }
+        log.debug("Exchange rates saved ({}): {}", label, line);
     }
 
     /** Fetches and persists every Frankfurter rate for one base. Silent: callers own the log line. */
@@ -325,13 +351,16 @@ public class ExchangeRateService {
         }
 
         Set<String> covered = new HashSet<>();
+        Map<String, BigDecimal> savedRates = new LinkedHashMap<>();
         int bulkSaved = 0;
         if (bulk != null) {
             bulkSaved = bulk.persisted().saved();
             cacheFailures += bulk.persisted().cacheFailures();
             firstCacheError = bulk.persisted().firstCacheError();
             for (ExchangeRateEntry entry : bulk.entries()) {
-                covered.add(entry.getBaseCurrency() + "->" + entry.getQuoteCurrency());
+                String pairKey = entry.getBaseCurrency() + "->" + entry.getQuoteCurrency();
+                covered.add(pairKey);
+                savedRates.put(pairKey, entry.getRate());
             }
         }
 
@@ -361,6 +390,7 @@ public class ExchangeRateService {
                         if (attempt > 1) {
                             retried++;
                         }
+                        savedRates.put(base + "->" + quote, rate);
                         success = true;
                         break;
                     } catch (Exception e) {
@@ -390,6 +420,7 @@ public class ExchangeRateService {
         if (!hasProblems) {
             log.info("Exchange rate refresh complete ({}): base={}, saved={} (bulk={}, individual={}), failed=0, retried={}, took={} ms",
                     trigger, baseCurrency, saved, bulkSaved, individuallyRefreshed, retried, tookMs);
+            logSavedRates(trigger, savedRates);
             return;
         }
 
@@ -419,6 +450,7 @@ public class ExchangeRateService {
             log.warn(line, "finished with problems", trigger, baseCurrency, saved, bulkSaved, individuallyRefreshed,
                     failedPairs.size(), retried, tookMs, problems);
         }
+        logSavedRates(trigger, savedRates);
     }
 
     /**
