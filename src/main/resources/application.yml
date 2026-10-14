@@ -307,3 +307,48 @@ logging:
     "[org.springframework.data.mongodb]": WARN
     "[org.springframework.data.repository.config.RepositoryConfigurationExtensionSupport]": ERROR
     "[org.springframework.cloud.commons.util.InetUtils]": ERROR
+
+# Commercial (payment service provider) API. Called only by the developer service.
+# Every value has a safe default, so this whole block is optional.
+#
+# serves: live, sandbox or both. Production should run one deployment per
+# environment, each with its own database and provider credentials. Use both
+# only for local development.
+commercial:
+  enabled: ${COMMERCIAL_ENABLED:true}
+  serves: ${COMMERCIAL_SERVES:both}
+  currencies: ${COMMERCIAL_CURRENCIES:USD,KES}
+  quote-ttl-seconds: 900
+  signing:
+    # When enabled, every request must carry X-Timestamp and X-Signature
+    # (HMAC-SHA256 over timestamp, method, path with query and body hash).
+    # Several secrets may be listed so a secret can be rotated without downtime.
+    enabled: ${COMMERCIAL_SIGNING_ENABLED:false}
+    secrets: ${COMMERCIAL_SIGNING_SECRETS:}
+    replay-window-seconds: 300
+  events:
+    # Where outbox events are forwarded for delivery to merchant URLs.
+    developer-service-url: ${DEVELOPER_SERVICE_URL:}
+    api-key: ${DEVELOPER_SERVICE_API_KEY:}
+    signing-secret: ${COMMERCIAL_EVENTS_SIGNING_SECRET:}
+    max-attempts: 12
+    dispatch-batch-size: 50
+    http-timeout-seconds: 10
+    dispatcher-enabled: true
+    dispatch-interval-ms: 2000
+  sandbox:
+    # Delay before a sandbox payment or payout that follows the test amount
+    # rules is resolved automatically.
+    auto-resolve-delay-ms: 3000
+    redirect-base: ${COMMERCIAL_SANDBOX_REDIRECT_BASE:https://sandbox.invalid}
+  registrations:
+    max-per-app: 10
+  recovery-interval-ms: 30000
+  expiry-interval-ms: 60000
+  # Fee rules per method. Unset methods use the built in placeholder rates,
+  # which must be replaced with the agreed pricing before go live.
+  # fees:
+  #   collection:
+  #     MOBILE_MONEY: { percent-bps: 200, flat-cents: 0, min-cents: 10 }
+  #   payout:
+  #     MOBILE_MONEY: { percent-bps: 100, flat-cents: 20 }
