@@ -328,7 +328,8 @@ commercial:
     replay-window-seconds: 300
   events:
     # Where outbox events are forwarded for delivery to merchant URLs.
-    developer-service-url: ${DEVELOPER_SERVICE_URL:}
+    # Placeholder local address. Set DEVELOPER_SERVICE_URL to the real Developer Service.
+    developer-service-url: ${DEVELOPER_SERVICE_URL:http://localhost:8085}
     api-key: ${DEVELOPER_SERVICE_API_KEY:}
     signing-secret: ${COMMERCIAL_EVENTS_SIGNING_SECRET:}
     max-attempts: 12
