@@ -4,7 +4,7 @@ import com.premisave.wallet.commercial.dto.Views;
 import com.premisave.wallet.commercial.entity.LedgerLine;
 import com.premisave.wallet.commercial.entity.MerchantWallet;
 import com.premisave.wallet.commercial.exception.CommercialException;
-import com.premisave.wallet.commercial.repository.LedgerLineRepository;
+import com.premisave.wallet.commercial.repository.CommercialLedgerLineRepository;
 import com.premisave.wallet.commercial.security.CommercialContext;
 import com.premisave.wallet.commercial.util.Money;
 import org.springframework.data.domain.Page;
@@ -25,18 +25,18 @@ import java.util.List;
 import java.util.Map;
 
 /** Balance and statement for one merchant wallet. All figures are USD. */
-@Service
+@Service("commercialBalanceService")
 public class BalanceService {
 
     private static final Duration MAX_STATEMENT_RANGE = Duration.ofDays(92);
 
     private final LedgerService ledger;
-    private final LedgerLineRepository lines;
+    private final CommercialLedgerLineRepository lines;
     private final MongoTemplate mongo;
     private final PricingService pricing;
     private final FxConverter fx;
 
-    public BalanceService(LedgerService ledger, LedgerLineRepository lines, MongoTemplate mongo,
+    public BalanceService(LedgerService ledger, CommercialLedgerLineRepository lines, MongoTemplate mongo,
                           PricingService pricing, FxConverter fx) {
         this.ledger = ledger;
         this.lines = lines;

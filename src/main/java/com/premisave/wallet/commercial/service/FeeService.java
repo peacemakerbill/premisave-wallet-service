@@ -17,7 +17,7 @@ import java.util.Map;
  * method through commercial.fees.collection.* and commercial.fees.payout.*.
  * Per merchant fee plans replace this later without changing callers.
  */
-@Service
+@Service("commercialFeeService")
 public class FeeService {
 
     private static final Map<MethodType, FeeRule> DEFAULT_COLLECTION = new EnumMap<>(MethodType.class);

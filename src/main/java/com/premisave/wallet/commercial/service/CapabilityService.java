@@ -14,7 +14,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /** What this merchant and app can use right now. */
-@Service
+@Service("commercialCapabilityService")
 public class CapabilityService {
 
     private final RailRegistry rails;

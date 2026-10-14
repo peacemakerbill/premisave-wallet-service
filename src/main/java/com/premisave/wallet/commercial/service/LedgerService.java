@@ -6,7 +6,7 @@ import com.premisave.wallet.commercial.enums.Environment;
 import com.premisave.wallet.commercial.enums.ErrorCode;
 import com.premisave.wallet.commercial.enums.LedgerEntryType;
 import com.premisave.wallet.commercial.exception.CommercialException;
-import com.premisave.wallet.commercial.repository.LedgerLineRepository;
+import com.premisave.wallet.commercial.repository.CommercialLedgerLineRepository;
 import com.premisave.wallet.commercial.repository.MerchantWalletRepository;
 import com.premisave.wallet.commercial.util.Ids;
 import org.bson.Document;
@@ -31,7 +31,7 @@ import java.util.List;
  * Balances are in USD cents: available (spendable), held (reserved for
  * in-flight payouts) and pending (received, not yet released).
  */
-@Service
+@Service("commercialLedgerService")
 public class LedgerService {
 
     /** How many recent operation keys each wallet remembers. Retries happen within seconds, far inside this window. */
@@ -41,9 +41,9 @@ public class LedgerService {
 
     private final MongoTemplate mongo;
     private final MerchantWalletRepository wallets;
-    private final LedgerLineRepository lines;
+    private final CommercialLedgerLineRepository lines;
 
-    public LedgerService(MongoTemplate mongo, MerchantWalletRepository wallets, LedgerLineRepository lines) {
+    public LedgerService(MongoTemplate mongo, MerchantWalletRepository wallets, CommercialLedgerLineRepository lines) {
         this.mongo = mongo;
         this.wallets = wallets;
         this.lines = lines;

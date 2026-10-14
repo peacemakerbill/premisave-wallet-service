@@ -36,7 +36,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /** Callback URLs a merchant app registers for events (and for synchronous validation). */
-@Service
+@Service("commercialCallbackRegistrationService")
 public class CallbackRegistrationService {
 
     private static final String VALIDATION_EVENT = "payment.validation";

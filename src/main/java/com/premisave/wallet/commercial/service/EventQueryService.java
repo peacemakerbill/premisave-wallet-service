@@ -32,7 +32,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /** Reading, re-sending and sampling events for the calling merchant and environment. */
-@Service
+@Service("commercialEventQueryService")
 public class EventQueryService {
 
     private final CommercialEventRepository events;

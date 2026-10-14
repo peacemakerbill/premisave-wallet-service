@@ -8,7 +8,7 @@ import com.premisave.wallet.commercial.dto.Views;
 import com.premisave.wallet.commercial.entity.CallbackRegistration;
 import com.premisave.wallet.commercial.entity.CommercialEvent;
 import com.premisave.wallet.commercial.entity.CommercialTransaction;
-import com.premisave.wallet.commercial.entity.IdempotencyRecord;
+import com.premisave.wallet.commercial.entity.CommercialIdempotencyRecord;
 import com.premisave.wallet.commercial.entity.LedgerLine;
 import com.premisave.wallet.commercial.entity.MerchantHold;
 import com.premisave.wallet.commercial.entity.Quote;
@@ -35,7 +35,7 @@ import java.util.Map;
 import java.util.Set;
 
 /** Helpers that exist only in the sandbox: pick an outcome, add funds, send sample events, start over. */
-@Service
+@Service("commercialSandboxService")
 public class SandboxService {
 
     private static final BigDecimal MAX_CREDIT_USD = new BigDecimal("100000");
@@ -121,7 +121,7 @@ public class SandboxService {
                 .and("type").nin(TxType.PAYMENT.name(), TxType.PAYOUT.name())), CommercialTransaction.class));
         long eventCount = count(mongo.remove(byMerchant, CommercialEvent.class));
         mongo.remove(byMerchant, Quote.class);
-        mongo.remove(byMerchant, IdempotencyRecord.class);
+        mongo.remove(byMerchant, CommercialIdempotencyRecord.class);
         mongo.remove(byMerchant, MerchantHold.class);
         mongo.remove(Query.query(Criteria.where("walletId").is(ctx.walletId())), LedgerLine.class);
         if (!keep.contains("callbacks")) mongo.remove(byMerchant, CallbackRegistration.class);

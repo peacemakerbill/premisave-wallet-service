@@ -35,7 +35,7 @@ public class CommercialPaymentService {
     private static final int DEFAULT_EXPIRY_SECONDS = 3600;
     private static final int MOBILE_MONEY_EXPIRY_SECONDS = 300;
 
-    private final IdempotencyService idempotency;
+    private final CommercialIdempotencyService idempotency;
     private final PricingService pricing;
     private final QuoteService quotes;
     private final LimitService limits;
@@ -44,7 +44,7 @@ public class CommercialPaymentService {
     private final TransactionOutcomeService outcomes;
     private final TransactionQueryService queries;
 
-    public CommercialPaymentService(IdempotencyService idempotency, PricingService pricing, QuoteService quotes,
+    public CommercialPaymentService(CommercialIdempotencyService idempotency, PricingService pricing, QuoteService quotes,
                                     LimitService limits, RailRegistry rails, CommercialTransactionStore store,
                                     TransactionOutcomeService outcomes, TransactionQueryService queries) {
         this.idempotency = idempotency;
@@ -57,7 +57,7 @@ public class CommercialPaymentService {
         this.queries = queries;
     }
 
-    public IdempotencyService.Outcome<Map<String, Object>> create(CommercialContext ctx, CreatePaymentRequest req,
+    public CommercialIdempotencyService.Outcome<Map<String, Object>> create(CommercialContext ctx, CreatePaymentRequest req,
                                                                     String idempotencyKey, String bodyHash) {
         return idempotency.execute(ctx, idempotencyKey, bodyHash, "PAYMENT",
                 () -> doCreate(ctx, req),

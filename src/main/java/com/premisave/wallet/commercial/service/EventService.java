@@ -33,7 +33,7 @@ import java.util.Set;
  * registered ones (notifyRegistered). Delivery itself belongs to
  * EventDispatcher and the developer service.
  */
-@Service
+@Service("commercialEventService")
 public class EventService {
 
     private static final Logger log = LoggerFactory.getLogger(EventService.class);

@@ -7,7 +7,6 @@ import com.premisave.wallet.commercial.enums.ResultCode;
  * provider (safe to report as 503, nothing was debited). REJECTED means the
  * provider refused it with a reason.
  */
-@SuppressWarnings("serial")
 public class RailException extends RuntimeException {
 
     public enum Kind { UNAVAILABLE, REJECTED }

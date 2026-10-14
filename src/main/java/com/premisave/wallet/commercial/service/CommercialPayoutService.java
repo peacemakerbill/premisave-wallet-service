@@ -37,7 +37,7 @@ import java.util.Map;
 @Service
 public class CommercialPayoutService {
 
-    private final IdempotencyService idempotency;
+    private final CommercialIdempotencyService idempotency;
     private final PricingService pricing;
     private final QuoteService quotes;
     private final LimitService limits;
@@ -48,7 +48,7 @@ public class CommercialPayoutService {
     private final TransactionOutcomeService outcomes;
     private final TransactionQueryService queries;
 
-    public CommercialPayoutService(IdempotencyService idempotency, PricingService pricing, QuoteService quotes,
+    public CommercialPayoutService(CommercialIdempotencyService idempotency, PricingService pricing, QuoteService quotes,
                                    LimitService limits, RailRegistry rails, LedgerService ledger,
                                    MerchantHoldRepository holds, CommercialTransactionStore store,
                                    TransactionOutcomeService outcomes, TransactionQueryService queries) {
@@ -64,7 +64,7 @@ public class CommercialPayoutService {
         this.queries = queries;
     }
 
-    public IdempotencyService.Outcome<Map<String, Object>> create(CommercialContext ctx, CreatePayoutRequest req,
+    public CommercialIdempotencyService.Outcome<Map<String, Object>> create(CommercialContext ctx, CreatePayoutRequest req,
                                                                    String idempotencyKey, String bodyHash) {
         return idempotency.execute(ctx, idempotencyKey, bodyHash, "PAYOUT",
                 () -> doCreate(ctx, req),

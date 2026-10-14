@@ -25,7 +25,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /** Reads and searches a merchant's own transactions. Every query is pinned to merchant and environment. */
-@Service
+@Service("commercialTransactionQueryService")
 public class TransactionQueryService {
 
     private final MongoTemplate mongo;

@@ -35,7 +35,7 @@ import java.util.Set;
  * repeats the money and event steps for any transaction whose process stopped
  * half way, so a crash cannot leave money unapplied.
  */
-@Service
+@Service("commercialTransactionOutcomeService")
 public class TransactionOutcomeService implements RailResultSink {
 
     private static final Logger log = LoggerFactory.getLogger(TransactionOutcomeService.class);

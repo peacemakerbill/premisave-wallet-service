@@ -6,7 +6,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 
 /** Reads rates from the existing ExchangeRateService, so the commercial API and consumer flows always agree. */
-@Component
+@Component("commercialExchangeRateFxConverter")
 public class ExchangeRateFxConverter implements FxConverter {
 
     private final ExchangeRateService exchangeRates;

@@ -26,7 +26,7 @@ import java.util.List;
  * The day and month run in UTC. Volume is summed from the merchant's own
  * transactions that have not failed.
  */
-@Service
+@Service("commercialLimitService")
 public class LimitService {
 
     private static final List<String> COUNTED = List.of(

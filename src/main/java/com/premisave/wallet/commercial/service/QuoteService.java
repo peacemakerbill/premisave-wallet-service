@@ -11,7 +11,7 @@ import com.premisave.wallet.commercial.enums.ErrorCode;
 import com.premisave.wallet.commercial.enums.MethodType;
 import com.premisave.wallet.commercial.exception.CommercialException;
 import com.premisave.wallet.commercial.rail.PaymentRail;
-import com.premisave.wallet.commercial.repository.QuoteRepository;
+import com.premisave.wallet.commercial.repository.CommercialQuoteRepository;
 import com.premisave.wallet.commercial.security.CommercialContext;
 import com.premisave.wallet.commercial.util.Ids;
 import com.premisave.wallet.commercial.util.RequestValidators;
@@ -22,15 +22,15 @@ import java.time.Instant;
 import java.util.Map;
 
 /** Prices a request ahead of time and lets a later payment or payout hold the quoted rate and fee. */
-@Service
+@Service("commercialQuoteService")
 public class QuoteService {
 
     private final CommercialProperties props;
     private final PricingService pricing;
     private final RailRegistry rails;
-    private final QuoteRepository quotes;
+    private final CommercialQuoteRepository quotes;
 
-    public QuoteService(CommercialProperties props, PricingService pricing, RailRegistry rails, QuoteRepository quotes) {
+    public QuoteService(CommercialProperties props, PricingService pricing, RailRegistry rails, CommercialQuoteRepository quotes) {
         this.props = props;
         this.pricing = pricing;
         this.rails = rails;

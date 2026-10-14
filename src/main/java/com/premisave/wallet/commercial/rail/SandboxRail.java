@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit;
  * secret, redirect and so on) and then resolves the transaction by the test
  * amount rules in SandboxOutcomes, a few seconds later.
  */
-@Component
+@Component("commercialSandboxRail")
 public class SandboxRail implements PaymentRail {
 
     private static final Logger log = LoggerFactory.getLogger(SandboxRail.class);

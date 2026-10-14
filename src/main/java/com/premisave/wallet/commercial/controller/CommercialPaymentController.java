@@ -8,7 +8,7 @@ import com.premisave.wallet.commercial.security.CommercialContext;
 import com.premisave.wallet.commercial.security.CommercialContextHolder;
 import com.premisave.wallet.commercial.security.CommercialRequestFilter;
 import com.premisave.wallet.commercial.service.CommercialPaymentService;
-import com.premisave.wallet.commercial.service.IdempotencyService;
+import com.premisave.wallet.commercial.service.CommercialIdempotencyService;
 import com.premisave.wallet.commercial.service.TransactionQueryService;
 import com.premisave.wallet.dto.ApiResponse;
 import jakarta.validation.Valid;
@@ -43,9 +43,9 @@ public class CommercialPaymentController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestAttribute(CommercialRequestFilter.ATTR_BODY_HASH) String bodyHash,
             @Valid @RequestBody CreatePaymentRequest req) {
-        IdempotencyService.requireValidKey(idempotencyKey);
+        CommercialIdempotencyService.requireValidKey(idempotencyKey);
         CommercialContext ctx = CommercialContextHolder.require();
-        IdempotencyService.Outcome<Map<String, Object>> out = payments.create(ctx, req, idempotencyKey, bodyHash);
+        CommercialIdempotencyService.Outcome<Map<String, Object>> out = payments.create(ctx, req, idempotencyKey, bodyHash);
         return Responses.idempotent("Payment created", out.replayed(), out.value(), HttpStatus.CREATED);
     }
 

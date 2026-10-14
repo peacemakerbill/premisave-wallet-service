@@ -44,7 +44,7 @@ import java.util.Map;
 import java.util.Set;
 
 /** Merchant and app provisioning, driven by the developer service. */
-@Service
+@Service("commercialMerchantService")
 public class MerchantService {
 
     private final CommercialProperties props;

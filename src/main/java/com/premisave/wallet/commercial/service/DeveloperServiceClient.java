@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
  *
  * Both calls carry the internal API key; the event call is also signed.
  */
-@Component
+@Component("commercialDeveloperServiceClient")
 public class DeveloperServiceClient {
 
     private static final Logger log = LoggerFactory.getLogger(DeveloperServiceClient.class);

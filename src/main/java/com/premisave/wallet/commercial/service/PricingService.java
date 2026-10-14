@@ -17,7 +17,7 @@ import java.util.Locale;
  * default currency; any other supported currency is converted at the current
  * rate, or at the rate fixed by a quote the caller names.
  */
-@Service
+@Service("commercialPricingService")
 public class PricingService {
 
     private final CommercialProperties props;

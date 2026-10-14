@@ -18,7 +18,7 @@ import java.util.Locale;
  * Chooses the rail for a request. Today the first matching rail wins; health
  * based failover between rails is a later addition and slots in here.
  */
-@Service
+@Service("commercialRailRegistry")
 public class RailRegistry {
 
     private final List<PaymentRail> rails;

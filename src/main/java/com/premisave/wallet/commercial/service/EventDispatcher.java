@@ -32,7 +32,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * which the event is marked FAILED and can be sent again through the resend
  * endpoint.
  */
-@Component
+@Component("commercialEventDispatcher")
 public class EventDispatcher {
 
     private static final Logger log = LoggerFactory.getLogger(EventDispatcher.class);

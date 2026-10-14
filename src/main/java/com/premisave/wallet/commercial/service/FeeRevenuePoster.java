@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
  * sandbox fees are not revenue. Posting twice is harmless because an entry
  * for the same source is looked up first.
  */
-@Component
+@Component("commercialFeeRevenuePoster")
 public class FeeRevenuePoster {
 
     static final String SOURCE_TYPE = "COMMERCIAL_TRANSACTION";
