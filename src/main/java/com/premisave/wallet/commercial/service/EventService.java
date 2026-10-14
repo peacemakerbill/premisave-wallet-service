@@ -10,6 +10,7 @@ import com.premisave.wallet.commercial.enums.RegistrationStatus;
 import com.premisave.wallet.commercial.enums.RegistrationType;
 import com.premisave.wallet.commercial.repository.CallbackRegistrationRepository;
 import com.premisave.wallet.commercial.repository.CommercialEventRepository;
+import com.premisave.wallet.commercial.dto.SettlementViews;
 import com.premisave.wallet.commercial.dto.Views;
 import com.premisave.wallet.commercial.util.EventTypeMatcher;
 import com.premisave.wallet.commercial.util.Hashing;
@@ -104,6 +105,7 @@ public class EventService {
         return switch (tx.getType()) {
             case PAYMENT -> Views.payment(tx);
             case PAYOUT -> Views.payout(tx);
+            case SETTLEMENT -> SettlementViews.settlement(tx);
             default -> Views.transaction(tx);
         };
     }

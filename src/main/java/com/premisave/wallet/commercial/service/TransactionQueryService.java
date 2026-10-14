@@ -123,6 +123,8 @@ public class TransactionQueryService {
         return switch (type) {
             case PAYMENT -> "Payment";
             case PAYOUT -> "Payout";
+            case SETTLEMENT -> "Settlement";
+            case TRANSFER -> "Transfer";
             default -> "Transaction";
         };
     }

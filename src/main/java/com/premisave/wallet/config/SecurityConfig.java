@@ -123,7 +123,8 @@ public class SecurityConfig {
                     "/payments/stripe/connect/webhook",
                     "/payments/paypal/webhook",
                     "/payments/flutterwave/webhook",
-                    "/payments/nowpayments/webhook"
+                    "/payments/nowpayments/webhook",
+                    "/payments/commercial/rail/**"
                 ).permitAll()
 
                 // ── 3. Internal, service-to-service calls (API key, not JWT) ──

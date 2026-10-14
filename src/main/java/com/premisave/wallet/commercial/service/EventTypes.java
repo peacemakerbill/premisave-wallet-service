@@ -35,6 +35,13 @@ public final class EventTypes {
                 case TIMED_OUT -> "payout.timed_out";
             };
         }
+        if (tx.getType() == TxType.SETTLEMENT) {
+            return switch (s) {
+                case SUCCESS -> "settlement.succeeded";
+                case FAILED, TIMED_OUT, CANCELLED, REVERSED -> "settlement.failed";
+                case REQUIRES_ACTION, PENDING -> null;
+            };
+        }
         return null;
     }
 }

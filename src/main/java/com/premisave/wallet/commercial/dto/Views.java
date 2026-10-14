@@ -13,7 +13,6 @@ import com.premisave.wallet.commercial.entity.SettlementDestination;
 import com.premisave.wallet.commercial.entity.TimelineEntry;
 import com.premisave.wallet.commercial.entity.TxResult;
 import com.premisave.wallet.commercial.enums.Environment;
-import com.premisave.wallet.commercial.enums.TxType;
 import com.premisave.wallet.commercial.util.Masking;
 import com.premisave.wallet.commercial.util.Money;
 
@@ -82,7 +81,7 @@ public final class Views {
         m.put("amount", Money.format(tx.getAmountCents()));
         m.put("currency", Money.BASE_CURRENCY);
         m.put("fee", Money.format(tx.getFeeCents()));
-        long net = tx.getType() == TxType.PAYOUT ? -tx.getSettleCents() : tx.getSettleCents();
+        long net = tx.getType().isDebit() ? -tx.getSettleCents() : tx.getSettleCents();
         m.put("net", Money.format(net));
         m.put("method", method(tx));
         m.put("objectId", tx.getId());

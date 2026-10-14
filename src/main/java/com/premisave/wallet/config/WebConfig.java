@@ -51,7 +51,8 @@ public class WebConfig implements WebMvcConfigurer {
                     "/payments/stripe/connect/webhook",
                     "/payments/paypal/webhook",
                     "/payments/flutterwave/webhook",
-                    "/payments/nowpayments/webhook"
+                    "/payments/nowpayments/webhook",
+                    "/payments/commercial/rail/**"
                 );
     }
 }

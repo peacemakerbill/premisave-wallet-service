@@ -73,7 +73,7 @@ public class TransactionOutcomeService implements RailResultSink {
     /** Applies an outcome and returns the transaction as it stands afterwards. */
     public CommercialTransaction apply(CommercialTransaction tx, RailOutcome outcome) {
         TxStatus to = outcome.status();
-        Set<TxStatus> from = to == TxStatus.REVERSED && tx.getType() == TxType.PAYOUT
+        Set<TxStatus> from = to == TxStatus.REVERSED && tx.getType().usesHold()
                 ? EnumSet.of(TxStatus.SUCCESS) : TxStatus.OPEN;
 
         if (!to.isFinal()) {
@@ -148,20 +148,21 @@ public class TransactionOutcomeService implements RailResultSink {
             return;
         }
 
-        if (tx.getType() == TxType.PAYOUT) {
+        if (tx.getType().usesHold()) {
+            String what = tx.getType().label();
             switch (tx.getStatus()) {
                 case SUCCESS -> {
                     ledger.capture(wallet.getWalletId(), tx.getId(), tx.getSettleCents(), tx.getFeeCents(),
-                            "Payout " + ref + " (amount " + Money.format(tx.getAmountCents())
+                            what + " " + ref + " (amount " + Money.format(tx.getAmountCents())
                                     + ", fee " + Money.format(tx.getFeeCents()) + ")");
                     closeHold(tx, MerchantHold.CAPTURED);
                 }
                 case FAILED, TIMED_OUT, CANCELLED -> {
-                    ledger.release(wallet.getWalletId(), tx.getId(), tx.getSettleCents(), "Payout " + ref + " released");
+                    ledger.release(wallet.getWalletId(), tx.getId(), tx.getSettleCents(), what + " " + ref + " released");
                     closeHold(tx, MerchantHold.RELEASED);
                 }
                 case REVERSED -> ledger.reverse(wallet.getWalletId(), tx.getId(), tx.getAmountCents(),
-                        "Payout " + ref + " reversed by the provider");
+                        what + " " + ref + " reversed by the provider");
                 default -> { }
             }
         }

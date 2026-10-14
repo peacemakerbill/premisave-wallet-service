@@ -344,6 +344,30 @@ commercial:
     redirect-base: ${COMMERCIAL_SANDBOX_REDIRECT_BASE:https://sandbox.invalid}
   registrations:
     max-per-app: 10
+  mpesa:
+    # Live M-Pesa for the commercial API. Reuses the Daraja credentials under
+    # mpesa.daraja.*. Point mpesa.daraja.environment at sandbox to try the live
+    # path with Safaricom test money.
+    enabled: ${COMMERCIAL_MPESA_ENABLED:false}
+    # Public https address Safaricom can reach, with no trailing path.
+    callback-base-url: ${COMMERCIAL_MPESA_CALLBACK_BASE_URL:}
+    # Signs the callback addresses. At least 16 characters.
+    callback-secret: ${COMMERCIAL_MPESA_CALLBACK_SECRET:}
+    collection-max-kes: 250000
+    poll-after-seconds: 60
+    poll-interval-ms: 30000
+    http-timeout-seconds: 15
+  indexes:
+    # Creates the indexes declared on the commercial documents at startup. Several guarantees
+    # (unique idempotency keys, one ledger line per operation) depend on them.
+    ensure: true
+  settlements:
+    # Runs the automatic settlement schedules merchants have saved.
+    scheduler-enabled: true
+    scheduler-interval-ms: 60000
+  transfers:
+    # Finishes transfers that were held but not completed, for example after a restart.
+    recovery-interval-ms: 30000
   recovery-interval-ms: 30000
   expiry-interval-ms: 60000
   # Fee rules per method. Unset methods use the built in placeholder rates,

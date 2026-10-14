@@ -701,6 +701,70 @@
 			"defaultValue": 60000
 		},
 		{
+			"name": "commercial.mpesa.enabled",
+			"type": "java.lang.Boolean",
+			"description": "Turns on the live M-Pesa rail of the commercial API: STK push payments and B2C payouts for live requests. Reuses the Daraja credentials under mpesa.daraja.*. When false, live mobile money requests return METHOD_UNAVAILABLE.",
+			"defaultValue": false
+		},
+		{
+			"name": "commercial.mpesa.callback-base-url",
+			"type": "java.lang.String",
+			"description": "Public https address Safaricom can reach, with no trailing path, for example https://wallet.example.com. The rail appends its own callback paths under /payments/commercial/rail/. Required when the rail is enabled."
+		},
+		{
+			"name": "commercial.mpesa.callback-secret",
+			"type": "java.lang.String",
+			"description": "Secret that signs the callback addresses given to Safaricom, so only genuine callbacks for a transaction are accepted. At least 16 characters. Required when the rail is enabled."
+		},
+		{
+			"name": "commercial.mpesa.collection-max-kes",
+			"type": "java.lang.Integer",
+			"description": "Largest single M-Pesa payment, in whole KES. Safaricom's STK push limit is 250,000.",
+			"defaultValue": 250000
+		},
+		{
+			"name": "commercial.mpesa.poll-after-seconds",
+			"type": "java.lang.Integer",
+			"description": "How long a payment waits for its callback before the status poller starts asking Safaricom about it.",
+			"defaultValue": 60
+		},
+		{
+			"name": "commercial.mpesa.poll-interval-ms",
+			"type": "java.lang.Long",
+			"description": "How often, in milliseconds, the status poller runs. Read directly by the @Scheduled annotation through this property placeholder.",
+			"defaultValue": 30000
+		},
+		{
+			"name": "commercial.mpesa.http-timeout-seconds",
+			"type": "java.lang.Integer",
+			"description": "Timeout, in seconds, for calls from the commercial M-Pesa rail to Safaricom.",
+			"defaultValue": 15
+		},
+		{
+			"name": "commercial.indexes.ensure",
+			"type": "java.lang.Boolean",
+			"description": "Creates the indexes declared on the commercial documents when the service starts. Several guarantees depend on them, including unique idempotency keys and one ledger line per operation. Spring Data only does this itself when spring.data.mongodb.auto-index-creation is true.",
+			"defaultValue": true
+		},
+		{
+			"name": "commercial.settlements.scheduler-enabled",
+			"type": "java.lang.Boolean",
+			"description": "Turns the automatic settlement scheduler on or off. When off, merchants can still settle by hand; saved schedules simply do not run on this instance.",
+			"defaultValue": true
+		},
+		{
+			"name": "commercial.settlements.scheduler-interval-ms",
+			"type": "java.lang.Long",
+			"description": "How often, in milliseconds, saved settlement schedules are checked. Read directly by the @Scheduled annotation through this property placeholder.",
+			"defaultValue": 60000
+		},
+		{
+			"name": "commercial.transfers.recovery-interval-ms",
+			"type": "java.lang.Long",
+			"description": "How often, in milliseconds, transfers that were held but not completed are finished. Read directly by the @Scheduled annotation through this property placeholder.",
+			"defaultValue": 30000
+		},
+		{
 			"name": "commercial.fees.collection",
 			"type": "java.util.Map<java.lang.String,com.premisave.wallet.commercial.config.CommercialProperties$FeeRule>",
 			"description": "Fee rules for incoming payments, keyed by method name (for example MOBILE_MONEY or CARD). Each rule has percent-bps (100 = 1%), flat-cents, min-cents and max-cents. A method without a rule uses the built-in default rule."

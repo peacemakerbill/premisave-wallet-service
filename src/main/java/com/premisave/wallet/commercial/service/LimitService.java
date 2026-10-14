@@ -22,7 +22,7 @@ import java.util.List;
 
 /**
  * Enforces merchant and app ceilings in USD: single transaction, daily and
- * monthly volume (payments and payouts together) and daily payout count.
+ * monthly volume (payments, payouts and transfers together) and daily payout count.
  * The day and month run in UTC. Volume is summed from the merchant's own
  * transactions that have not failed.
  */
@@ -45,6 +45,10 @@ public class LimitService {
         if (exceeds(usdCents, limits.getSingleTransactionUsd())) {
             throw exceeded("singleTransactionUsd", limits.getSingleTransactionUsd());
         }
+
+        // A settlement moves the merchant's own money to a destination fixed in advance, so only the
+        // single transaction ceiling applies to it; volume limits are for money going to other parties.
+        if (type == TxType.SETTLEMENT) return;
 
         Instant now = Instant.now();
         if (limits.getDailyVolumeUsd() != null || limits.getDailyPayoutCount() != null) {
@@ -73,7 +77,7 @@ public class LimitService {
     private List<CommercialTransaction> since(CommercialContext ctx, Instant from) {
         Criteria c = Criteria.where("merchantId").is(ctx.merchantId())
                 .and("livemode").is(ctx.livemode())
-                .and("type").in(List.of(TxType.PAYMENT.name(), TxType.PAYOUT.name()))
+                .and("type").in(List.of(TxType.PAYMENT.name(), TxType.PAYOUT.name(), TxType.TRANSFER.name()))
                 .and("status").in(COUNTED)
                 .and("createdAt").gte(from);
         return mongo.find(Query.query(c), CommercialTransaction.class);

@@ -20,6 +20,7 @@ import com.premisave.wallet.commercial.exception.CommercialException;
 import com.premisave.wallet.commercial.rail.RailOutcome;
 import com.premisave.wallet.commercial.rail.SandboxRail;
 import com.premisave.wallet.commercial.security.CommercialContext;
+import com.premisave.wallet.commercial.settlement.SettlementSchedule;
 import com.premisave.wallet.commercial.util.Money;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -123,6 +124,7 @@ public class SandboxService {
         mongo.remove(byMerchant, Quote.class);
         mongo.remove(byMerchant, CommercialIdempotencyRecord.class);
         mongo.remove(byMerchant, MerchantHold.class);
+        mongo.remove(byMerchant, SettlementSchedule.class);
         mongo.remove(Query.query(Criteria.where("walletId").is(ctx.walletId())), LedgerLine.class);
         if (!keep.contains("callbacks")) mongo.remove(byMerchant, CallbackRegistration.class);
         ledger.resetWallet(ctx.walletId());

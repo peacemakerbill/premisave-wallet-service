@@ -145,7 +145,7 @@ public class CommercialPaymentService {
         return Views.payment(after);
     }
 
-    static void applyPricing(CommercialTransaction tx, Priced priced, Quote quote) {
+    public static void applyPricing(CommercialTransaction tx, Priced priced, Quote quote) {
         tx.setAmountCents(priced.usdCents());
         tx.setFeeCents(priced.feeCents());
         tx.setSettleCents(priced.settleCents());

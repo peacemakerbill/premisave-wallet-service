@@ -25,6 +25,7 @@ import java.util.Map;
 @Document(collection = "commercial_transactions")
 @CompoundIndexes({
     @CompoundIndex(name = "merchant_env_type_created", def = "{'merchantId': 1, 'livemode': 1, 'type': 1, 'createdAt': -1}"),
+    @CompoundIndex(name = "merchant_env_completed", def = "{'merchantId': 1, 'livemode': 1, 'completedAt': -1}"),
     @CompoundIndex(name = "merchant_env_reference", def = "{'merchantId': 1, 'livemode': 1, 'merchantReference': 1}"),
     @CompoundIndex(name = "provider_reference", def = "{'rail': 1, 'providerReference': 1}", sparse = true)
 })
@@ -69,6 +70,12 @@ public class CommercialTransaction {
     private boolean notifyRegistered;
     private Map<String, String> metadata = new LinkedHashMap<>();
     private String holdId;
+
+    /**
+     * Links to other objects and small facts that belong to one kind of transaction only,
+     * for example a settlement's destination id and trigger, or the payment a refund is for.
+     */
+    private Map<String, String> relations = new LinkedHashMap<>();
 
     /** Set once the money side of a final status has been applied to the wallet. */
     private boolean ledgerApplied;
@@ -140,6 +147,8 @@ public class CommercialTransaction {
     public void setMetadata(Map<String, String> v) { this.metadata = v; }
     public String getHoldId() { return holdId; }
     public void setHoldId(String v) { this.holdId = v; }
+    public Map<String, String> getRelations() { return relations; }
+    public void setRelations(Map<String, String> v) { this.relations = v == null ? new LinkedHashMap<>() : v; }
     public boolean isLedgerApplied() { return ledgerApplied; }
     public long getVersion() { return version; }
     public List<TimelineEntry> getTimeline() { return timeline; }

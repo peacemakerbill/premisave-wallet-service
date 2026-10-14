@@ -23,7 +23,7 @@ import java.time.format.DateTimeParseException;
 import java.util.Locale;
 import java.util.Map;
 
-/** Balance, statement and the combined transaction view. Settlements and transfers are not built yet. */
+/** Balance, statement and the combined transaction view. Settlements, transfers and reports have their own controllers. */
 @RestController
 @RequestMapping("/internal/commercial/v1/{env:live|sandbox}")
 public class CommercialSettlementController {
