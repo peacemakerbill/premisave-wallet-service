@@ -580,6 +580,135 @@
 			"type": "java.lang.Integer",
 			"description": "Maximum retry attempts ExchangeRateService's scheduled refresh makes per currency pair before giving up on that pair for the current refresh cycle and moving on to the next.",
 			"defaultValue": 3
+		},
+		{
+			"name": "commercial.enabled",
+			"type": "java.lang.Boolean",
+			"description": "Master switch for the commercial (payment service provider) API under /internal/commercial/v1/**. When false the commercial endpoints are not served. Only the future Developer Service calls this API.",
+			"defaultValue": true
+		},
+		{
+			"name": "commercial.serves",
+			"type": "java.lang.String",
+			"description": "Which environments this deployment accepts: 'live', 'sandbox' or 'both'. Production should run one deployment per environment, each with its own database and provider credentials. 'both' is meant for local development.",
+			"defaultValue": "both"
+		},
+		{
+			"name": "commercial.currencies",
+			"type": "java.util.List<java.lang.String>",
+			"description": "Currencies the commercial API accepts for payments and payouts, as upper-case ISO 4217 codes. Amounts are held internally in USD cents.",
+			"defaultValue": [
+				"USD",
+				"KES"
+			]
+		},
+		{
+			"name": "commercial.quote-ttl-seconds",
+			"type": "java.lang.Integer",
+			"description": "How long a payout quote stays valid, in seconds. A payout that references an expired quote is rejected.",
+			"defaultValue": 900
+		},
+		{
+			"name": "commercial.signing.enabled",
+			"type": "java.lang.Boolean",
+			"description": "When true, every commercial request must carry X-Timestamp and X-Signature (HMAC-SHA256 over timestamp, method, path with query, and the SHA-256 hex of the body). Keep false until the Developer Service signs its calls.",
+			"defaultValue": false
+		},
+		{
+			"name": "commercial.signing.secrets",
+			"type": "java.util.List<java.lang.String>",
+			"description": "Signing secrets accepted for request verification. List more than one during rotation so the old and new secret both verify. Blank entries are ignored."
+		},
+		{
+			"name": "commercial.signing.replay-window-seconds",
+			"type": "java.lang.Integer",
+			"description": "Maximum allowed difference, in seconds, between X-Timestamp and the server clock before a signed request is rejected as a replay.",
+			"defaultValue": 300
+		},
+		{
+			"name": "commercial.events.developer-service-url",
+			"type": "java.lang.String",
+			"description": "Base URL of the Developer Service. Events are forwarded to POST {url}/internal/events and callback registrations are verified through POST {url}/internal/callbacks/verify. When unset, events stay in the outbox and are not forwarded, and live callback registrations cannot be verified."
+		},
+		{
+			"name": "commercial.events.api-key",
+			"type": "java.lang.String",
+			"description": "Shared secret sent as X-API-Key on calls from this service to the Developer Service. Must match the key the Developer Service expects."
+		},
+		{
+			"name": "commercial.events.signing-secret",
+			"type": "java.lang.String",
+			"description": "Secret used to sign forwarded events. The signature is sent as X-Premisave-Signature: sha256=HMAC-SHA256(secret, timestamp + '.' + body), with X-Premisave-Event-Id and X-Premisave-Timestamp alongside it."
+		},
+		{
+			"name": "commercial.events.max-attempts",
+			"type": "java.lang.Integer",
+			"description": "Maximum forwarding attempts per event before it is marked failed. Retries use an increasing backoff.",
+			"defaultValue": 12
+		},
+		{
+			"name": "commercial.events.dispatch-batch-size",
+			"type": "java.lang.Integer",
+			"description": "Maximum number of due events the dispatcher picks up in one run.",
+			"defaultValue": 50
+		},
+		{
+			"name": "commercial.events.http-timeout-seconds",
+			"type": "java.lang.Integer",
+			"description": "Timeout, in seconds, for calls from this service to the Developer Service.",
+			"defaultValue": 10
+		},
+		{
+			"name": "commercial.events.dispatcher-enabled",
+			"type": "java.lang.Boolean",
+			"description": "When false the scheduled dispatcher does not forward events. Events are still written to the outbox. Useful for running a second instance without double dispatch.",
+			"defaultValue": true
+		},
+		{
+			"name": "commercial.events.dispatch-interval-ms",
+			"type": "java.lang.Long",
+			"description": "How often, in milliseconds, the dispatcher looks for due outbox events. Read directly by the @Scheduled annotation through this property placeholder.",
+			"defaultValue": 2000
+		},
+		{
+			"name": "commercial.sandbox.auto-resolve-delay-ms",
+			"type": "java.lang.Integer",
+			"description": "Delay, in milliseconds, before the simulated sandbox rail resolves a payment or payout to its final outcome. The outcome is chosen from the last digits of the amount in cents.",
+			"defaultValue": 3000
+		},
+		{
+			"name": "commercial.sandbox.redirect-base",
+			"type": "java.lang.String",
+			"description": "Base URL used to build the redirect and checkout URLs returned by sandbox payments. The default is a non-routable placeholder host.",
+			"defaultValue": "https://sandbox.invalid"
+		},
+		{
+			"name": "commercial.registrations.max-per-app",
+			"type": "java.lang.Integer",
+			"description": "Maximum callback registrations per app and environment, counting every status.",
+			"defaultValue": 10
+		},
+		{
+			"name": "commercial.recovery-interval-ms",
+			"type": "java.lang.Long",
+			"description": "How often, in milliseconds, the recovery sweeper re-applies ledger steps and holds that were interrupted part way. Read directly by the @Scheduled annotation through this property placeholder.",
+			"defaultValue": 30000
+		},
+		{
+			"name": "commercial.expiry-interval-ms",
+			"type": "java.lang.Long",
+			"description": "How often, in milliseconds, the expiry job times out stale pending payments, payouts and quotes. Read directly by the @Scheduled annotation through this property placeholder.",
+			"defaultValue": 60000
+		},
+		{
+			"name": "commercial.fees.collection",
+			"type": "java.util.Map<java.lang.String,com.premisave.wallet.commercial.config.CommercialProperties$FeeRule>",
+			"description": "Fee rules for incoming payments, keyed by method name (for example MOBILE_MONEY or CARD). Each rule has percent-bps (100 = 1%), flat-cents, min-cents and max-cents. A method without a rule uses the built-in default rule."
+		},
+		{
+			"name": "commercial.fees.payout",
+			"type": "java.util.Map<java.lang.String,com.premisave.wallet.commercial.config.CommercialProperties$FeeRule>",
+			"description": "Fee rules for payouts, keyed by method name. Same rule shape as commercial.fees.collection. A method without a rule uses the built-in default rule."
 		}
 	],
 	"hints": [
@@ -704,6 +833,23 @@
 				{
 					"value": "production",
 					"description": "Flutterwave live environment — hits f4bexperience.flutterwave.com."
+				}
+			]
+		},
+		{
+			"name": "commercial.serves.values",
+			"values": [
+				{
+					"value": "both",
+					"description": "Accept live and sandbox requests. Intended for local development."
+				},
+				{
+					"value": "live",
+					"description": "Accept live requests only. Sandbox routes return 404."
+				},
+				{
+					"value": "sandbox",
+					"description": "Accept sandbox requests only. Live routes return 404."
 				}
 			]
 		},

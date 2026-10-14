@@ -63,10 +63,15 @@ public class CommercialEvent {
     public ForwardStatus getForwardStatus() { return forwardStatus; }
     public void setForwardStatus(ForwardStatus v) { this.forwardStatus = v; }
     public int getAttempts() { return attempts; }
+    public void setAttempts(int v) { this.attempts = v; }
     public Instant getNextAttemptAt() { return nextAttemptAt; }
     public void setNextAttemptAt(Instant v) { this.nextAttemptAt = v; }
+    public Instant getLockedUntil() { return lockedUntil; }
+    public void setLockedUntil(Instant v) { this.lockedUntil = v; }
     public String getLastError() { return lastError; }
+    public void setLastError(String v) { this.lastError = v; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant v) { this.createdAt = v; }
     public Instant getDeliveredAt() { return deliveredAt; }
+    public void setDeliveredAt(Instant v) { this.deliveredAt = v; }
 }

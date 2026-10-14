@@ -11,6 +11,7 @@ import java.util.Map;
  * The advice turns it into the standard ApiResponse envelope with the code
  * and any extra fields placed inside data.
  */
+@SuppressWarnings("serial")
 public class CommercialException extends RuntimeException {
 
     private final ErrorCode code;

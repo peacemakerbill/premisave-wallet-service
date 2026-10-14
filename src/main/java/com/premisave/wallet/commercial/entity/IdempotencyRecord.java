@@ -45,10 +45,16 @@ public class IdempotencyRecord {
     }
 
     public String getId() { return id; }
+    public String getMerchantId() { return merchantId; }
+    public boolean isLivemode() { return livemode; }
     public String getKey() { return key; }
     public String getRequestHash() { return requestHash; }
     public String getState() { return state; }
+    public void setState(String v) { this.state = v; }
     public String getResourceType() { return resourceType; }
+    public void setResourceType(String v) { this.resourceType = v; }
     public String getResourceId() { return resourceId; }
+    public void setResourceId(String v) { this.resourceId = v; }
     public Instant getExpiresAt() { return expiresAt; }
+    public Instant getCreatedAt() { return createdAt; }
 }
