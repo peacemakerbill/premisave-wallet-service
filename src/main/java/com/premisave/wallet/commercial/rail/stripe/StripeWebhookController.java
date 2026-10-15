@@ -1,7 +1,6 @@
 package com.premisave.wallet.commercial.rail.stripe;
 
 import com.premisave.wallet.commercial.billing.CredentialSetup;
-import com.premisave.wallet.commercial.billing.CustomerPaymentMethod;
 import com.premisave.wallet.commercial.billing.PaymentMethodService;
 import com.premisave.wallet.commercial.config.CommercialRailsProperties;
 import com.premisave.wallet.commercial.dispute.Dispute;

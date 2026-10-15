@@ -8,7 +8,6 @@ import com.premisave.wallet.commercial.enums.TxType;
 import com.premisave.wallet.commercial.exception.CommercialException;
 import com.premisave.wallet.commercial.rail.RailOutcome;
 import com.premisave.wallet.commercial.service.CommercialPayoutService;
-import com.premisave.wallet.commercial.service.CommercialTransactionStore;
 import com.premisave.wallet.commercial.service.EventService;
 import com.premisave.wallet.commercial.service.EventTypes;
 import com.premisave.wallet.commercial.service.TransactionOutcomeService;
@@ -54,19 +53,17 @@ public class BatchDispatcher {
     private final PayoutBatchRepository batches;
     private final CommercialPayoutService payouts;
     private final BulkPayoutService bulk;
-    private final CommercialTransactionStore store;
     private final TransactionOutcomeService outcomes;
     private final EventService events;
     private final CommercialBatchProperties props;
 
     public BatchDispatcher(MongoTemplate mongo, PayoutBatchRepository batches, CommercialPayoutService payouts,
-                           BulkPayoutService bulk, CommercialTransactionStore store, TransactionOutcomeService outcomes,
+                           BulkPayoutService bulk, TransactionOutcomeService outcomes,
                            EventService events, CommercialBatchProperties props) {
         this.mongo = mongo;
         this.batches = batches;
         this.payouts = payouts;
         this.bulk = bulk;
-        this.store = store;
         this.outcomes = outcomes;
         this.events = events;
         this.props = props;

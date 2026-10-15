@@ -17,7 +17,6 @@ import com.premisave.wallet.commercial.rail.RailCapability;
 import com.premisave.wallet.commercial.rail.RailException;
 import com.premisave.wallet.commercial.rail.RailOutcome;
 import com.premisave.wallet.commercial.rail.RailResponse;
-import com.premisave.wallet.commercial.service.CommercialTransactionStore;
 import com.premisave.wallet.commercial.transfer.PremisaveWalletCredit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,15 +51,13 @@ public class PremisaveRail implements PaymentRail {
     private final WalletConsentService consents;
     private final PremisaveWalletDebit debit;
     private final PremisaveWalletCredit credit;
-    private final CommercialTransactionStore store;
     private final CommercialRailsProperties.Premisave props;
 
     public PremisaveRail(WalletConsentService consents, PremisaveWalletDebit debit, PremisaveWalletCredit credit,
-                         CommercialTransactionStore store, CommercialRailsProperties props) {
+                         CommercialRailsProperties props) {
         this.consents = consents;
         this.debit = debit;
         this.credit = credit;
-        this.store = store;
         this.props = props.premisave();
     }
 

@@ -1,0 +1,85 @@
+# Values for the Spring context test only. Loaded through @ActiveProfiles("test").
+# Every name below is a placeholder in application.yml that has no default; the values are dummies.
+
+FLUTTERWAVE_CLIENT_ID: test
+FLUTTERWAVE_CLIENT_SECRET: test
+FLUTTERWAVE_ENCRYPTION_KEY: test
+FLUTTERWAVE_REDIRECT_URL: https://example.com/test
+FLUTTERWAVE_WEBHOOK_SECRET_HASH: test
+INTERNAL_API_KEY: test
+MAIL_PASSWORD: test
+MAIL_USERNAME: test
+MPESA_B2B_INITIATOR_NAME: test
+MPESA_B2B_INITIATOR_PASSWORD: test
+MPESA_B2B_RECEIVER_SHORTCODE: test
+MPESA_B2B_RESULT_URL: https://example.com/test
+MPESA_B2B_SHORTCODE: test
+MPESA_B2B_TIMEOUT_URL: https://example.com/test
+MPESA_B2C_COMMAND_ID: BusinessPayment
+MPESA_B2C_INITIATOR_NAME: test
+MPESA_B2C_INITIATOR_PASSWORD: test
+MPESA_B2C_RESULT_URL: https://example.com/test
+MPESA_B2C_SHORTCODE: test
+MPESA_B2C_TIMEOUT_URL: https://example.com/test
+MPESA_BALANCE_INITIATOR_NAME: test
+MPESA_BALANCE_INITIATOR_PASSWORD: test
+MPESA_BALANCE_PARTY_A: test
+MPESA_BALANCE_RESULT_URL: https://example.com/test
+MPESA_BALANCE_TIMEOUT_URL: https://example.com/test
+MPESA_C2B_CONFIRMATION_URL: https://example.com/test
+MPESA_C2B_RESPONSE_TYPE: Completed
+MPESA_C2B_SHORTCODE: test
+MPESA_C2B_VALIDATION_URL: https://example.com/test
+MPESA_CALLBACK_URL: https://example.com/test
+MPESA_CONSUMER_KEY: test
+MPESA_CONSUMER_SECRET: test
+MPESA_PASSKEY: test
+MPESA_POCHI_INITIATOR_NAME: test
+MPESA_POCHI_INITIATOR_PASSWORD: test
+MPESA_POCHI_PARTY_A: test
+MPESA_POCHI_RESULT_URL: https://example.com/test
+MPESA_POCHI_TIMEOUT_URL: https://example.com/test
+MPESA_PULL_CALLBACK_URL: https://example.com/test
+MPESA_PULL_DAYS: 7
+MPESA_PULL_NOMINATED_NUMBER: test
+MPESA_PULL_SHORTCODE: test
+MPESA_REVERSAL_INITIATOR_NAME: test
+MPESA_REVERSAL_INITIATOR_PASSWORD: test
+MPESA_REVERSAL_RECEIVER_PARTY: test
+MPESA_REVERSAL_RESULT_URL: https://example.com/test
+MPESA_REVERSAL_TIMEOUT_URL: https://example.com/test
+MPESA_SHORTCODE: test
+MPESA_STATUS_INITIATOR_NAME: test
+MPESA_STATUS_INITIATOR_PASSWORD: test
+MPESA_STATUS_PARTY_A: test
+MPESA_STATUS_RESULT_URL: https://example.com/test
+MPESA_STATUS_TIMEOUT_URL: https://example.com/test
+NOWPAYMENTS_API_KEY: test
+NOWPAYMENTS_CALLBACK_URL: https://example.com/test
+NOWPAYMENTS_IPN_SECRET: test
+PAYPAL_CANCEL_URL: https://example.com/test
+PAYPAL_CLIENT_ID: test
+PAYPAL_CLIENT_SECRET: test
+PAYPAL_ENV: sandbox
+PAYPAL_RETURN_URL: https://example.com/test
+PAYPAL_WEBHOOK_ID: test
+STRIPE_CONNECT_REFRESH_URL: https://example.com/test
+STRIPE_CONNECT_RETURN_URL: https://example.com/test
+STRIPE_CONNECT_WEBHOOK_SECRET: test
+STRIPE_SECRET_KEY: test
+STRIPE_WEBHOOK_SECRET: test
+
+commercial:
+  indexes:
+    ensure: false
+  settlements:
+    scheduler-enabled: false
+  billing:
+    scheduler-enabled: false
+  batches:
+    dispatcher-enabled: false
+
+spring:
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/premisave-wallet-test?serverSelectionTimeoutMS=2000

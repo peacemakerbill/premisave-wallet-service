@@ -1,7 +1,6 @@
 package com.premisave.wallet.commercial.link;
 
 import com.premisave.wallet.commercial.dto.Views;
-import com.premisave.wallet.commercial.util.Money;
 
 import java.math.BigDecimal;
 import java.time.Instant;
