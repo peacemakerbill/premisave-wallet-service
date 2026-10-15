@@ -1,5 +1,6 @@
 # Values for the Spring context test only. Loaded through @ActiveProfiles("test").
 # Every name below is a placeholder in application.yml that has no default; the values are dummies.
+# Values found in the project's .env file (imported at the bottom) override these dummies.
 
 FLUTTERWAVE_CLIENT_ID: test
 FLUTTERWAVE_CLIENT_SECRET: test
@@ -80,6 +81,7 @@ commercial:
     dispatcher-enabled: false
 
 spring:
-  data:
-    mongodb:
-      uri: mongodb://localhost:27017/premisave-wallet-test?serverSelectionTimeoutMS=2000
+  config:
+    import: optional:file:.env[.properties]
+  mongodb:
+    uri: mongodb://localhost:27017/premisave-wallet-test?serverSelectionTimeoutMS=2000
