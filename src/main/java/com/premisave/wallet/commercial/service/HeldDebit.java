@@ -73,8 +73,13 @@ public class HeldDebit {
      * money); a rail that is simply unreachable does the same and also reports 503 to the caller.
      */
     public void dispatch(PaymentRail rail, PayoutCommand command, CommercialTransaction tx) {
+        send(() -> rail.payout(command), tx);
+    }
+
+    /** Same as dispatch for any rail call that answers with a RailResponse, for example a provider refund. */
+    public void send(java.util.function.Supplier<com.premisave.wallet.commercial.rail.RailResponse> call, CommercialTransaction tx) {
         try {
-            outcomes.applyRailResponse(tx, rail.payout(command));
+            outcomes.applyRailResponse(tx, call.get());
         } catch (RailException e) {
             outcomes.apply(tx, RailOutcome.of(TxStatus.FAILED,
                     e.code() != null ? e.code() : ResultCode.PROVIDER_ERROR, e.getMessage()));

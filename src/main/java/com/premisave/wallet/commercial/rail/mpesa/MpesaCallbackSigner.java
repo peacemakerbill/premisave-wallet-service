@@ -23,6 +23,8 @@ public class MpesaCallbackSigner {
     public static final String STK = "stk";
     public static final String B2C_RESULT = "b2c-result";
     public static final String B2C_TIMEOUT = "b2c-timeout";
+    public static final String C2B_VALIDATION = "c2b-validation";
+    public static final String C2B_CONFIRMATION = "c2b-confirmation";
 
     private final String base;
     private final String secret;

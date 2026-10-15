@@ -13,6 +13,8 @@ import com.premisave.wallet.commercial.enums.ResultCode;
 import com.premisave.wallet.commercial.enums.TxStatus;
 import com.premisave.wallet.commercial.enums.TxType;
 import com.premisave.wallet.commercial.exception.CommercialException;
+import com.premisave.wallet.commercial.link.PaymentLink;
+import com.premisave.wallet.commercial.link.PaymentLinkService;
 import com.premisave.wallet.commercial.rail.CollectCommand;
 import com.premisave.wallet.commercial.rail.PaymentRail;
 import com.premisave.wallet.commercial.rail.RailException;
@@ -43,10 +45,12 @@ public class CommercialPaymentService {
     private final CommercialTransactionStore store;
     private final TransactionOutcomeService outcomes;
     private final TransactionQueryService queries;
+    private final PaymentLinkService paymentLinks;
 
     public CommercialPaymentService(CommercialIdempotencyService idempotency, PricingService pricing, QuoteService quotes,
                                     LimitService limits, RailRegistry rails, CommercialTransactionStore store,
-                                    TransactionOutcomeService outcomes, TransactionQueryService queries) {
+                                    TransactionOutcomeService outcomes, TransactionQueryService queries,
+                                    PaymentLinkService paymentLinks) {
         this.idempotency = idempotency;
         this.pricing = pricing;
         this.quotes = quotes;
@@ -55,31 +59,51 @@ public class CommercialPaymentService {
         this.store = store;
         this.outcomes = outcomes;
         this.queries = queries;
+        this.paymentLinks = paymentLinks;
     }
 
     public CommercialIdempotencyService.Outcome<Map<String, Object>> create(CommercialContext ctx, CreatePaymentRequest req,
                                                                     String idempotencyKey, String bodyHash) {
+        return createWithRelations(ctx, req, idempotencyKey, bodyHash, Map.of());
+    }
+
+    /**
+     * Creates a payment that belongs to something else (an invoice, say). The relations are stored on the
+     * payment before it is sent anywhere, so the owner can always find it again, even after a crash.
+     */
+    public CommercialIdempotencyService.Outcome<Map<String, Object>> createWithRelations(
+            CommercialContext ctx, CreatePaymentRequest req, String idempotencyKey, String bodyHash,
+            Map<String, String> relations) {
         return idempotency.execute(ctx, idempotencyKey, bodyHash, "PAYMENT",
-                () -> doCreate(ctx, req),
+                () -> doCreate(ctx, req, relations),
                 id -> Views.payment(queries.get(ctx, id, TxType.PAYMENT)));
     }
 
-    private String doCreate(CommercialContext ctx, CreatePaymentRequest req) {
+    private String doCreate(CommercialContext ctx, CreatePaymentRequest req, Map<String, String> relations) {
         MethodSpec spec = req.method();
         MethodType method = spec.type();
         if (!MethodPolicy.isEnabled(ctx.merchant(), ctx.app(), ctx.environment(), method)) {
             throw new CommercialException(ErrorCode.METHOD_NOT_ENABLED, method + " is not enabled for this merchant or app");
         }
 
+        // A payment made through a payment link takes the link's currency, reference, callback and metadata.
+        PaymentLink link = req.paymentLinkId() == null || req.paymentLinkId().isBlank() ? null
+                : paymentLinks.requireForAttempt(ctx, req.paymentLinkId().trim(), method, req.amount(), req.currency());
+        String currency = link != null ? link.getCurrency() : req.currency();
+        String reference = link != null ? link.getMerchantReference() : req.merchantReference();
+        String callbackUrl = blankToNull(req.callbackUrl()) != null || link == null ? req.callbackUrl() : link.getCallbackUrl();
+
         CustomerInfo c = req.customer() == null ? new CustomerInfo(null, null, null, null) : req.customer();
         Map<String, Object> customer = RequestValidators.customerFor(method, c.name(), c.email(), c.phone(),
                 c.accountRef(), spec.returnUrl(), spec.cancelUrl());
-        Map<String, String> metadata = RequestValidators.metadata(req.metadata());
+        Map<String, String> metadata = new LinkedHashMap<>();
+        if (link != null) metadata.putAll(link.getMetadata());
+        metadata.putAll(RequestValidators.metadata(req.metadata()));
         checkCallbackUrl(ctx, req.callbackUrl());
 
         Quote quote = req.quoteId() == null ? null
-                : quotes.requireUsable(ctx, req.quoteId(), Direction.COLLECTION, method, req.amount(), req.currency());
-        Priced priced = pricing.price(Direction.COLLECTION, method, req.amount(), req.currency(), quote);
+                : quotes.requireUsable(ctx, req.quoteId(), Direction.COLLECTION, method, req.amount(), currency);
+        Priced priced = pricing.price(Direction.COLLECTION, method, req.amount(), currency, quote);
         limits.check(ctx, TxType.PAYMENT, priced.usdCents());
         PaymentRail rail = rails.select(ctx.environment(), Direction.COLLECTION, method, spec.provider(), null, priced.currency());
 
@@ -94,18 +118,25 @@ public class CommercialPaymentService {
         tx.setLivemode(ctx.livemode());
         tx.setType(TxType.PAYMENT);
         tx.setStatus(TxStatus.PENDING);
-        tx.setMerchantReference(req.merchantReference());
+        tx.setMerchantReference(reference);
         tx.setDescription(req.description());
         applyPricing(tx, priced, quote);
         tx.setMethodType(method);
         tx.setRail(rail.id());
         tx.setProvider(rail.providerName(method));
         tx.setCustomer(customer);
-        tx.setCallbackUrl(blankToNull(req.callbackUrl()));
+        tx.setCallbackUrl(blankToNull(callbackUrl));
         tx.setNotifyRegistered(Boolean.TRUE.equals(req.notifyRegistered()));
         tx.setMetadata(metadata);
         tx.setExpiresAt(now.plusSeconds(expiry));
+        if (link != null) tx.getRelations().put(PaymentLinkService.relationKey(), link.getId());
+        tx.getRelations().putAll(relations);
         store.insert(tx);
+        if (link != null && link.getUsage() == PaymentLink.Usage.SINGLE && paymentLinks.hasOtherAttempt(link.getId(), tx.getId())) {
+            // Two customers raced for the last use of a single use link. Nothing was sent, so just step aside.
+            store.discardUnsent(tx.getId());
+            throw CommercialException.invalidState("This single use payment link already has a payment in progress or completed");
+        }
 
         Map<String, Object> options = new LinkedHashMap<>();
         if (spec.returnUrl() != null) options.put("returnUrl", spec.returnUrl());
@@ -156,7 +187,7 @@ public class CommercialPaymentService {
         tx.setQuoteId(quote == null ? null : quote.getQuoteId());
     }
 
-    static void checkCallbackUrl(CommercialContext ctx, String url) {
+    public static void checkCallbackUrl(CommercialContext ctx, String url) {
         if (url == null || url.isBlank()) return;
         CallbackUrlValidator.check(url, ctx.environment()).ifPresent(reason -> {
             throw new CommercialException(ErrorCode.INVALID_CALLBACK_URL, "callbackUrl: " + reason);

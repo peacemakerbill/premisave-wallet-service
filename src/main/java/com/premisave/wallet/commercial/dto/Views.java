@@ -37,9 +37,11 @@ public final class Views {
         m.put("netAmount", Money.format(tx.getSettleCents()));
         m.put("method", method(tx));
         m.put("customer", maskedCustomer(tx.getCustomer()));
+        m.put("paymentLinkId", tx.getRelations().get("paymentLinkId"));
         m.put("nextAction", tx.getNextAction());
         m.put("result", result(tx.getResult()));
         m.put("providerReference", tx.getProviderReference());
+        m.put("refundedAmount", Money.format(tx.getRefundedCents()));
         m.put("description", tx.getDescription());
         m.put("callbackUrl", tx.getCallbackUrl());
         m.put("notifyRegistered", tx.isNotifyRegistered());
@@ -59,6 +61,8 @@ public final class Views {
         m.put("destination", maskedDestination(tx.getDestination()));
         m.put("remarks", tx.getRemarks());
         m.put("result", result(tx.getResult()));
+        m.put("beneficiary", beneficiary(tx));
+        m.put("batchId", tx.getRelations().get("batchId"));
         m.put("providerReference", tx.getProviderReference());
         m.put("callbackUrl", tx.getCallbackUrl());
         m.put("notifyRegistered", tx.isNotifyRegistered());
@@ -112,6 +116,7 @@ public final class Views {
         m.put("enabledMethods", p.getEnabledMethods().stream().map(Enum::name).sorted().toList());
         m.put("limits", Map.of("sandbox", limits(p.limitsFor(Environment.SANDBOX)), "live", limits(p.limitsFor(Environment.LIVE))));
         m.put("feePlanId", p.getFeePlanId());
+        m.put("requireBeneficiaryCheck", p.isRequireBeneficiaryCheck());
         m.put("settlementDestinations", Map.of(
                 "sandbox", destinations(p.destinationsFor(Environment.SANDBOX)),
                 "live", destinations(p.destinationsFor(Environment.LIVE))));
@@ -249,6 +254,17 @@ public final class Views {
         return m;
     }
 
+    /** The beneficiary check a payout relied on, or null when it had none. */
+    private static Map<String, Object> beneficiary(CommercialTransaction tx) {
+        String checkId = tx.getRelations().get("beneficiaryCheckId");
+        if (checkId == null) return null;
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("checkId", checkId);
+        m.put("registeredName", tx.getRelations().get("beneficiaryName"));
+        m.put("match", tx.getRelations().get("beneficiaryMatch"));
+        return m;
+    }
+
     private static Map<String, Object> method(CommercialTransaction tx) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("type", tx.getMethodType() == null ? null : tx.getMethodType().name());
@@ -256,7 +272,7 @@ public final class Views {
         return m;
     }
 
-    private static Map<String, Object> result(TxResult r) {
+    public static Map<String, Object> result(TxResult r) {
         if (r == null) return null;
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("code", r.getCode().name());
@@ -277,7 +293,7 @@ public final class Views {
         return m;
     }
 
-    private static Map<String, Object> maskedDestination(Map<String, Object> d) {
+    public static Map<String, Object> maskedDestination(Map<String, Object> d) {
         Map<String, Object> m = new LinkedHashMap<>();
         if (d == null) return m;
         d.forEach((k, v) -> m.put(k, switch (k) {

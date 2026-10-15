@@ -48,16 +48,19 @@ public class TransactionOutcomeService implements RailResultSink {
     private final EventService events;
     private final FeeRevenuePoster feeRevenue;
     private final MongoTemplate mongo;
+    private final List<TransactionFinishListener> listeners;
 
     public TransactionOutcomeService(CommercialTransactionStore store, LedgerService ledger,
                                      MerchantWalletRepository wallets, EventService events,
-                                     FeeRevenuePoster feeRevenue, MongoTemplate mongo) {
+                                     FeeRevenuePoster feeRevenue, MongoTemplate mongo,
+                                     List<TransactionFinishListener> listeners) {
         this.store = store;
         this.ledger = ledger;
         this.wallets = wallets;
         this.events = events;
         this.feeRevenue = feeRevenue;
         this.mongo = mongo;
+        this.listeners = listeners == null ? List.of() : listeners;
     }
 
     @Override
@@ -132,6 +135,13 @@ public class TransactionOutcomeService implements RailResultSink {
         store.markLedgerApplied(tx.getId());
         feeRevenue.post(tx);
         events.emit(tx);
+        for (TransactionFinishListener l : listeners) {
+            try {
+                l.onFinished(tx);
+            } catch (RuntimeException e) {
+                log.error("{} failed for transaction {}", l.getClass().getSimpleName(), tx.getId(), e);
+            }
+        }
     }
 
     private void applyMoney(CommercialTransaction tx) {

@@ -95,7 +95,7 @@ public class MpesaStkReconciler {
     }
 
     void reportStuckPayouts() {
-        Criteria c = Criteria.where("type").is(TxType.PAYOUT.name())
+        Criteria c = Criteria.where("type").in(TxType.PAYOUT.name(), TxType.REFUND.name())
                 .and("rail").is(RailId.MPESA.name())
                 .and("status").in(TxStatus.OPEN.stream().map(Enum::name).toList())
                 .and("createdAt").lt(Instant.now().minus(STUCK_PAYOUT_AFTER));

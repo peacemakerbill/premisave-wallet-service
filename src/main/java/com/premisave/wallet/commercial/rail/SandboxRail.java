@@ -78,7 +78,9 @@ public class SandboxRail implements PaymentRail {
     @Override
     public RailResponse collect(CollectCommand c) {
         String ref = "sbx_" + c.transactionId();
-        Map<String, Object> next = nextActionFor(c);
+        // Charging a saved payment method needs nothing from the customer, apart from the mobile money prompt.
+        boolean savedMethod = c.methodOptions().containsKey("paymentMethodId") && c.method() != MethodType.MOBILE_MONEY;
+        Map<String, Object> next = savedMethod ? null : nextActionFor(c);
         RailResponse response = next == null ? RailResponse.pending(ref) : RailResponse.requiresAction(next, ref);
         scheduleAutoOutcome(c.transactionId(), c.usdCents(), Direction.COLLECTION);
         return response;
@@ -94,6 +96,24 @@ public class SandboxRail implements PaymentRail {
     @Override
     public boolean cancelCollection(CommercialTransaction tx) {
         return true;
+    }
+
+    /** The sandbox refunds cards and PayPal itself, like their real providers; other methods use the generic fallbacks. */
+    @Override
+    public RailRefundMode refundMode(CommercialTransaction payment) {
+        MethodType m = payment.getMethodType();
+        return m == MethodType.CARD || m == MethodType.PAYPAL ? RailRefundMode.REFUND : RailRefundMode.NONE;
+    }
+
+    @Override
+    public RailResponse refund(RefundCommand c) {
+        scheduleAutoOutcome(c.transactionId(), c.usdCents(), Direction.PAYOUT);
+        return RailResponse.pending("sbx_" + c.transactionId());
+    }
+
+    @Override
+    public void submitDisputeEvidence(DisputeEvidenceCommand command) {
+        // Accepted without checking: the sandbox decides disputes only when asked to.
     }
 
     /** Applies a chosen outcome after a delay. Used by the simulate helper endpoints. */

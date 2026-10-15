@@ -126,6 +126,20 @@ public class MerchantService {
             if (open > 0) {
                 throw CommercialException.invalidState("There are " + open + " transactions still in progress");
             }
+            long disputes = mongo.count(Query.query(Criteria.where("merchantId").is(merchantId)
+                    .and("livemode").is(env.livemode())
+                    .and("status").in(com.premisave.wallet.commercial.dispute.Dispute.ACTIVE.stream().map(Enum::name).toList())),
+                    com.premisave.wallet.commercial.dispute.Dispute.class);
+            if (disputes > 0) {
+                throw CommercialException.invalidState("There are " + disputes + " disputes still open");
+            }
+            long subscriptions = mongo.count(Query.query(Criteria.where("merchantId").is(merchantId)
+                    .and("livemode").is(env.livemode())
+                    .and("state").in(com.premisave.wallet.commercial.billing.Subscription.LIVE.stream().map(Enum::name).toList())),
+                    com.premisave.wallet.commercial.billing.Subscription.class);
+            if (subscriptions > 0) {
+                throw CommercialException.invalidState("There are " + subscriptions + " subscriptions still running; cancel them first");
+            }
         }
         p.setStatusFor(env, target);
         p.setUpdatedAt(Instant.now());
@@ -147,6 +161,7 @@ public class MerchantService {
         }
         if (req.limits() != null) p.setLimitsFor(env, toLimits(req.limits()));
         if (req.feePlanId() != null && !req.feePlanId().isBlank()) p.setFeePlanId(req.feePlanId());
+        if (req.requireBeneficiaryCheck() != null) p.setRequireBeneficiaryCheck(req.requireBeneficiaryCheck());
         if (req.settlementDestinations() != null) p.setDestinationsFor(env, toDestinations(req.settlementDestinations()));
         p.setUpdatedAt(Instant.now());
         return Views.merchant(merchants.save(p));

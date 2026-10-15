@@ -53,6 +53,9 @@ public class MpesaDarajaClient {
 
     public record B2cAccepted(String conversationId, String originatorConversationId) {}
 
+    /** registered is false with alreadyRegistered true when Safaricom already holds addresses for the paybill. */
+    public record C2bRegistration(boolean registered, boolean alreadyRegistered, String message) {}
+
     /** Nothing reached Safaricom, so nothing was charged or sent. */
     public static class NotSent extends RuntimeException {
         private static final long serialVersionUID = 1L;
@@ -157,6 +160,33 @@ public class MpesaDarajaClient {
             throw rejected("M-Pesa did not accept the payout: " + text(reply, "ResponseDescription"));
         }
         return new B2cAccepted(text(reply, "ConversationID"), text(reply, "OriginatorConversationID"));
+    }
+
+    /**
+     * Tells Safaricom where to send validation and confirmation requests for a paybill. Safaricom keeps one pair
+     * per paybill and will not overwrite it, so a paybill that already has addresses answers alreadyRegistered.
+     */
+    public C2bRegistration registerC2bUrls(String shortcode, String responseType, String confirmationUrl, String validationUrl) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("ShortCode", shortcode);
+        body.put("ResponseType", responseType);
+        body.put("ConfirmationURL", confirmationUrl);
+        body.put("ValidationURL", validationUrl);
+        Map<String, Object> reply = post("/mpesa/c2b/v2/registerurl", body);
+        String errorCode = text(reply, "errorCode");
+        if (!errorCode.isBlank()) {
+            String message = text(reply, "errorMessage");
+            if (errorCode.equals("500.003.1001") || message.toLowerCase().contains("duplicate notification")) {
+                return new C2bRegistration(false, true, message);
+            }
+            throw rejected("M-Pesa refused the address registration: " + errorCode + (message.isBlank() ? "" : " " + message));
+        }
+        String code = text(reply, "ResponseCode");
+        String description = text(reply, "ResponseDescription");
+        if (!(code.equals("0") || code.equals("00000000") || description.equalsIgnoreCase("success"))) {
+            throw rejected("M-Pesa did not accept the address registration: " + description);
+        }
+        return new C2bRegistration(true, false, description);
     }
 
     // ---------------------------------------------------------------- plumbing

@@ -22,5 +22,14 @@ public record CreatePaymentRequest(
         @Size(max = 2048) String callbackUrl,
         Boolean notifyRegistered,
         @Min(60) @Max(86400) Integer expiresInSeconds,
-        Map<String, String> metadata) {
+        Map<String, String> metadata,
+        @Size(max = 40) String paymentLinkId) {
+
+    /** A payment that does not come from a payment link. */
+    public CreatePaymentRequest(BigDecimal amount, String currency, String merchantReference, String description,
+                                CustomerInfo customer, MethodSpec method, String quoteId, String callbackUrl,
+                                Boolean notifyRegistered, Integer expiresInSeconds, Map<String, String> metadata) {
+        this(amount, currency, merchantReference, description, customer, method, quoteId, callbackUrl,
+                notifyRegistered, expiresInSeconds, metadata, null);
+    }
 }

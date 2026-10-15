@@ -67,6 +67,9 @@ public class TransactionQueryService {
         eq(all, "customer.email", f.get("customerEmail"));
         eq(all, "customer.phone", f.get("customerPhone"));
         eq(all, "destination.type", upper(f.get("destinationType")));
+        eq(all, "relations.paymentLinkId", f.get("paymentLinkId"));
+        eq(all, "relations.batchId", f.get("batchId"));
+        eq(all, "relations.paymentId", f.get("paymentId"));
 
         Instant from = instant(f.get("from"), "from");
         Instant to = instant(f.get("to"), "to");
@@ -125,6 +128,7 @@ public class TransactionQueryService {
             case PAYOUT -> "Payout";
             case SETTLEMENT -> "Settlement";
             case TRANSFER -> "Transfer";
+            case REFUND -> "Refund";
             default -> "Transaction";
         };
     }

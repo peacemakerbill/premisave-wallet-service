@@ -44,6 +44,11 @@ public class CommercialTransactionStore {
         return repo.insert(tx);
     }
 
+    /** Removes a transaction that was recorded but never sent anywhere (no rail call, no money moved, no event). */
+    public void discardUnsent(String id) {
+        repo.deleteById(id);
+    }
+
     public Optional<CommercialTransaction> find(String id) {
         return repo.findById(id);
     }

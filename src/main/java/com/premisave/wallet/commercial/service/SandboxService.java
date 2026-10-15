@@ -20,6 +20,16 @@ import com.premisave.wallet.commercial.exception.CommercialException;
 import com.premisave.wallet.commercial.rail.RailOutcome;
 import com.premisave.wallet.commercial.rail.SandboxRail;
 import com.premisave.wallet.commercial.security.CommercialContext;
+import com.premisave.wallet.commercial.batch.PayoutBatch;
+import com.premisave.wallet.commercial.dispute.Dispute;
+import com.premisave.wallet.commercial.dispute.DisputeService;
+import com.premisave.wallet.commercial.dispute.DisputeViews;
+import com.premisave.wallet.commercial.dto.CreateTestDisputeRequest;
+import com.premisave.wallet.commercial.dto.ResolveDisputeRequest;
+import com.premisave.wallet.commercial.refund.RefundViews;
+import com.premisave.wallet.commercial.beneficiary.BeneficiaryCheck;
+import com.premisave.wallet.commercial.link.AccountReference;
+import com.premisave.wallet.commercial.link.PaymentLink;
 import com.premisave.wallet.commercial.settlement.SettlementSchedule;
 import com.premisave.wallet.commercial.util.Money;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -51,10 +61,11 @@ public class SandboxService {
     private final PricingService pricing;
     private final FxConverter fx;
     private final MongoTemplate mongo;
+    private final DisputeService disputes;
 
     public SandboxService(TransactionQueryService queries, TransactionOutcomeService outcomes, SandboxRail sandboxRail,
                           LedgerService ledger, BalanceService balances, PricingService pricing, FxConverter fx,
-                          MongoTemplate mongo) {
+                          MongoTemplate mongo, DisputeService disputes) {
         this.queries = queries;
         this.outcomes = outcomes;
         this.sandboxRail = sandboxRail;
@@ -63,6 +74,7 @@ public class SandboxService {
         this.pricing = pricing;
         this.fx = fx;
         this.mongo = mongo;
+        this.disputes = disputes;
     }
 
     /** Applies the chosen outcome now, or after delaySeconds, exactly as a provider result would be applied. */
@@ -85,6 +97,28 @@ public class SandboxService {
             return view(tx);
         }
         return view(outcomes.apply(tx, outcome));
+    }
+
+    /** Section 13.3: opens a dispute on a successful sandbox payment, as a provider would. */
+    public Map<String, Object> createDispute(CommercialContext ctx, CreateTestDisputeRequest req) {
+        requireSandbox(ctx);
+        CommercialTransaction payment = queries.get(ctx, req.paymentId().trim(), TxType.PAYMENT);
+        if (req.amount() != null && Money.hasMoreThanCents(req.amount())) {
+            throw CommercialException.validation("amount", "must have at most two decimal places");
+        }
+        long cents = req.amount() == null ? payment.getAmountCents() : Money.toCents(req.amount());
+        return DisputeViews.dispute(disputes.open(payment, cents, req.reason(), null, null));
+    }
+
+    /** Decides a sandbox dispute: WON releases the held amount, LOST takes it. */
+    public Map<String, Object> resolveDispute(CommercialContext ctx, String id, ResolveDisputeRequest req) {
+        requireSandbox(ctx);
+        Dispute d = disputes.get(ctx, id);
+        String outcome = req.outcome().trim().toUpperCase(Locale.ROOT);
+        if (!outcome.equals("WON") && !outcome.equals("LOST")) {
+            throw CommercialException.validation("outcome", "must be WON or LOST");
+        }
+        return DisputeViews.dispute(disputes.resolve(d.getId(), outcome.equals("WON")));
     }
 
     public Map<String, Object> credit(CommercialContext ctx, CreditRequest req) {
@@ -125,6 +159,18 @@ public class SandboxService {
         mongo.remove(byMerchant, CommercialIdempotencyRecord.class);
         mongo.remove(byMerchant, MerchantHold.class);
         mongo.remove(byMerchant, SettlementSchedule.class);
+        mongo.remove(byMerchant, PaymentLink.class);
+        mongo.remove(byMerchant, AccountReference.class);
+        mongo.remove(byMerchant, PayoutBatch.class);
+        mongo.remove(byMerchant, BeneficiaryCheck.class);
+        mongo.remove(byMerchant, Dispute.class);
+        mongo.remove(byMerchant, com.premisave.wallet.commercial.billing.Subscription.class);
+        mongo.remove(byMerchant, com.premisave.wallet.commercial.billing.Invoice.class);
+        if (!keep.contains("plans")) mongo.remove(byMerchant, com.premisave.wallet.commercial.billing.Plan.class);
+        if (!keep.contains("customers")) {
+            mongo.remove(byMerchant, com.premisave.wallet.commercial.billing.BillingCustomer.class);
+            mongo.remove(byMerchant, com.premisave.wallet.commercial.billing.CustomerPaymentMethod.class);
+        }
         mongo.remove(Query.query(Criteria.where("walletId").is(ctx.walletId())), LedgerLine.class);
         if (!keep.contains("callbacks")) mongo.remove(byMerchant, CallbackRegistration.class);
         ledger.resetWallet(ctx.walletId());
@@ -164,6 +210,10 @@ public class SandboxService {
     }
 
     private static Map<String, Object> view(CommercialTransaction tx) {
-        return tx.getType() == TxType.PAYMENT ? Views.payment(tx) : Views.payout(tx);
+        return switch (tx.getType()) {
+            case PAYMENT -> Views.payment(tx);
+            case REFUND -> RefundViews.refund(tx);
+            default -> Views.payout(tx);
+        };
     }
 }

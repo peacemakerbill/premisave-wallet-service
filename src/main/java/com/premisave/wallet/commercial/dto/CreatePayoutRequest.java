@@ -1,5 +1,6 @@
 package com.premisave.wallet.commercial.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -10,7 +11,7 @@ import java.util.Map;
 
 /**
  * destination is a free form object whose required fields depend on its type;
- * DestinationValidator checks it and returns the cleaned version.
+ * RequestValidators checks it and returns the cleaned version.
  */
 public record CreatePayoutRequest(
         @NotNull @DecimalMin(value = "0.01", message = "must be at least 0.01") BigDecimal amount,
@@ -22,5 +23,14 @@ public record CreatePayoutRequest(
         @Size(max = 40) String quoteId,
         @Size(max = 2048) String callbackUrl,
         Boolean notifyRegistered,
-        Map<String, String> metadata) {
+        Map<String, String> metadata,
+        @Valid BeneficiaryCheckRequest beneficiaryCheck) {
+
+    /** A payout with no beneficiary check; the check then follows the merchant's default. */
+    public CreatePayoutRequest(BigDecimal amount, String currency, String merchantReference, String remarks,
+                               Map<String, Object> destination, String provider, String quoteId, String callbackUrl,
+                               Boolean notifyRegistered, Map<String, String> metadata) {
+        this(amount, currency, merchantReference, remarks, destination, provider, quoteId, callbackUrl,
+                notifyRegistered, metadata, null);
+    }
 }

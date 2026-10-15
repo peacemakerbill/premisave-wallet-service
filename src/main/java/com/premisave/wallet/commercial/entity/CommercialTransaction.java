@@ -27,7 +27,11 @@ import java.util.Map;
     @CompoundIndex(name = "merchant_env_type_created", def = "{'merchantId': 1, 'livemode': 1, 'type': 1, 'createdAt': -1}"),
     @CompoundIndex(name = "merchant_env_completed", def = "{'merchantId': 1, 'livemode': 1, 'completedAt': -1}"),
     @CompoundIndex(name = "merchant_env_reference", def = "{'merchantId': 1, 'livemode': 1, 'merchantReference': 1}"),
-    @CompoundIndex(name = "provider_reference", def = "{'rail': 1, 'providerReference': 1}", sparse = true)
+    @CompoundIndex(name = "provider_reference", def = "{'rail': 1, 'providerReference': 1}", sparse = true),
+    @CompoundIndex(name = "payment_link", def = "{'relations.paymentLinkId': 1, 'status': 1}", sparse = true),
+    @CompoundIndex(name = "payout_batch", def = "{'relations.batchId': 1, 'relations.batchIndex': 1}", sparse = true),
+    @CompoundIndex(name = "refund_payment", def = "{'relations.paymentId': 1, 'status': 1}", sparse = true),
+    @CompoundIndex(name = "invoice_attempt", def = "{'relations.invoiceId': 1, 'relations.attempt': 1}", sparse = true)
 })
 public class CommercialTransaction {
 
@@ -76,6 +80,13 @@ public class CommercialTransaction {
      * for example a settlement's destination id and trigger, or the payment a refund is for.
      */
     private Map<String, String> relations = new LinkedHashMap<>();
+
+    /**
+     * Payments only: how much of this payment is spoken for by refunds that have not failed. Changed
+     * only by guarded updates in RefundReservations, never by saving the whole document.
+     */
+    private long refundedCents;
+    private Instant refundTouchedAt;
 
     /** Set once the money side of a final status has been applied to the wallet. */
     private boolean ledgerApplied;
@@ -149,6 +160,8 @@ public class CommercialTransaction {
     public void setHoldId(String v) { this.holdId = v; }
     public Map<String, String> getRelations() { return relations; }
     public void setRelations(Map<String, String> v) { this.relations = v == null ? new LinkedHashMap<>() : v; }
+    public long getRefundedCents() { return refundedCents; }
+    public Instant getRefundTouchedAt() { return refundTouchedAt; }
     public boolean isLedgerApplied() { return ledgerApplied; }
     public long getVersion() { return version; }
     public List<TimelineEntry> getTimeline() { return timeline; }

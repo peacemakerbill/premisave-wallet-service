@@ -14,6 +14,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -30,6 +31,11 @@ public class DeveloperServiceClient {
 
     private static final Logger log = LoggerFactory.getLogger(DeveloperServiceClient.class);
     private static final Pattern VERIFIED = Pattern.compile("\"verified\"\\s*:\\s*true");
+    private static final Pattern RESULT = Pattern.compile("\"result\"\\s*:\\s*\"(ACCEPT|REJECT)\"", Pattern.CASE_INSENSITIVE);
+    private static final Pattern REASON = Pattern.compile("\"reason\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+
+    /** The merchant's answer to a validation callback. */
+    public record ValidationReply(boolean accepted, String reason) {}
 
     private final CommercialProperties.Events config;
     private final HttpClient http;
@@ -90,6 +96,47 @@ public class DeveloperServiceClient {
             log.warn("Callback verification call failed: {}", e.toString());
             return e.getClass().getSimpleName() + ": " + e.getMessage();
         }
+    }
+
+    /**
+     * Asks the developer service to put a validation request to the merchant and wait for the answer.
+     *
+     * POST {base}/internal/validations  with {"registrationId", "url", "deadlineMs", "payload": {...}}
+     *
+     * The developer service delivers payload to the registered url and replies with the merchant's
+     * {"result": "ACCEPT" | "REJECT", "reason": "..."} within the deadline. Returns null when there is no usable
+     * answer (not configured, an error, a timeout, an unreadable reply); the caller then applies the
+     * registration's onTimeout setting.
+     */
+    public ValidationReply validate(String registrationId, String url, String payloadJson, int deadlineMs) {
+        if (!configured()) return null;
+        try {
+            String body = "{\"registrationId\":" + Json.quote(registrationId) + ",\"url\":" + Json.quote(url)
+                    + ",\"deadlineMs\":" + deadlineMs + ",\"payload\":" + payloadJson + "}";
+            HttpRequest.Builder req = HttpRequest.newBuilder(URI.create(base() + "/internal/validations"))
+                    .timeout(Duration.ofMillis(deadlineMs + 1000L))
+                    .header("Content-Type", "application/json");
+            if (config.apiKey() != null) req.header("X-API-Key", config.apiKey());
+            HttpResponse<String> resp = http.send(req.POST(HttpRequest.BodyPublishers.ofString(body)).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() / 100 != 2) return null;
+            return parseReply(resp.body());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (Exception e) {
+            log.warn("Validation call for registration {} failed: {}", registrationId, e.toString());
+            return null;
+        }
+    }
+
+    static ValidationReply parseReply(String body) {
+        if (body == null) return null;
+        Matcher result = RESULT.matcher(body);
+        if (!result.find()) return null;
+        Matcher reason = REASON.matcher(body);
+        String why = reason.find() ? reason.group(1).replace("\\\"", "\"").replace("\\\\", "\\") : null;
+        return new ValidationReply(result.group(1).equalsIgnoreCase("ACCEPT"), why);
     }
 
     private String base() {

@@ -180,7 +180,7 @@ public class CommercialTransferService {
     }
 
     /** "SELLER ONE" becomes "S***** O**": enough for a merchant to recognise the person, not to learn the name. */
-    static String maskName(String name) {
+    public static String maskName(String name) {
         if (name == null || name.isBlank()) return null;
         StringBuilder out = new StringBuilder();
         for (String word : name.trim().split("\\s+")) {

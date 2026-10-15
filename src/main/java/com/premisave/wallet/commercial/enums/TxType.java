@@ -10,10 +10,10 @@ public enum TxType {
 
     /**
      * Amount plus fee is held first, then captured on success or released on failure.
-     * This is the model payouts introduced; settlements and transfers share it.
+     * This is the model payouts introduced; settlements, transfers and refunds share it.
      */
     public boolean usesHold() {
-        return this == PAYOUT || this == SETTLEMENT || this == TRANSFER;
+        return this == PAYOUT || this == SETTLEMENT || this == TRANSFER || this == REFUND;
     }
 
     /** Human wording for ledger descriptions and messages. */

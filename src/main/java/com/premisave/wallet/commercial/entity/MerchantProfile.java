@@ -39,6 +39,8 @@ public class MerchantProfile {
     private Limits liveLimits = new Limits();
     private Limits sandboxLimits = new Limits();
     private String feePlanId = "fee_standard";
+    /** When true, payouts must pass a beneficiary check unless the request says otherwise. */
+    private boolean requireBeneficiaryCheck;
     private List<SettlementDestination> liveSettlementDestinations = new ArrayList<>();
     private List<SettlementDestination> sandboxSettlementDestinations = new ArrayList<>();
 
@@ -71,6 +73,8 @@ public class MerchantProfile {
     public void setEnabledMethods(Set<MethodType> v) { this.enabledMethods = v; }
     public String getFeePlanId() { return feePlanId; }
     public void setFeePlanId(String v) { this.feePlanId = v; }
+    public boolean isRequireBeneficiaryCheck() { return requireBeneficiaryCheck; }
+    public void setRequireBeneficiaryCheck(boolean v) { this.requireBeneficiaryCheck = v; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant v) { this.createdAt = v; }
     public Instant getUpdatedAt() { return updatedAt; }

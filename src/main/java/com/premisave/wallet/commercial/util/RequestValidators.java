@@ -84,6 +84,11 @@ public final class RequestValidators {
             case MOBILE_MONEY -> {
                 d.put("country", country(raw));
                 d.put("phoneNumber", normalisePhone("destination.phoneNumber", str(raw, "phoneNumber")));
+                String network = str(raw, "network");
+                if (network != null && !network.isBlank()) {
+                    if (network.trim().length() > 20) throw CommercialException.validation("destination.network", "is longer than 20 characters");
+                    d.put("network", network.trim().toUpperCase(Locale.ROOT));
+                }
             }
             case BUSINESS_ACCOUNT -> {
                 d.put("country", country(raw));

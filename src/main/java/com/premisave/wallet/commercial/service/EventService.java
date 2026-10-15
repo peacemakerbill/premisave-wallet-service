@@ -55,6 +55,8 @@ public class EventService {
     public void emit(CommercialTransaction tx) {
         String type = EventTypes.forTransaction(tx);
         if (type == null) return;
+        // Items of a bulk payout that was rolled back before it was accepted were never visible to the merchant.
+        if ("true".equals(tx.getRelations().get("silent"))) return;
         String id = "evt_" + Hashing.sha256Hex((tx.getId() + "|" + type + "|" + tx.getVersion()).getBytes()).substring(0, 16);
         List<EventTarget> targets = targetsFor(tx.getAppId(), tx.isLivemode(), type, tx.getCallbackUrl(), tx.isNotifyRegistered());
         store(id, type, tx.getMerchantId(), tx.getAppId(), tx.isLivemode(), tx.getId(), objectView(tx), targets);
@@ -64,6 +66,15 @@ public class EventService {
     public CommercialEvent emitDirect(String type, String merchantId, String appId, boolean livemode,
                                       String objectId, Map<String, Object> data, List<EventTarget> targets) {
         return store(Ids.next("evt"), type, merchantId, appId, livemode, objectId, data, targets);
+    }
+
+    /**
+     * Emits an event under an id the caller chose, so asking twice for the same thing (for example
+     * after a crash) stores one event. Used for events that belong to no single transaction.
+     */
+    public CommercialEvent emitWithId(String eventId, String type, String merchantId, String appId, boolean livemode,
+                                      String objectId, Map<String, Object> data, List<EventTarget> targets) {
+        return store(eventId, type, merchantId, appId, livemode, objectId, data, targets);
     }
 
     /** Re-queues an event for delivery, optionally to a different set of targets. */
@@ -106,6 +117,7 @@ public class EventService {
             case PAYMENT -> Views.payment(tx);
             case PAYOUT -> Views.payout(tx);
             case SETTLEMENT -> SettlementViews.settlement(tx);
+            case REFUND -> com.premisave.wallet.commercial.refund.RefundViews.refund(tx);
             default -> Views.transaction(tx);
         };
     }

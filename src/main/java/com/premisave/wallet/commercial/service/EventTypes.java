@@ -9,6 +9,20 @@ public final class EventTypes {
 
     public static final String CALLBACK_TEST = "callback.test";
     public static final String CALLBACK_VERIFICATION = "callback.verification";
+    public static final String PAYOUT_BATCH_COMPLETED = "payout.batch.completed";
+    public static final String BENEFICIARY_CHECK_COMPLETED = "beneficiary_check.completed";
+    public static final String DISPUTE_OPENED = "dispute.opened";
+    public static final String DISPUTE_WON = "dispute.won";
+    public static final String DISPUTE_LOST = "dispute.lost";
+    public static final String SUBSCRIPTION_CREATED = "subscription.created";
+    public static final String SUBSCRIPTION_ACTIVATED = "subscription.activated";
+    public static final String SUBSCRIPTION_PAST_DUE = "subscription.past_due";
+    public static final String SUBSCRIPTION_PAUSED = "subscription.paused";
+    public static final String SUBSCRIPTION_CANCELLED = "subscription.cancelled";
+    public static final String PAYMENT_METHOD_ACTIVATED = "customer.payment_method.activated";
+    public static final String INVOICE_UPCOMING = "invoice.upcoming";
+    public static final String INVOICE_PAID = "invoice.paid";
+    public static final String INVOICE_PAYMENT_FAILED = "invoice.payment_failed";
 
     private EventTypes() {}
 
@@ -39,6 +53,13 @@ public final class EventTypes {
             return switch (s) {
                 case SUCCESS -> "settlement.succeeded";
                 case FAILED, TIMED_OUT, CANCELLED, REVERSED -> "settlement.failed";
+                case REQUIRES_ACTION, PENDING -> null;
+            };
+        }
+        if (tx.getType() == TxType.REFUND) {
+            return switch (s) {
+                case SUCCESS -> "refund.succeeded";
+                case FAILED, TIMED_OUT, CANCELLED, REVERSED -> "refund.failed";
                 case REQUIRES_ACTION, PENDING -> null;
             };
         }

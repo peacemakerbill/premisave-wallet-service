@@ -16,5 +16,6 @@ public record UpdateConfigRequest(
         @Valid LimitsDto limits,
         @Size(max = 40) String feePlanId,
         @Valid List<SettlementDestinationDto> settlementDestinations,
+        Boolean requireBeneficiaryCheck,
         @NotNull String environment) {
 }

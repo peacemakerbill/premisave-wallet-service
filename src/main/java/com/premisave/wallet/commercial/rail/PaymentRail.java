@@ -34,6 +34,34 @@ public interface PaymentRail {
         return false;
     }
 
+    /** What this rail can do to return the money of a payment it collected. */
+    default RailRefundMode refundMode(CommercialTransaction payment) {
+        return RailRefundMode.NONE;
+    }
+
+    /** Asks the provider to refund or reverse a payment. Only called when refundMode is not NONE. */
+    default RailResponse refund(RefundCommand command) throws RailException {
+        throw new RailException(RailException.Kind.UNAVAILABLE, null, id() + " cannot refund payments");
+    }
+
+    /** Sends dispute evidence to the provider. */
+    default void submitDisputeEvidence(DisputeEvidenceCommand command) throws RailException {
+        throw new RailException(RailException.Kind.UNAVAILABLE, null, id() + " does not accept dispute evidence");
+    }
+
+    /** True when this rail's later results are found by asking the provider; RailPoller then calls poll. */
+    default boolean pollable() {
+        return false;
+    }
+
+    /**
+     * Asks the provider what became of an open transaction. Returns the outcome once the provider has a final
+     * answer, or null while it is still in progress or cannot be reached. Must be safe to call repeatedly.
+     */
+    default RailOutcome poll(CommercialTransaction tx) {
+        return null;
+    }
+
     /** The provider name shown to merchants for a method on this rail. */
     default String providerName(MethodType method) {
         return id().name();
