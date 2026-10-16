@@ -1,15 +1,13 @@
 package com.premisave.wallet.commercial.security;
 
 import com.premisave.wallet.commercial.config.CommercialProperties;
-import com.premisave.wallet.commercial.entity.MerchantApp;
 import com.premisave.wallet.commercial.entity.MerchantProfile;
-import com.premisave.wallet.commercial.enums.AppStatus;
 import com.premisave.wallet.commercial.enums.Environment;
 import com.premisave.wallet.commercial.enums.ErrorCode;
 import com.premisave.wallet.commercial.enums.MerchantStatus;
 import com.premisave.wallet.commercial.exception.CommercialException;
-import com.premisave.wallet.commercial.repository.MerchantAppRepository;
 import com.premisave.wallet.commercial.repository.MerchantProfileRepository;
+import com.premisave.wallet.commercial.service.AppSnapshotService;
 import com.premisave.wallet.commercial.util.Ids;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -18,9 +16,10 @@ import org.springframework.web.servlet.HandlerInterceptor;
 
 /**
  * Establishes the CommercialContext for /live and /sandbox routes: environment
- * from the path (cross-checked against X-App-Environment), then merchant and
- * app from the headers, with suspension rules. Reads stay available to a
- * suspended merchant or app; anything that changes state is refused.
+ * from the path (cross-checked against X-App-Environment), the merchant from this
+ * service's own records, and the app from the context headers the developer service
+ * sends, with suspension rules. Reads stay available to a suspended merchant or app;
+ * anything that changes state is refused.
  */
 @Component
 public class CommercialRequestInterceptor implements HandlerInterceptor {
@@ -29,13 +28,13 @@ public class CommercialRequestInterceptor implements HandlerInterceptor {
 
     private final CommercialProperties props;
     private final MerchantProfileRepository merchants;
-    private final MerchantAppRepository apps;
+    private final AppSnapshotService snapshots;
 
     public CommercialRequestInterceptor(CommercialProperties props, MerchantProfileRepository merchants,
-                                        MerchantAppRepository apps) {
+                                        AppSnapshotService snapshots) {
         this.props = props;
         this.merchants = merchants;
-        this.apps = apps;
+        this.snapshots = snapshots;
     }
 
     @Override
@@ -59,14 +58,9 @@ public class CommercialRequestInterceptor implements HandlerInterceptor {
                     "X-App-Environment must be " + env.headerValue() + " for the /" + env.pathSegment() + " path");
         }
 
-        String merchantId = required(request, "X-Merchant-Id");
-        String appId = required(request, "X-App-Id");
-
-        MerchantProfile merchant = merchants.findById(merchantId)
+        AppContext app = AppContextHeaders.parse(request::getHeader, env);
+        MerchantProfile merchant = merchants.findById(app.merchantId())
                 .orElseThrow(() -> new CommercialException(ErrorCode.MERCHANT_NOT_FOUND, "Merchant not found"));
-        MerchantApp app = apps.findById(appId)
-                .filter(a -> a.getMerchantId().equals(merchantId) && a.getEnvironment() == env)
-                .orElseThrow(() -> new CommercialException(ErrorCode.APP_NOT_FOUND, "App not found"));
 
         boolean readOnly = request.getMethod().equals("GET") || request.getMethod().equals("HEAD");
         MerchantStatus status = merchant.statusFor(env);
@@ -78,11 +72,12 @@ public class CommercialRequestInterceptor implements HandlerInterceptor {
                 throw new CommercialException(ErrorCode.MERCHANT_SUSPENDED,
                         "The merchant is " + status.name().toLowerCase() + " in this environment");
             }
-            if (app.getStatus() == AppStatus.SUSPENDED) {
+            if (!app.active()) {
                 throw new CommercialException(ErrorCode.APP_SUSPENDED, "The app is suspended");
             }
         }
 
+        snapshots.recordQuietly(app);
         CommercialContextHolder.set(new CommercialContext(env, merchant, app, requestId));
         return true;
     }
@@ -101,14 +96,5 @@ public class CommercialRequestInterceptor implements HandlerInterceptor {
         String segment = slash < 0 ? rest : rest.substring(0, slash);
         return Environment.fromPathSegment(segment)
                 .orElseThrow(() -> new CommercialException(ErrorCode.NOT_FOUND, "Unknown commercial route"));
-    }
-
-    private static String required(HttpServletRequest request, String header) {
-        String v = request.getHeader(header);
-        if (v == null || v.isBlank()) {
-            throw new CommercialException(ErrorCode.VALIDATION_FAILED, header + " header is required")
-                    .withDetails(java.util.List.of(java.util.Map.of("field", header, "issue", "missing")));
-        }
-        return v.trim();
     }
 }

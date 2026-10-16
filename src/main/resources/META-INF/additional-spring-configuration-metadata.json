@@ -628,7 +628,7 @@
     {
       "name": "commercial.events.developer-service-url",
       "type": "java.lang.String",
-      "description": "Base URL of the Developer Service. Events are forwarded to POST {url}/internal/events and callback registrations are verified through POST {url}/internal/callbacks/verify. When unset, events stay in the outbox and are not forwarded, and live callback registrations cannot be verified."
+      "description": "Base URL of the Developer Service. Events are forwarded to POST {url}/internal/events and callback registrations are verified through POST {url}/internal/callbacks/verify. When unset, events stay in the outbox and are not forwarded, and live callback registrations cannot be verified. The developer service does not accept events or callback verification yet (a later slice adds them), so leave this empty until it does."
     },
     {
       "name": "commercial.events.api-key",
@@ -1152,6 +1152,118 @@
       "type": "java.lang.Long",
       "description": "How often, in milliseconds, uncredited paybill payments are retried. Read directly by the @Scheduled annotation.",
       "defaultValue": 30000
+    },
+    {
+      "name": "commercial.onboarding.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Creates an onboarding application for each new merchant and blocks switching production on without an approved application.",
+      "defaultValue": true
+    },
+    {
+      "name": "commercial.onboarding.required-documents",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Document types an application must hold before it can be submitted and have accepted before it can be approved.",
+      "defaultValue": [
+        "BUSINESS_REGISTRATION",
+        "TAX_COMPLIANCE",
+        "DIRECTOR_ID"
+      ]
+    },
+    {
+      "name": "commercial.onboarding.max-document-bytes",
+      "type": "java.lang.Long",
+      "description": "Largest onboarding document in bytes. Values above 8388608 are lowered to 8388608 because documents travel as base64 inside a 12 MB request.",
+      "defaultValue": 5242880
+    },
+    {
+      "name": "commercial.onboarding.max-documents",
+      "type": "java.lang.Integer",
+      "description": "The most documents one application can hold.",
+      "defaultValue": 20
+    },
+    {
+      "name": "commercial.onboarding.staff-notify-emails",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Addresses told when an application is submitted or resubmitted. Empty sends nothing."
+    },
+    {
+      "name": "commercial.onboarding.mail-from",
+      "type": "java.lang.String",
+      "description": "Sender address of onboarding emails. Empty uses the mail account's own address."
+    },
+    {
+      "name": "commercial.onboarding.roles.review",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Staff roles that may start a review, add notes and mark documents.",
+      "defaultValue": [
+        "FINANCE",
+        "OPERATIONS",
+        "ADMIN"
+      ]
+    },
+    {
+      "name": "commercial.onboarding.roles.return-for-correction",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Staff roles that may send an application back to the applicant.",
+      "defaultValue": [
+        "FINANCE",
+        "OPERATIONS",
+        "ADMIN"
+      ]
+    },
+    {
+      "name": "commercial.onboarding.roles.approve",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Staff roles that may approve an application, which switches production on.",
+      "defaultValue": [
+        "FINANCE",
+        "ADMIN"
+      ]
+    },
+    {
+      "name": "commercial.onboarding.roles.reject",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Staff roles that may reject an application.",
+      "defaultValue": [
+        "FINANCE",
+        "OPERATIONS",
+        "ADMIN"
+      ]
+    },
+    {
+      "name": "commercial.onboarding.roles.reopen",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Staff roles that may bring a rejected application back into review.",
+      "defaultValue": [
+        "ADMIN"
+      ]
+    },
+    {
+      "name": "commercial.onboarding.drive.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Stores onboarding documents in Google Drive. Needs a service account key and a folder id; without them uploads are refused.",
+      "defaultValue": false
+    },
+    {
+      "name": "commercial.onboarding.drive.service-account-json-path",
+      "type": "java.lang.String",
+      "description": "Path of the Google service account key file. Preferred over the inline form."
+    },
+    {
+      "name": "commercial.onboarding.drive.service-account-json",
+      "type": "java.lang.String",
+      "description": "The Google service account key as JSON text, for platforms that only offer environment variables."
+    },
+    {
+      "name": "commercial.onboarding.drive.folder-id",
+      "type": "java.lang.String",
+      "description": "Id of the Drive folder (or shared drive folder) documents are stored in. Share it with the service account as Editor."
+    },
+    {
+      "name": "commercial.onboarding.drive.http-timeout-seconds",
+      "type": "java.lang.Integer",
+      "description": "Seconds to wait for Google. At least 2.",
+      "defaultValue": 30
     }
   ],
   "hints": [

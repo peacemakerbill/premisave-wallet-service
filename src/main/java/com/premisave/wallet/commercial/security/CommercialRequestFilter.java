@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * Runs for /internal/commercial/** after the normal security chain has
@@ -33,6 +34,10 @@ public class CommercialRequestFilter extends OncePerRequestFilter {
     public static final String ATTR_BODY_HASH = "commercial.bodyHash";
     private static final String PREFIX = "/internal/commercial/";
     private static final int MAX_BODY_BYTES = 1_048_576;
+    /** Onboarding documents travel as base64 inside the JSON body, so that one route gets a larger limit. */
+    private static final int MAX_DOCUMENT_BODY_BYTES = 12 * 1_048_576;
+    private static final Pattern DOCUMENT_UPLOAD =
+            Pattern.compile("^/internal/commercial/v1/merchants/[^/]+/application/documents$");
 
     private final CommercialProperties props;
 
@@ -55,9 +60,12 @@ public class CommercialRequestFilter extends OncePerRequestFilter {
         request.setAttribute(ATTR_REQUEST_ID, requestId);
         response.setHeader("X-Request-Id", requestId);
 
-        byte[] body = request.getInputStream().readNBytes(MAX_BODY_BYTES + 1);
-        if (body.length > MAX_BODY_BYTES) {
-            reject(response, 400, ErrorCode.VALIDATION_FAILED, "Request body is larger than 1 MB", requestId);
+        boolean documentUpload = "POST".equals(request.getMethod()) && DOCUMENT_UPLOAD.matcher(request.getRequestURI()).matches();
+        int limit = documentUpload ? MAX_DOCUMENT_BODY_BYTES : MAX_BODY_BYTES;
+        byte[] body = request.getInputStream().readNBytes(limit + 1);
+        if (body.length > limit) {
+            reject(response, 400, ErrorCode.VALIDATION_FAILED,
+                    "Request body is larger than " + (limit / 1_048_576) + " MB", requestId);
             return;
         }
         request.setAttribute(ATTR_BODY_HASH, Hashing.sha256Hex(body));

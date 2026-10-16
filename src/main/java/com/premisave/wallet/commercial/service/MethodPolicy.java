@@ -1,9 +1,9 @@
 package com.premisave.wallet.commercial.service;
 
-import com.premisave.wallet.commercial.entity.MerchantApp;
 import com.premisave.wallet.commercial.entity.MerchantProfile;
 import com.premisave.wallet.commercial.enums.Environment;
 import com.premisave.wallet.commercial.enums.MethodType;
+import com.premisave.wallet.commercial.security.AppContext;
 
 /**
  * Which methods a caller may use. Sandbox allows every method so developers
@@ -14,9 +14,9 @@ public final class MethodPolicy {
 
     private MethodPolicy() {}
 
-    public static boolean isEnabled(MerchantProfile merchant, MerchantApp app, Environment env, MethodType method) {
+    public static boolean isEnabled(MerchantProfile merchant, AppContext app, Environment env, MethodType method) {
         boolean merchantAllows = env == Environment.SANDBOX || merchant.getEnabledMethods().contains(method);
-        boolean appAllows = app.getEnabledMethods() == null || app.getEnabledMethods().contains(method);
+        boolean appAllows = app.enabledMethods() == null || app.enabledMethods().contains(method);
         return merchantAllows && appAllows;
     }
 }

@@ -328,8 +328,10 @@ commercial:
     replay-window-seconds: 300
   events:
     # Where outbox events are forwarded for delivery to merchant URLs.
-    # Placeholder local address. Set DEVELOPER_SERVICE_URL to the real Developer Service.
-    developer-service-url: ${DEVELOPER_SERVICE_URL:http://localhost:8085}
+    # Leave empty for now. The developer service does not accept events yet (a later slice adds
+    # POST /internal/events), so with an address here the dispatcher would only fail and retry.
+    # Events stay safely in the outbox while this is empty.
+    developer-service-url: ${DEVELOPER_SERVICE_URL:}
     api-key: ${DEVELOPER_SERVICE_API_KEY:}
     signing-secret: ${COMMERCIAL_EVENTS_SIGNING_SECRET:}
     max-attempts: 12
@@ -368,6 +370,152 @@ commercial:
   transfers:
     # Finishes transfers that were held but not completed, for example after a restart.
     recovery-interval-ms: 30000
+  links:
+    # Public address of the checkout page that the developer service serves. A payment link's url is
+    # this address plus /pay/{id}. Without one the url is the relative path /pay/{id}.
+    checkout-base-url: ${COMMERCIAL_LINKS_CHECKOUT_BASE_URL:}
+    # Same, for sandbox links. Falls back to checkout-base-url.
+    sandbox-checkout-base-url: ${COMMERCIAL_LINKS_SANDBOX_CHECKOUT_BASE_URL:}
+  batches:
+    # Bulk payouts are sent to their rails at a steady pace: this many per run, one run every
+    # dispatch-interval-ms (ten every two seconds is about five a second).
+    items-per-run: 10
+    dispatch-interval-ms: 2000
+    dispatcher-enabled: true
+    # A payout handed to a provider that never answered is closed as timed out after this long.
+    stuck-after-minutes: 60
+    max-items: 500
+  beneficiary:
+    # How long a provider's answer about a destination is reused before the provider is asked again.
+    cache-hours: 24
+  refunds:
+    # A refund above this many USD is returned with requiresApproval true. Until the approval
+    # workflow is decided the flag is informational and the refund still proceeds.
+    approval-threshold-usd: 1000
+    # How often, in milliseconds, wallet credit refunds that stopped part way are finished.
+    recovery-interval-ms: 30000
+  disputes:
+    # Days a merchant has to answer a dispute opened by the sandbox helper. Real disputes carry the provider's deadline.
+    evidence-window-days: 14
+    # How often, in milliseconds, disputes interrupted while opening or settling are finished.
+    recovery-interval-ms: 30000
+  billing:
+    # Runs subscription billing: bills periods that have ended, retries failed invoices,
+    # finishes stalled attempts, resumes paused subscriptions and sends invoice.upcoming.
+    scheduler-enabled: true
+    scheduler-interval-ms: 60000
+    # How many days before a billing date invoice.upcoming is sent (1 to 30).
+    upcoming-days: 3
+    # Minutes an attempt may sit unresolved before the recovery sweep looks at it. Keep this
+    # above 5, the minutes an Idempotency-Key is held while its request runs (minimum 6).
+    stuck-minutes: 10
+    # The most subscriptions, invoices or notices handled per step of one scheduler run (1 to 1000).
+    batch-size: 100
+    # Sandbox advance-clock helper: milliseconds to wait for each payment to settle (0 to 30000).
+    clock-wait-ms: 3000
+  rails:
+    # Live provider rails other than M-Pesa. Every rail is off until its enabled flag is true, and each
+    # reuses the credentials already configured for the wallet service (stripe.*, paypal.*, flutterwave.*,
+    # nowpayments.*). Currencies a rail serves must also be listed in commercial.currencies.
+    http-timeout-seconds: 20
+    polling:
+      # Looks open payments, payouts and refunds up with their provider, and finishes pending payment
+      # methods, so a lost or late webhook is picked up. Needed for Flutterwave, NOWPayments and PayPal.
+      enabled: true
+      interval-ms: 20000
+      after-seconds: 15
+      batch-size: 50
+    stripe:
+      enabled: ${COMMERCIAL_STRIPE_ENABLED:false}
+      # Returned to the customer's browser with a card payment.
+      publishable-key: ${COMMERCIAL_STRIPE_PUBLISHABLE_KEY:}
+      # Signing secret of the commercial webhook destination in the Stripe Dashboard
+      # (endpoint /payments/commercial/rail/webhook/stripe). Not the wallet service's secret.
+      webhook-secret: ${COMMERCIAL_STRIPE_WEBHOOK_SECRET:}
+      currencies: USD
+      min-usd-cents: 50
+      max-usd-cents: 10000000
+      webhook-tolerance-seconds: 300
+      setup-timeout-hours: 24
+    paypal:
+      enabled: ${COMMERCIAL_PAYPAL_ENABLED:false}
+      currencies: USD
+      min-usd-cents: 100
+      max-usd-cents: 10000000
+      setup-timeout-hours: 24
+    flutterwave:
+      enabled: ${COMMERCIAL_FLUTTERWAVE_ENABLED:false}
+      # Local currencies mobile money is collected in (Kenya stays on M-Pesa) and bank payout currencies.
+      mobile-money-currencies: GHS,UGX,TZS,RWF,ZMW
+      bank-currencies: NGN,GHS,KES,UGX,TZS,RWF,ZAR
+      # Currency of the Flutterwave balance that transfers are paid from.
+      source-currency: USD
+      # Placeholder customer email for a customer who gave only a phone number.
+      customer-email-domain: payments.premisave.com
+      min-usd-cents: 50
+      max-usd-cents: 5000000
+    nowpayments:
+      enabled: ${COMMERCIAL_NOWPAYMENTS_ENABLED:false}
+      default-pay-currency: usdttrc20
+      min-usd-cents: 500
+      max-usd-cents: 10000000
+    premisave:
+      # Premisave wallets as a payment method (the owner approves in the app) and a payout destination.
+      enabled: ${COMMERCIAL_PREMISAVE_ENABLED:false}
+      # Minutes a wallet owner has to approve a payment.
+      consent-minutes: 15
+      # The largest single charge a standing approval (subscription) can be given.
+      mandate-max-usd-cents: 50000
+      # Hours a wallet owner has to approve a standing approval.
+      mandate-hours: 48
+      min-usd-cents: 1
+      max-usd-cents: 5000000
+  c2b:
+    # Paybill payments by account reference. Needs commercial.mpesa.enabled too.
+    enabled: ${COMMERCIAL_C2B_ENABLED:false}
+    # The paybill customers pay. Safaricom keeps one address pair per paybill, so use one that is not
+    # already registered for the wallet service's deposits, or route both with CommercialC2bRouter.
+    shortcode: ${COMMERCIAL_C2B_SHORTCODE:}
+    # What Safaricom does when our validation address cannot be reached: Completed or Cancelled.
+    response-type: Cancelled
+    # Ask the merchant's registered VALIDATION callback before accepting a payment.
+    merchant-validation: true
+    validation-deadline-ms: 3000
+    # Register the validation and confirmation addresses with Safaricom at start up. Otherwise call
+    # POST /internal/commercial/v1/c2b/register-urls once.
+    register-on-startup: false
+    # Seconds a recorded but uncredited payment waits before it is tried again, and how often that is checked.
+    reprocess-after-seconds: 60
+    sweep-interval-ms: 30000
+  onboarding:
+    # Merchant application form, document review and approval. Approving an application switches production on.
+    enabled: ${COMMERCIAL_ONBOARDING_ENABLED:true}
+    # Document types an application must hold, and have accepted by a reviewer, before it can be approved.
+    # Types: BUSINESS_REGISTRATION, CERTIFICATE_OF_INCORPORATION, TAX_COMPLIANCE, DIRECTOR_ID,
+    # PROOF_OF_ADDRESS, BANK_STATEMENT, OTHER.
+    required-documents: [BUSINESS_REGISTRATION, TAX_COMPLIANCE, DIRECTOR_ID]
+    # Largest file in bytes (hard ceiling 8 MB) and the most files per application.
+    max-document-bytes: 5242880
+    max-documents: 20
+    # Addresses told when an application is submitted or resubmitted. Comma separated. Empty sends nothing.
+    staff-notify-emails: ${COMMERCIAL_ONBOARDING_STAFF_EMAILS:}
+    # Sender of onboarding emails. Empty uses the mail account's own address.
+    mail-from: ${COMMERCIAL_ONBOARDING_MAIL_FROM:}
+    # Which staff role may do what. The role arrives in the X-Actor-Role header, compared without case.
+    roles:
+      review: [FINANCE, OPERATIONS, ADMIN]
+      return-for-correction: [FINANCE, OPERATIONS, ADMIN]
+      approve: [FINANCE, ADMIN]
+      reject: [FINANCE, OPERATIONS, ADMIN]
+      reopen: [ADMIN]
+    drive:
+      # Documents are stored in a Google Drive folder through a service account. Share the folder with the
+      # service account's email as Editor. Give the key as a file path (preferred) or as the JSON itself.
+      enabled: ${COMMERCIAL_DRIVE_ENABLED:false}
+      service-account-json-path: ${COMMERCIAL_DRIVE_SERVICE_ACCOUNT_PATH:}
+      service-account-json: ${COMMERCIAL_DRIVE_SERVICE_ACCOUNT_JSON:}
+      folder-id: ${COMMERCIAL_DRIVE_FOLDER_ID:}
+      http-timeout-seconds: 30
   recovery-interval-ms: 30000
   expiry-interval-ms: 60000
   # Fee rules per method. Unset methods use the built in placeholder rates,

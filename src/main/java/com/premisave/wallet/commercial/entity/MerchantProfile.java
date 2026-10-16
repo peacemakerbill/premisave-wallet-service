@@ -23,6 +23,10 @@ public class MerchantProfile {
     @Indexed(unique = true)
     private String developerAccountId;
 
+    /** PRM- followed by ten digits, counted up from 1. Unset only for merchants created before numbers existed. */
+    @Indexed(unique = true, sparse = true)
+    private String merchantNumber;
+
     private String businessName;
     private String displayName;
     private String country;
@@ -53,6 +57,8 @@ public class MerchantProfile {
     public void setMerchantId(String v) { this.merchantId = v; }
     public String getDeveloperAccountId() { return developerAccountId; }
     public void setDeveloperAccountId(String v) { this.developerAccountId = v; }
+    public String getMerchantNumber() { return merchantNumber; }
+    public void setMerchantNumber(String v) { this.merchantNumber = v; }
     public String getBusinessName() { return businessName; }
     public void setBusinessName(String v) { this.businessName = v; }
     public String getDisplayName() { return displayName; }

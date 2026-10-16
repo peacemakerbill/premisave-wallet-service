@@ -5,16 +5,15 @@ import com.premisave.wallet.commercial.dto.CreatePaymentRequest;
 import com.premisave.wallet.commercial.dto.CustomerInfo;
 import com.premisave.wallet.commercial.dto.MethodSpec;
 import com.premisave.wallet.commercial.entity.CommercialTransaction;
-import com.premisave.wallet.commercial.entity.MerchantApp;
 import com.premisave.wallet.commercial.entity.MerchantProfile;
-import com.premisave.wallet.commercial.enums.AppStatus;
 import com.premisave.wallet.commercial.enums.Environment;
 import com.premisave.wallet.commercial.enums.ErrorCode;
 import com.premisave.wallet.commercial.enums.MerchantStatus;
 import com.premisave.wallet.commercial.exception.CommercialException;
-import com.premisave.wallet.commercial.repository.MerchantAppRepository;
 import com.premisave.wallet.commercial.repository.MerchantProfileRepository;
+import com.premisave.wallet.commercial.security.AppContext;
 import com.premisave.wallet.commercial.security.CommercialContext;
+import com.premisave.wallet.commercial.service.AppSnapshotService;
 import com.premisave.wallet.commercial.service.CommercialPaymentService;
 import com.premisave.wallet.commercial.service.CommercialTransactionStore;
 import com.premisave.wallet.commercial.util.Hashing;
@@ -66,7 +65,7 @@ public class BillingEngine {
     private final CustomerPaymentMethodRepository methods;
     private final BillingCustomerRepository customers;
     private final MerchantProfileRepository merchants;
-    private final MerchantAppRepository apps;
+    private final AppSnapshotService apps;
     private final BillingEvents events;
     private final MongoTemplate mongo;
     private final CommercialBillingProperties props;
@@ -75,7 +74,7 @@ public class BillingEngine {
                          SubscriptionTransitions transitions, CommercialPaymentService payments,
                          CommercialTransactionStore txStore, CustomerPaymentMethodRepository methods,
                          BillingCustomerRepository customers, MerchantProfileRepository merchants,
-                         MerchantAppRepository apps, BillingEvents events, MongoTemplate mongo,
+                         AppSnapshotService apps, BillingEvents events, MongoTemplate mongo,
                          CommercialBillingProperties props) {
         this.subs = subs;
         this.invoices = invoices;
@@ -330,10 +329,10 @@ public class BillingEngine {
     /** The caller context to bill as, or empty when the merchant or app is not active in that environment. */
     public Optional<CommercialContext> contextFor(Subscription s) {
         MerchantProfile merchant = merchants.findById(s.getMerchantId()).orElse(null);
-        MerchantApp app = s.getAppId() == null ? null : apps.findById(s.getAppId()).orElse(null);
+        AppContext app = apps.find(s.getAppId()).orElse(null);
         if (merchant == null || app == null) return Optional.empty();
         Environment env = s.isLivemode() ? Environment.LIVE : Environment.SANDBOX;
-        if (merchant.statusFor(env) != MerchantStatus.ACTIVE || app.getStatus() != AppStatus.ACTIVE) return Optional.empty();
+        if (merchant.statusFor(env) != MerchantStatus.ACTIVE || !app.active()) return Optional.empty();
         return Optional.of(new CommercialContext(env, merchant, app, Ids.requestId()));
     }
 

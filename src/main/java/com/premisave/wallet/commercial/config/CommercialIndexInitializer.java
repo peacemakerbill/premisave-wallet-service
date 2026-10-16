@@ -11,6 +11,7 @@ import org.springframework.data.mongodb.core.index.IndexDefinition;
 import org.springframework.data.mongodb.core.index.IndexOperations;
 import org.springframework.data.mongodb.core.index.IndexResolver;
 import org.springframework.data.mongodb.core.index.MongoPersistentEntityIndexResolver;
+import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.MongoPersistentEntity;
 import org.springframework.data.mongodb.core.mapping.MongoPersistentProperty;
 import org.springframework.stereotype.Component;
@@ -23,7 +24,7 @@ import org.springframework.stereotype.Component;
  * is true, and this project does not set it, so without this class those
  * unique indexes would silently not exist.
  *
- * Only documents in the commercial package are touched; the rest of the wallet
+ * Only documents (classes annotated with @Document) in the commercial package are touched; the rest of the wallet
  * service keeps whatever index handling it has today. A failure on one document
  * (for example duplicates already stored under a unique index) is logged and
  * does not stop the others or the service from starting. Creating an index that
@@ -51,6 +52,8 @@ public class CommercialIndexInitializer {
         for (MongoPersistentEntity<?> entity : mapping.getPersistentEntities()) {
             Class<?> type = entity.getType();
             if (!type.getName().startsWith(PACKAGE)) continue;
+            // Embedded value classes (results, limits, timeline entries) are mapped too but are not collections.
+            if (!type.isAnnotationPresent(Document.class)) continue;
             try {
                 IndexOperations ops = mongo.indexOps(type);
                 for (IndexDefinition definition : resolver.resolveIndexFor(type)) {

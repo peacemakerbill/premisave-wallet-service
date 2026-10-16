@@ -5,7 +5,6 @@ import com.premisave.wallet.commercial.entity.CommercialEvent;
 import com.premisave.wallet.commercial.entity.CommercialTransaction;
 import com.premisave.wallet.commercial.entity.LedgerLine;
 import com.premisave.wallet.commercial.entity.Limits;
-import com.premisave.wallet.commercial.entity.MerchantApp;
 import com.premisave.wallet.commercial.entity.MerchantProfile;
 import com.premisave.wallet.commercial.entity.MerchantWallet;
 import com.premisave.wallet.commercial.entity.Quote;
@@ -107,6 +106,7 @@ public final class Views {
     public static Map<String, Object> merchant(MerchantProfile p) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("merchantId", p.getMerchantId());
+        m.put("merchantNumber", p.getMerchantNumber());
         m.put("businessName", p.getBusinessName());
         m.put("displayName", p.getDisplayName());
         m.put("country", p.getCountry());
@@ -122,20 +122,6 @@ public final class Views {
                 "live", destinations(p.destinationsFor(Environment.LIVE))));
         m.put("createdAt", iso(p.getCreatedAt()));
         m.put("updatedAt", iso(p.getUpdatedAt()));
-        return m;
-    }
-
-    public static Map<String, Object> app(MerchantApp a) {
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("appId", a.getAppId());
-        m.put("merchantId", a.getMerchantId());
-        m.put("environment", a.getEnvironment().headerValue());
-        m.put("name", a.getName());
-        m.put("status", a.getStatus().name());
-        m.put("enabledMethods", a.getEnabledMethods() == null ? null : a.getEnabledMethods().stream().map(Enum::name).sorted().toList());
-        m.put("limits", a.getLimits() == null ? null : limits(a.getLimits()));
-        m.put("createdAt", iso(a.getCreatedAt()));
-        m.put("updatedAt", iso(a.getUpdatedAt()));
         return m;
     }
 

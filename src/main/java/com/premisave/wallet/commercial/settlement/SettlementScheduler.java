@@ -1,19 +1,18 @@
 package com.premisave.wallet.commercial.settlement;
 
 import com.premisave.wallet.commercial.entity.CommercialTransaction;
-import com.premisave.wallet.commercial.entity.MerchantApp;
 import com.premisave.wallet.commercial.entity.MerchantProfile;
 import com.premisave.wallet.commercial.entity.SettlementDestination;
-import com.premisave.wallet.commercial.enums.AppStatus;
 import com.premisave.wallet.commercial.enums.Direction;
 import com.premisave.wallet.commercial.enums.Environment;
 import com.premisave.wallet.commercial.enums.MerchantStatus;
 import com.premisave.wallet.commercial.enums.TxStatus;
 import com.premisave.wallet.commercial.enums.TxType;
 import com.premisave.wallet.commercial.exception.CommercialException;
-import com.premisave.wallet.commercial.repository.MerchantAppRepository;
 import com.premisave.wallet.commercial.repository.MerchantProfileRepository;
+import com.premisave.wallet.commercial.security.AppContext;
 import com.premisave.wallet.commercial.security.CommercialContext;
+import com.premisave.wallet.commercial.service.AppSnapshotService;
 import com.premisave.wallet.commercial.service.FeeService;
 import com.premisave.wallet.commercial.service.LedgerService;
 import com.premisave.wallet.commercial.util.Ids;
@@ -48,14 +47,14 @@ public class SettlementScheduler {
 
     private final SettlementScheduleRepository schedules;
     private final MerchantProfileRepository merchants;
-    private final MerchantAppRepository apps;
+    private final AppSnapshotService apps;
     private final LedgerService ledger;
     private final FeeService fees;
     private final SettlementService settlements;
     private final MongoTemplate mongo;
 
     public SettlementScheduler(SettlementScheduleRepository schedules, MerchantProfileRepository merchants,
-                               MerchantAppRepository apps, LedgerService ledger, FeeService fees,
+                               AppSnapshotService apps, LedgerService ledger, FeeService fees,
                                SettlementService settlements, MongoTemplate mongo) {
         this.schedules = schedules;
         this.merchants = merchants;
@@ -79,10 +78,10 @@ public class SettlementScheduler {
 
     void runOne(SettlementSchedule s) {
         Optional<MerchantProfile> merchant = merchants.findById(s.getMerchantId());
-        Optional<MerchantApp> app = s.getAppId() == null ? Optional.empty() : apps.findById(s.getAppId());
+        Optional<AppContext> app = apps.find(s.getAppId());
         if (merchant.isEmpty() || app.isEmpty()) return;
         Environment env = s.isLivemode() ? Environment.LIVE : Environment.SANDBOX;
-        if (merchant.get().statusFor(env) != MerchantStatus.ACTIVE || app.get().getStatus() != AppStatus.ACTIVE) return;
+        if (merchant.get().statusFor(env) != MerchantStatus.ACTIVE || !app.get().active()) return;
 
         SettlementDestination dest = merchant.get().destinationsFor(env).stream()
                 .filter(d -> d.getId().equals(s.getDestinationId())).findFirst().orElse(null);

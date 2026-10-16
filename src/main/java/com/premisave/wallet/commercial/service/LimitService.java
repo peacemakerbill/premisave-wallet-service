@@ -39,7 +39,7 @@ public class LimitService {
     }
 
     public void check(CommercialContext ctx, TxType type, long usdCents) {
-        Limits limits = Limits.stricter(ctx.merchant().limitsFor(ctx.environment()), ctx.app().getLimits());
+        Limits limits = Limits.stricter(ctx.merchant().limitsFor(ctx.environment()), ctx.app().limits());
         if (limits.isEmpty()) return;
 
         if (exceeds(usdCents, limits.getSingleTransactionUsd())) {

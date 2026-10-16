@@ -1,33 +1,33 @@
 package com.premisave.wallet.commercial.service;
 
+import com.premisave.wallet.commercial.config.CommercialOnboardingProperties;
 import com.premisave.wallet.commercial.config.CommercialProperties;
 import com.premisave.wallet.commercial.dto.ChangeStatusRequest;
-import com.premisave.wallet.commercial.dto.CreateAppRequest;
 import com.premisave.wallet.commercial.dto.CreateMerchantRequest;
 import com.premisave.wallet.commercial.dto.LimitsDto;
 import com.premisave.wallet.commercial.dto.SettlementDestinationDto;
-import com.premisave.wallet.commercial.dto.UpdateAppRequest;
 import com.premisave.wallet.commercial.dto.UpdateConfigRequest;
 import com.premisave.wallet.commercial.dto.Views;
 import com.premisave.wallet.commercial.entity.CommercialTransaction;
 import com.premisave.wallet.commercial.entity.Limits;
-import com.premisave.wallet.commercial.entity.MerchantApp;
 import com.premisave.wallet.commercial.entity.MerchantProfile;
 import com.premisave.wallet.commercial.entity.MerchantWallet;
 import com.premisave.wallet.commercial.entity.SettlementDestination;
-import com.premisave.wallet.commercial.enums.AppStatus;
 import com.premisave.wallet.commercial.enums.Environment;
 import com.premisave.wallet.commercial.enums.ErrorCode;
 import com.premisave.wallet.commercial.enums.MerchantStatus;
 import com.premisave.wallet.commercial.enums.MethodType;
 import com.premisave.wallet.commercial.enums.TxStatus;
 import com.premisave.wallet.commercial.exception.CommercialException;
-import com.premisave.wallet.commercial.repository.MerchantAppRepository;
+import com.premisave.wallet.commercial.onboarding.MerchantNumberService;
+import com.premisave.wallet.commercial.onboarding.MerchantNumbers;
+import com.premisave.wallet.commercial.onboarding.OnboardingApplication;
+import com.premisave.wallet.commercial.onboarding.OnboardingService;
+import com.premisave.wallet.commercial.onboarding.OnboardingStatus;
 import com.premisave.wallet.commercial.repository.MerchantProfileRepository;
+import com.premisave.wallet.commercial.repository.OnboardingApplicationRepository;
 import com.premisave.wallet.commercial.util.Ids;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -41,25 +41,32 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
-/** Merchant and app provisioning, driven by the developer service. */
+/** Merchant provisioning, driven by the developer service. Apps are owned by the developer service. */
 @Service("commercialMerchantService")
 public class MerchantService {
 
     private final CommercialProperties props;
     private final MerchantProfileRepository merchants;
-    private final MerchantAppRepository apps;
     private final LedgerService ledger;
     private final MongoTemplate mongo;
+    private final MerchantNumberService numbers;
+    private final CommercialOnboardingProperties onboardingProps;
+    private final OnboardingService onboarding;
+    private final OnboardingApplicationRepository applications;
 
     public MerchantService(CommercialProperties props, MerchantProfileRepository merchants,
-                           MerchantAppRepository apps, LedgerService ledger, MongoTemplate mongo) {
+                           LedgerService ledger, MongoTemplate mongo, MerchantNumberService numbers,
+                           CommercialOnboardingProperties onboardingProps, OnboardingService onboarding,
+                           OnboardingApplicationRepository applications) {
         this.props = props;
         this.merchants = merchants;
-        this.apps = apps;
         this.ledger = ledger;
         this.mongo = mongo;
+        this.numbers = numbers;
+        this.onboardingProps = onboardingProps;
+        this.onboarding = onboarding;
+        this.applications = applications;
     }
 
     public Map<String, Object> create(CreateMerchantRequest req) {
@@ -74,6 +81,7 @@ public class MerchantService {
         Instant now = Instant.now();
         MerchantProfile p = new MerchantProfile();
         p.setMerchantId(Ids.next("mer"));
+        p.setMerchantNumber(numbers.next());
         p.setDeveloperAccountId(req.developerAccountId());
         p.setBusinessName(req.businessName().trim());
         p.setDisplayName(req.displayName() == null || req.displayName().isBlank()
@@ -93,11 +101,33 @@ public class MerchantService {
         } catch (DuplicateKeyException raced) {
             throw duplicate(merchants.findByDeveloperAccountId(req.developerAccountId()).orElse(p));
         }
-        return Views.merchant(p);
+        Map<String, Object> view = Views.merchant(p);
+        if (onboardingProps.enabled()) {
+            OnboardingApplication application = onboarding.createFor(p);
+            view.put("onboarding", onboardingSummary(application));
+        }
+        return view;
     }
 
     public Map<String, Object> get(String merchantId) {
-        return Views.merchant(require(merchantId));
+        MerchantProfile p = require(merchantId);
+        Map<String, Object> view = Views.merchant(p);
+        applications.findByMerchantId(merchantId).ifPresent(a -> view.put("onboarding", onboardingSummary(a)));
+        return view;
+    }
+
+    public Map<String, Object> getByNumber(String merchantNumber) {
+        String n = MerchantNumbers.normalise(merchantNumber);
+        MerchantProfile p = merchants.findByMerchantNumber(n)
+                .orElseThrow(() -> new CommercialException(ErrorCode.MERCHANT_NOT_FOUND, "Merchant not found"));
+        return get(p.getMerchantId());
+    }
+
+    private static Map<String, Object> onboardingSummary(OnboardingApplication a) {
+        Map<String, Object> o = new LinkedHashMap<>();
+        o.put("applicationId", a.getApplicationId());
+        o.put("status", a.getStatus().name());
+        return o;
     }
 
     public Map<String, Object> changeStatus(String merchantId, ChangeStatusRequest req) {
@@ -111,6 +141,14 @@ public class MerchantService {
         }
         if (current == MerchantStatus.CLOSED) {
             throw CommercialException.invalidState("A closed merchant environment cannot be changed");
+        }
+        if (env == Environment.LIVE && target == MerchantStatus.ACTIVE && current == MerchantStatus.PENDING_APPROVAL) {
+            applications.findByMerchantId(merchantId).ifPresent(a -> {
+                if (a.getStatus() != OnboardingStatus.APPROVED) {
+                    throw CommercialException.invalidState(
+                            "Production is switched on by approving the onboarding application, which is " + a.getStatus().name().toLowerCase(Locale.ROOT));
+                }
+            });
         }
         if (target != MerchantStatus.ACTIVE && (req.reason() == null || req.reason().isBlank())) {
             throw CommercialException.validation("reason", "is required when suspending or closing");
@@ -167,64 +205,11 @@ public class MerchantService {
         return Views.merchant(merchants.save(p));
     }
 
-    public Map<String, Object> createApp(String merchantId, CreateAppRequest req) {
-        MerchantProfile p = require(merchantId);
-        Environment env = parseEnvironment("environment", req.environment());
-        MerchantStatus status = p.statusFor(env);
-        if (env == Environment.LIVE && status == MerchantStatus.PENDING_APPROVAL) {
-            throw new CommercialException(ErrorCode.LIVE_NOT_ENABLED, "Production access has not been approved for this merchant");
-        }
-        if (status != MerchantStatus.ACTIVE) {
-            throw new CommercialException(ErrorCode.MERCHANT_SUSPENDED, "The merchant is " + status.name().toLowerCase(Locale.ROOT) + " in this environment");
-        }
-        if (apps.existsById(req.appId())) {
-            throw new CommercialException(ErrorCode.DUPLICATE_REQUEST, "An app with this id is already registered");
-        }
-
-        MerchantApp a = new MerchantApp();
-        a.setAppId(req.appId());
-        a.setMerchantId(merchantId);
-        a.setEnvironment(env);
-        a.setName(req.name().trim());
-        a.setEnabledMethods(narrowedMethods(p, env, req.enabledMethods()));
-        a.setLimits(narrowedLimits(p, env, req.limits()));
-        Instant now = Instant.now();
-        a.setCreatedAt(now);
-        a.setUpdatedAt(now);
-        try {
-            apps.insert(a);
-        } catch (DuplicateKeyException raced) {
-            throw new CommercialException(ErrorCode.DUPLICATE_REQUEST, "An app with this id is already registered");
-        }
-        return Views.app(a);
-    }
-
-    public Page<MerchantApp> listApps(String merchantId, String environment, AppStatus status, Pageable pageable) {
-        require(merchantId);
-        Environment env = environment == null || environment.isBlank() ? null : parseEnvironment("environment", environment);
-        if (env != null && status != null) return apps.findByMerchantIdAndEnvironmentAndStatus(merchantId, env, status, pageable);
-        if (env != null) return apps.findByMerchantIdAndEnvironment(merchantId, env, pageable);
-        if (status != null) return apps.findByMerchantIdAndStatus(merchantId, status, pageable);
-        return apps.findByMerchantId(merchantId, pageable);
-    }
-
-    public Map<String, Object> updateApp(String merchantId, String appId, UpdateAppRequest req) {
-        MerchantProfile p = require(merchantId);
-        MerchantApp a = apps.findById(appId).filter(x -> x.getMerchantId().equals(merchantId))
-                .orElseThrow(() -> new CommercialException(ErrorCode.APP_NOT_FOUND, "App not found"));
-        if (req.name() != null && !req.name().isBlank()) a.setName(req.name().trim());
-        if (req.status() != null) a.setStatus(req.status());
-        if (req.enabledMethods() != null) a.setEnabledMethods(narrowedMethods(p, a.getEnvironment(), req.enabledMethods()));
-        if (req.limits() != null) a.setLimits(narrowedLimits(p, a.getEnvironment(), req.limits()));
-        a.setUpdatedAt(Instant.now());
-        return Views.app(apps.save(a));
-    }
-
     // Helpers
 
     private MerchantProfile require(String merchantId) {
-        return merchants.findById(merchantId)
-                .orElseThrow(() -> new CommercialException(ErrorCode.MERCHANT_NOT_FOUND, "Merchant not found"));
+        return numbers.ensure(merchants.findById(merchantId)
+                .orElseThrow(() -> new CommercialException(ErrorCode.MERCHANT_NOT_FOUND, "Merchant not found")));
     }
 
     private static CommercialException duplicate(MerchantProfile existing) {
@@ -241,24 +226,6 @@ public class MerchantService {
             if (byHeader.isPresent()) return byHeader.get();
         }
         throw CommercialException.validation(field, "must be live, production or sandbox");
-    }
-
-    private static Set<MethodType> narrowedMethods(MerchantProfile p, Environment env, Set<MethodType> requested) {
-        if (requested == null) return null;
-        Set<MethodType> set = requested.isEmpty() ? EnumSet.noneOf(MethodType.class) : EnumSet.copyOf(requested);
-        if (env == Environment.LIVE && !p.getEnabledMethods().containsAll(set)) {
-            throw CommercialException.validation("enabledMethods", "an app cannot enable a method the merchant does not have");
-        }
-        return set;
-    }
-
-    private static Limits narrowedLimits(MerchantProfile p, Environment env, LimitsDto dto) {
-        if (dto == null) return null;
-        Limits l = toLimits(dto);
-        if (!l.fitsWithin(p.limitsFor(env))) {
-            throw CommercialException.validation("limits", "an app cannot exceed the merchant's limits");
-        }
-        return l;
     }
 
     private static Limits toLimits(LimitsDto dto) {
