@@ -30,6 +30,13 @@ public final class OnboardingRules {
         text(out, "contactName", f.getContactName());
         text(out, "contactEmail", f.getContactEmail());
         text(out, "contactPhone", f.getContactPhone());
+        text(out, "walletAccountNumber", f.getWalletAccountNumber());
+        if (f.isOnBehalf()) {
+            text(out, "applicantRole", f.getApplicantRole());
+            if (!hasUsable(docs, "AUTHORISATION_LETTER")) {
+                add(out, "document:AUTHORISATION_LETTER", "a signed letter from the business allowing you to apply for it is required");
+            }
+        }
         if (f.getExpectedMonthlyVolumeUsd() == null) add(out, "expectedMonthlyVolumeUsd", "is required");
 
         List<Director> directors = f.getDirectors() == null ? List.of() : f.getDirectors();

@@ -35,6 +35,8 @@ class OnboardingFlowTest {
     private final Map<String, byte[]> drive = new HashMap<>();
     private final List<String> toApplicant = new ArrayList<>();
     private final List<String> toStaff = new ArrayList<>();
+    /** Wallets by account number, true when frozen. */
+    private final Map<String, Boolean> walletStore = new HashMap<>();
 
     private final OnboardingService service;
     private final OnboardingReviewService review;
@@ -104,7 +106,11 @@ class OnboardingFlowTest {
                 return true;
             }
         };
-        service = new OnboardingService(applications, merchants, props, storage, timeline, notifier, new MerchantNumberService(null));
+        WalletDirectory wallets = account -> account == null || !walletStore.containsKey(account.toLowerCase())
+                ? Optional.empty()
+                : Optional.of(new WalletDirectory.WalletRef("wal_" + account.toLowerCase(), account.toLowerCase(),
+                        walletStore.get(account.toLowerCase())));
+        service = new OnboardingService(applications, merchants, props, storage, timeline, notifier, new MerchantNumberService(null), wallets);
         review = new OnboardingReviewService(applications, merchants, props, new RolePolicy(props), timeline, notifier, service);
 
         merchant = new MerchantProfile();
@@ -114,6 +120,9 @@ class OnboardingFlowTest {
         merchant.setCountry("KE");
         merchant.setContactEmail("owner@acme.test");
         merchantStore.put("mer_1", merchant);
+        walletStore.put("owner@acme.test", false);
+        walletStore.put("frozen@acme.test", true);
+        walletStore.put("someone@else.test", false);
         service.createFor(merchant);
     }
 
@@ -123,14 +132,18 @@ class OnboardingFlowTest {
     }
 
     private OnboardingApplication app() {
-        return applicationStore.values().iterator().next();
+        return app("mer_1");
+    }
+
+    private OnboardingApplication app(String merchantId) {
+        return applicationStore.values().stream().filter(a -> a.getMerchantId().equals(merchantId)).findFirst().orElseThrow();
     }
 
     private void fillForm() {
         service.saveForm("mer_1", new OnboardingFormRequest(BusinessType.LIMITED_COMPANY, null, null, "CPR/2020/1234",
                 "P051234567Z", null, "Nairobi", "Moi Avenue 12", "https://acme.test", "Retail", "Sells goods online",
                 25_000L, "Jane Doe", null, "254712345678",
-                List.of(new DirectorDto("Jane Doe", "12345678", "Director", 100))), OWNER);
+                List.of(new DirectorDto("Jane Doe", "12345678", "Director", 100)), "Owner@Acme.test", null, null), OWNER);
     }
 
     private String upload(String type) {
@@ -178,6 +191,53 @@ class OnboardingFlowTest {
         assertFalse(again.created(), "a second call returns the same application");
         assertEquals(first.application().get("applicationId"), again.application().get("applicationId"));
         assertEquals(ErrorCode.MERCHANT_NOT_FOUND, codeOf(() -> service.start("mer_missing")));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void theShortSummaryShowsWhatIsStillNeededAndWhenTheApplicationCanBeSent() {
+        Map<String, Object> draft = service.applicantSummary(app());
+        assertEquals("DRAFT", draft.get("status"));
+        assertEquals(false, draft.get("readyToSubmit"));
+        List<Map<String, String>> missing = (List<Map<String, String>>) draft.get("missing");
+        assertTrue(missing.stream().anyMatch(m -> "taxPin".equals(m.get("field"))));
+
+        fillForm();
+        upload("BUSINESS_REGISTRATION");
+        upload("TAX_COMPLIANCE");
+        Map<String, Object> ready = service.applicantSummary(app());
+        assertEquals(true, ready.get("readyToSubmit"));
+        assertTrue(((List<?>) ready.get("missing")).isEmpty());
+
+        service.submit("mer_1", null, OWNER);
+        Map<String, Object> sent = service.applicantSummary(app());
+        assertEquals("SUBMITTED", sent.get("status"));
+        assertEquals(false, sent.get("readyToSubmit"), "nothing more to send once it is with the reviewer");
+    }
+
+    @Test
+    void eachBusinessOfAnAccountHasItsOwnApplication() {
+        MerchantProfile second = new MerchantProfile();
+        second.setMerchantId("mer_2");
+        second.setMerchantNumber("PRM-0000000002");
+        second.setBusinessName("Acme Logistics Ltd");
+        second.setCountry("UG");
+        second.setContactEmail("owner@acme.test");
+        merchantStore.put("mer_2", second);
+        OnboardingApplication other = service.createFor(second);
+
+        service.saveForm("mer_2", new OnboardingFormRequest(BusinessType.PARTNERSHIP, null, null, "REG-2", "P0999",
+                null, "Kampala", null, null, null, null, null, null, null, null, null), OWNER);
+
+        assertEquals(2, applicationStore.size());
+        assertEquals("Acme Traders Ltd", app("mer_1").getForm().getRegisteredName());
+        assertEquals("Acme Logistics Ltd", other.getForm().getRegisteredName());
+        assertNull(app("mer_1").getForm().getTaxPin());
+        assertEquals("P0999", app("mer_2").getForm().getTaxPin());
+        assertEquals("UG", app("mer_2").getForm().getCountry());
+        readyAndSubmitted();
+        assertEquals(OnboardingStatus.SUBMITTED, app("mer_1").getStatus());
+        assertEquals(OnboardingStatus.DRAFT, app("mer_2").getStatus(), "submitting one does not submit the other");
     }
 
     @Test
@@ -396,5 +456,104 @@ class OnboardingFlowTest {
         review.startReview(id, FINANCE);
         review.startReview(id, FINANCE);
         assertEquals(ErrorCode.INVALID_STATE, codeOf(() -> review.startReview(id, OPS)));
+    }
+
+    private static OnboardingFormRequest walletOnly(String account) {
+        return new OnboardingFormRequest(null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, account, null, null);
+    }
+
+    @Test
+    void theFormLinksAnExistingWalletByItsAccountNumberInLowerCase() {
+        service.saveForm("mer_1", walletOnly(" Someone@Else.test "), OWNER);
+        assertEquals("someone@else.test", app().getForm().getWalletAccountNumber());
+        assertEquals("someone@else.test", app().getLinkedWalletAccount());
+        assertEquals("wal_someone@else.test", app().getLinkedWalletId());
+    }
+
+    @Test
+    void anUnknownOrFrozenWalletCannotBeLinked() {
+        assertEquals(ErrorCode.VALIDATION_FAILED, codeOf(() -> service.saveForm("mer_1", walletOnly("nobody@nowhere.test"), OWNER)));
+        assertEquals(ErrorCode.VALIDATION_FAILED, codeOf(() -> service.saveForm("mer_1", walletOnly("frozen@acme.test"), OWNER)));
+        assertNull(app().getLinkedWalletAccount());
+    }
+
+    @Test
+    void aBlankAccountNumberUnlinksTheWalletAndLeavingItOutKeepsIt() {
+        service.saveForm("mer_1", walletOnly("owner@acme.test"), OWNER);
+        service.saveForm("mer_1", walletOnly(null), OWNER);
+        assertEquals("owner@acme.test", app().getLinkedWalletAccount());
+        service.saveForm("mer_1", walletOnly(" "), OWNER);
+        assertNull(app().getLinkedWalletAccount());
+        assertNull(app().getForm().getWalletAccountNumber());
+    }
+
+    @Test
+    void theWalletToLinkIsRequiredToSubmit() {
+        fillForm();
+        upload("BUSINESS_REGISTRATION");
+        upload("TAX_COMPLIANCE");
+        service.saveForm("mer_1", walletOnly(" "), OWNER);
+        CommercialException e = assertThrows(CommercialException.class, () -> service.submit("mer_1", null, OWNER));
+        assertEquals(ErrorCode.APPLICATION_INCOMPLETE, e.code());
+        assertTrue(e.details().stream().anyMatch(m -> "walletAccountNumber".equals(m.get("field"))));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void applyingOnBehalfNeedsARoleAndAnAuthorisationLetter() {
+        fillForm();
+        upload("BUSINESS_REGISTRATION");
+        upload("TAX_COMPLIANCE");
+        assertTrue(((List<?>) service.applicantSummary(app()).get("missing")).isEmpty());
+
+        service.saveForm("mer_1", new OnboardingFormRequest(null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, true, null), OWNER);
+        List<Map<String, String>> missing = (List<Map<String, String>>) service.applicantSummary(app()).get("missing");
+        assertTrue(missing.stream().anyMatch(m -> "applicantRole".equals(m.get("field"))));
+        assertTrue(missing.stream().anyMatch(m -> "document:AUTHORISATION_LETTER".equals(m.get("field"))));
+
+        service.saveForm("mer_1", new OnboardingFormRequest(null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, " Accountant "), OWNER);
+        upload("AUTHORISATION_LETTER");
+        assertEquals("Accountant", app().getForm().getApplicantRole());
+        assertTrue(((List<?>) service.applicantSummary(app()).get("missing")).isEmpty());
+        assertEquals(true, service.applicantSummary(app()).get("readyToSubmit"));
+    }
+
+    @Test
+    void theSummaryCarriesTheWalletAndContactForTheDeveloperService() {
+        fillForm();
+        Map<String, Object> s = service.applicantSummary(app());
+        assertEquals("owner@acme.test", s.get("walletAccount"));
+        assertEquals("owner@acme.test", s.get("contactEmail"));
+    }
+
+    @Test
+    void theWalletOwnerIsToldWhenAnApplicationNamesTheirWalletAndOnlyWhenItIsNotTheApplicantsOwnAddress() {
+        fillForm();
+        upload("BUSINESS_REGISTRATION");
+        upload("TAX_COMPLIANCE");
+        service.submit("mer_1", null, OWNER);
+        assertEquals(1, toApplicant.size(), "the wallet is the contact's own address, so one email only");
+
+        MerchantProfile second = new MerchantProfile();
+        second.setMerchantId("mer_2");
+        second.setMerchantNumber("PRM-0000000002");
+        second.setBusinessName("Agency Client Ltd");
+        second.setCountry("KE");
+        second.setContactEmail("agent@agency.test");
+        merchantStore.put("mer_2", second);
+        service.createFor(second);
+        service.saveForm("mer_2", new OnboardingFormRequest(BusinessType.LIMITED_COMPANY, null, null, "REG-9", "P09",
+                null, "Nairobi", "Kenyatta Ave", null, "Retail", "Shop", 1000L, "Agent", null, "254700000000",
+                List.of(new DirectorDto("Client Owner", "999", "Director", 100)), "someone@else.test", true, "Agent"), OWNER);
+        service.uploadDocument("mer_2", "BUSINESS_REGISTRATION", "a.pdf", "application/pdf", PDF, OWNER);
+        service.uploadDocument("mer_2", "TAX_COMPLIANCE", "b.pdf", "application/pdf", PDF, OWNER);
+        service.uploadDocument("mer_2", "AUTHORISATION_LETTER", "c.pdf", "application/pdf", PDF, OWNER);
+        toApplicant.clear();
+        service.submit("mer_2", null, OWNER);
+        assertEquals(2, toApplicant.size());
+        assertTrue(toApplicant.stream().anyMatch(t -> t.startsWith("someone@else.test") && t.contains("wallet is named")));
     }
 }

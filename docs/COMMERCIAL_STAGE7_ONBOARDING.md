@@ -74,9 +74,16 @@ While an application exists and is not `APPROVED`, `PUT /merchants/{merchantId}/
 
 Business type, registered and trading name, registration number, tax PIN, country, city, address, website, industry, description, expected monthly volume in USD, contact name, email and phone, and one or more directors or owners (name, ID number, role, ownership percent; ownership may not total more than 100). Everything is optional while drafting and checked on submit.
 
+Three more fields link the application to a Premisave wallet and say who is applying:
+
+* `walletAccountNumber` is the wallet account (the owner's email address) that the business is linked to. It is required to submit. The wallet must exist and not be frozen (`400 VALIDATION_FAILED`, field `walletAccountNumber`). It is stored on the application as `linkedWalletId` and `linkedWalletAccount` (lower case, indexed), and an empty value while drafting removes the link.
+* `onBehalf` is true when a developer applies for a business that is not their own, and `applicantRole` (up to 80 characters) says who they are to the business. With `onBehalf` the role and an `AUTHORISATION_LETTER` document are required to submit.
+
+When an application that names a wallet is first submitted, the owner of that wallet is emailed that their wallet is named on a merchant application (who applied, and on whose behalf), without the merchant number, which is shown only after approval.
+
 ### Documents
 
-* Types: `BUSINESS_REGISTRATION`, `CERTIFICATE_OF_INCORPORATION`, `TAX_COMPLIANCE`, `DIRECTOR_ID`, `PROOF_OF_ADDRESS`, `BANK_STATEMENT`, `OTHER`. The ones that must be present are `commercial.onboarding.required-documents` (default registration, tax compliance and director ID).
+* Types: `BUSINESS_REGISTRATION`, `CERTIFICATE_OF_INCORPORATION`, `TAX_COMPLIANCE`, `DIRECTOR_ID`, `PROOF_OF_ADDRESS`, `BANK_STATEMENT`, `AUTHORISATION_LETTER`, `OTHER`. The ones that must be present are `commercial.onboarding.required-documents` (default registration, tax compliance and director ID).
 * PDF, JPEG or PNG only. The first bytes of the file must match the claimed type, so a renamed web page or executable is refused. Default limit 5 MB per file (hard ceiling 8 MB) and 20 files per application.
 * The file is sent as base64 inside the JSON body of `POST .../application/documents`. This keeps the existing request signing working (the signature covers the body) and avoids multipart handling. The request filter allows 12 MB for that one route and 1 MB for every other, so no `spring.servlet.multipart` setting is needed.
 * The bytes are stored in Google Drive; the application keeps the Drive file id, a view link, the SHA-256, the size and the review verdict. File names are cleaned (no paths, only letters, digits, dot, dash and underscore) and the Drive name is `PRM-number_TYPE_documentId_filename`.
@@ -118,6 +125,18 @@ commercial:
 ```
 
 These defaults are a suggestion, not a rule of yours: finance verifies the numbers and approves, operations checks the business and can return or reject but not approve, admins can do everything and alone reopen. Change them to match how the teams work. A role that may not do a step gets `403 ROLE_NOT_PERMITTED`; missing headers get `401 UNAUTHENTICATED`. The reviewer who starts a review is recorded on the application. Starting a review that someone else already holds returns `409 INVALID_STATE`, but this is not a lock: any other staff member whose role allows the step can still add notes, mark documents, return, approve or reject it.
+
+### The wallet owner's view
+
+The owner of the wallet named on the form can follow the application from the wallet, with their login token (`Authentication`, not the internal key). Only applications whose `linkedWalletAccount` equals the signed in account's email are visible, and anything else is `404 APPLICATION_NOT_FOUND`. The owner only reads.
+
+| Call | Shows |
+|:-|:-|
+| `GET /wallet/merchant-applications` | Every application that names the wallet, newest first: business name, status, a four step progress line (`FILL_IN`, `SUBMITTED`, `IN_REVIEW`, `DECISION`) with a plain sentence, whether it was applied for on behalf, and the merchant number only once approved |
+| `GET /wallet/merchant-applications/{applicationId}` | The same, plus who applied, the form (tax pin masked to its last 3 characters, director ID numbers left out), documents with their verdicts, the items the officials sent back, the decision, and the timeline without the email events |
+| `GET /wallet/merchant-numbers` | The merchant numbers of approved applications: number, business name, country, approval date, application id and the production status |
+
+The merchant number is generated when the merchant is created, but it is hidden from the owner until the officials (finance, operations or an admin, per the roles above) approve the application.
 
 ### Return for correction
 

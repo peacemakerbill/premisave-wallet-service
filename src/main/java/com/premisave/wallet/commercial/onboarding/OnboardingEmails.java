@@ -18,6 +18,17 @@ public final class OnboardingEmails {
                         "We will email you as soon as there is an update."));
     }
 
+    /** Sent to the owner of the wallet named on an application, so they know it exists and where to follow it. */
+    public static Email walletOwnerNotice(String businessName, boolean onBehalf, String applicantRole) {
+        String lead = onBehalf
+                ? "Your Premisave wallet was named on a merchant application made on behalf of a business"
+                  + (blank(applicantRole) ? "." : " by its " + applicantRole + ".")
+                : "Your Premisave wallet was named on a merchant application.";
+        return new Email("Your wallet is named on a merchant application - Premisave",
+                page("A merchant application names your wallet", lead, businessName, "Shown here once the application is approved",
+                        List.of(), "You can follow its progress in the Premisave app. If you do not recognise it, contact support."));
+    }
+
     public static Email reviewStarted(String businessName, String merchantNumber) {
         return new Email("Your merchant application is being reviewed - Premisave",
                 page("Review started", "A member of our team has started reviewing your application.",

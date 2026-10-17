@@ -1,16 +1,15 @@
 package com.premisave.wallet.commercial.onboarding;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import com.premisave.wallet.commercial.dto.Views;
+import com.premisave.wallet.commercial.entity.MerchantProfile;
+import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
-import org.junit.jupiter.api.Test;
-
-import com.premisave.wallet.commercial.dto.Views;
-import com.premisave.wallet.commercial.entity.MerchantProfile;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class OnboardingViewsTest {
 

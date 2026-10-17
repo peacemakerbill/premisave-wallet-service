@@ -23,6 +23,12 @@ public class BusinessForm {
     private String contactName;
     private String contactEmail;
     private String contactPhone;
+    /** The Premisave wallet account (its owner's email) this business is linked to. Its owner can follow the application. */
+    private String walletAccountNumber;
+    /** True when the applicant is applying for a business that is not their own, for example an agent or accountant. */
+    private boolean onBehalf;
+    /** What the applicant is to the business when applying on its behalf, for example Accountant. */
+    private String applicantRole;
     private List<Director> directors = new ArrayList<>();
 
     public BusinessForm() {}
@@ -57,6 +63,12 @@ public class BusinessForm {
     public void setContactEmail(String v) { this.contactEmail = v; }
     public String getContactPhone() { return contactPhone; }
     public void setContactPhone(String v) { this.contactPhone = v; }
+    public String getWalletAccountNumber() { return walletAccountNumber; }
+    public void setWalletAccountNumber(String v) { this.walletAccountNumber = v; }
+    public boolean isOnBehalf() { return onBehalf; }
+    public void setOnBehalf(boolean v) { this.onBehalf = v; }
+    public String getApplicantRole() { return applicantRole; }
+    public void setApplicantRole(String v) { this.applicantRole = v; }
     public List<Director> getDirectors() { return directors; }
     public void setDirectors(List<Director> v) { this.directors = v; }
 }

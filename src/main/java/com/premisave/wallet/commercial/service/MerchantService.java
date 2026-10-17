@@ -69,10 +69,17 @@ public class MerchantService {
         this.applications = applications;
     }
 
+    /**
+     * Adds a business to a developer account. An account can have many, but the same business (same name and country,
+     * ignoring case and punctuation) cannot be added twice: that is answered with DUPLICATE_REQUEST and the merchant it
+     * already is, which also makes a retry after a lost reply safe.
+     */
     public Map<String, Object> create(CreateMerchantRequest req) {
-        merchants.findByDeveloperAccountId(req.developerAccountId()).ifPresent(existing -> {
-            throw duplicate(existing);
-        });
+        String key = BusinessKeys.of(req.businessName(), req.country());
+        BusinessKeys.findSame(merchants.findByDeveloperAccountIdOrderByCreatedAtAsc(req.developerAccountId()), key)
+                .ifPresent(existing -> {
+                    throw duplicate(existing);
+                });
         String currency = req.defaultCurrency() == null ? "USD" : req.defaultCurrency().toUpperCase(Locale.ROOT);
         if (!props.supportsCurrency(currency)) {
             throw CommercialException.validation("defaultCurrency", currency + " is not supported");
@@ -83,6 +90,7 @@ public class MerchantService {
         p.setMerchantId(Ids.next("mer"));
         p.setMerchantNumber(numbers.next());
         p.setDeveloperAccountId(req.developerAccountId());
+        p.setApplicationKey(key);
         p.setBusinessName(req.businessName().trim());
         p.setDisplayName(req.displayName() == null || req.displayName().isBlank()
                 ? req.businessName().trim().toUpperCase(Locale.ROOT) : req.displayName().trim());
@@ -99,20 +107,38 @@ public class MerchantService {
         try {
             merchants.insert(p);
         } catch (DuplicateKeyException raced) {
-            throw duplicate(merchants.findByDeveloperAccountId(req.developerAccountId()).orElse(p));
+            // Either two requests for the same business raced, or the database still has the old one-merchant-per-account
+            // index on developerAccountId (see the migration note in DEVELOPER_SERVICE_SPLIT.md).
+            throw BusinessKeys.findSame(merchants.findByDeveloperAccountIdOrderByCreatedAtAsc(req.developerAccountId()), key)
+                    .map(MerchantService::duplicate)
+                    .orElseThrow(() -> raced);
         }
         Map<String, Object> view = Views.merchant(p);
         if (onboardingProps.enabled()) {
             OnboardingApplication application = onboarding.createFor(p);
-            view.put("onboarding", onboardingSummary(application));
+            view.put("onboarding", onboarding.applicantSummary(application));
         }
         return view;
     }
 
+    /** Every business of a developer account, oldest first, each with where its onboarding application stands. */
+    public Map<String, Object> listForDeveloper(String developerAccountId) {
+        List<Map<String, Object>> businesses = new ArrayList<>();
+        for (MerchantProfile p : merchants.findByDeveloperAccountIdOrderByCreatedAtAsc(developerAccountId)) {
+            businesses.add(withOnboarding(numbers.ensure(p)));
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("businesses", businesses);
+        return out;
+    }
+
     public Map<String, Object> get(String merchantId) {
-        MerchantProfile p = require(merchantId);
+        return withOnboarding(require(merchantId));
+    }
+
+    private Map<String, Object> withOnboarding(MerchantProfile p) {
         Map<String, Object> view = Views.merchant(p);
-        applications.findByMerchantId(merchantId).ifPresent(a -> view.put("onboarding", onboardingSummary(a)));
+        applications.findByMerchantId(p.getMerchantId()).ifPresent(a -> view.put("onboarding", onboarding.applicantSummary(a)));
         return view;
     }
 
@@ -121,13 +147,6 @@ public class MerchantService {
         MerchantProfile p = merchants.findByMerchantNumber(n)
                 .orElseThrow(() -> new CommercialException(ErrorCode.MERCHANT_NOT_FOUND, "Merchant not found"));
         return get(p.getMerchantId());
-    }
-
-    private static Map<String, Object> onboardingSummary(OnboardingApplication a) {
-        Map<String, Object> o = new LinkedHashMap<>();
-        o.put("applicationId", a.getApplicationId());
-        o.put("status", a.getStatus().name());
-        return o;
     }
 
     public Map<String, Object> changeStatus(String merchantId, ChangeStatusRequest req) {
@@ -213,7 +232,7 @@ public class MerchantService {
     }
 
     private static CommercialException duplicate(MerchantProfile existing) {
-        return new CommercialException(ErrorCode.DUPLICATE_REQUEST, "A merchant already exists for this developer account")
+        return new CommercialException(ErrorCode.DUPLICATE_REQUEST, "This developer account already has this business")
                 .with("merchantId", existing.getMerchantId());
     }
 

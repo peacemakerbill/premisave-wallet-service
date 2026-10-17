@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -31,6 +32,12 @@ public class CommercialMerchantController {
     @PostMapping
     public ResponseEntity<ApiResponse<Map<String, Object>>> create(@Valid @RequestBody CreateMerchantRequest req) {
         return Responses.created("Merchant created", merchants.create(req));
+    }
+
+    /** Every business of one developer account, with the state of each onboarding application. */
+    @GetMapping
+    public ResponseEntity<ApiResponse<Map<String, Object>>> list(@RequestParam String developerAccountId) {
+        return Responses.ok("Merchants retrieved", merchants.listForDeveloper(developerAccountId));
     }
 
     @GetMapping("/by-number/{merchantNumber}")

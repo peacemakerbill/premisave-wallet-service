@@ -34,10 +34,12 @@ public class OnboardingService {
     private final OnboardingTimeline timeline;
     private final OnboardingNotifier notifier;
     private final MerchantNumberService numbers;
+    private final WalletDirectory wallets;
 
     public OnboardingService(OnboardingApplicationRepository applications, MerchantProfileRepository merchants,
                              CommercialOnboardingProperties props, DocumentStorage storage,
-                             OnboardingTimeline timeline, OnboardingNotifier notifier, MerchantNumberService numbers) {
+                             OnboardingTimeline timeline, OnboardingNotifier notifier, MerchantNumberService numbers,
+                             WalletDirectory wallets) {
         this.applications = applications;
         this.merchants = merchants;
         this.props = props;
@@ -45,6 +47,7 @@ public class OnboardingService {
         this.timeline = timeline;
         this.notifier = notifier;
         this.numbers = numbers;
+        this.wallets = wallets;
     }
 
     /** Called when a merchant is created: the application starts as a draft with what is already known. */
@@ -87,6 +90,23 @@ public class OnboardingService {
         return new Started(true, OnboardingViews.application(a, false, props.requiredDocuments(), missingFor(a)));
     }
 
+    /**
+     * The short form of an application used in a merchant view: where it stands, whether it can be submitted now, and
+     * what is still missing. Lets a business list show what each business needs without opening every application.
+     */
+    public Map<String, Object> applicantSummary(OnboardingApplication a) {
+        List<Map<String, String>> missing = missingFor(a);
+        Map<String, Object> o = new java.util.LinkedHashMap<>();
+        o.put("applicationId", a.getApplicationId());
+        o.put("status", a.getStatus().name());
+        o.put("readyToSubmit", missing.isEmpty() && a.getStatus().editable());
+        o.put("missing", missing);
+        o.put("walletAccount", a.getLinkedWalletAccount());
+        String contact = a.getForm().getContactEmail();
+        o.put("contactEmail", contact == null || contact.isBlank() ? null : contact);
+        return o;
+    }
+
     public Map<String, Object> get(String merchantId) {
         OnboardingApplication a = forMerchant(merchantId);
         return OnboardingViews.application(a, false, props.requiredDocuments(), missingFor(a));
@@ -110,6 +130,9 @@ public class OnboardingService {
         if (req.contactName() != null) f.setContactName(clean(req.contactName()));
         if (req.contactEmail() != null) f.setContactEmail(req.contactEmail().trim());
         if (req.contactPhone() != null) f.setContactPhone(clean(req.contactPhone()));
+        if (req.walletAccountNumber() != null) linkWallet(a, req.walletAccountNumber());
+        if (req.onBehalf() != null) f.setOnBehalf(req.onBehalf());
+        if (req.applicantRole() != null) f.setApplicantRole(clean(req.applicantRole()));
         if (req.directors() != null) {
             List<Director> directors = new ArrayList<>();
             for (DirectorDto d : req.directors()) {
@@ -252,6 +275,11 @@ public class OnboardingService {
         String name = a.getForm().getRegisteredName();
         notifier.toApplicant(a, recipient(a), OnboardingEmails.received(name, a.getMerchantNumber(), resubmission));
         notifier.toStaff(a, OnboardingEmails.staffAlert(name, a.getMerchantNumber(), resubmission));
+        String owner = a.getLinkedWalletAccount();
+        if (!resubmission && owner != null && !owner.equalsIgnoreCase(recipient(a))) {
+            notifier.toApplicant(a, owner, OnboardingEmails.walletOwnerNotice(name, a.getForm().isOnBehalf(),
+                    a.getForm().getApplicantRole()));
+        }
         return OnboardingViews.application(a, false, props.requiredDocuments(), List.of());
     }
 
@@ -276,6 +304,26 @@ public class OnboardingService {
 
     List<Map<String, String>> missingFor(OnboardingApplication a) {
         return OnboardingRules.missing(a.getForm(), a.getDocuments(), props.requiredDocuments());
+    }
+
+    /** Links the wallet named on the form, or clears the link when the account number is blank. */
+    private void linkWallet(OnboardingApplication a, String accountNumber) {
+        BusinessForm f = a.getForm();
+        if (accountNumber.isBlank()) {
+            f.setWalletAccountNumber(null);
+            a.setLinkedWalletId(null);
+            a.setLinkedWalletAccount(null);
+            return;
+        }
+        WalletDirectory.WalletRef ref = wallets.find(accountNumber.trim()).orElseThrow(() -> CommercialException.validation(
+                "walletAccountNumber", "no Premisave wallet has that account number"));
+        if (ref.frozen()) {
+            throw CommercialException.validation("walletAccountNumber", "that wallet is frozen and cannot be linked");
+        }
+        String account = ref.accountNumber().trim().toLowerCase(Locale.ROOT);
+        f.setWalletAccountNumber(account);
+        a.setLinkedWalletId(ref.walletId());
+        a.setLinkedWalletAccount(account);
     }
 
     private OnboardingApplication editable(OnboardingApplication a) {

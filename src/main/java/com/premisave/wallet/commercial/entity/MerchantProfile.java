@@ -4,6 +4,7 @@ import com.premisave.wallet.commercial.enums.Environment;
 import com.premisave.wallet.commercial.enums.MerchantStatus;
 import com.premisave.wallet.commercial.enums.MethodType;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -13,15 +14,23 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 
-/** A business using the commercial API. One profile covers both environments; each has its own status and wallet. */
+/**
+ * A business using the commercial API. One profile covers both environments; each has its own status and wallet. A
+ * developer account can own many of these, one for each business it applies for. The compound index stops the same
+ * business being added twice to one account.
+ */
 @Document(collection = "merchant_profiles")
+@CompoundIndex(name = "developer_business_key", def = "{'developerAccountId': 1, 'applicationKey': 1}", unique = true, sparse = true)
 public class MerchantProfile {
 
     @Id
     private String merchantId;
 
-    @Indexed(unique = true)
+    @Indexed
     private String developerAccountId;
+
+    /** See BusinessKeys. Unset only for merchants created before many businesses per account were allowed. */
+    private String applicationKey;
 
     /** PRM- followed by ten digits, counted up from 1. Unset only for merchants created before numbers existed. */
     @Indexed(unique = true, sparse = true)
@@ -57,6 +66,8 @@ public class MerchantProfile {
     public void setMerchantId(String v) { this.merchantId = v; }
     public String getDeveloperAccountId() { return developerAccountId; }
     public void setDeveloperAccountId(String v) { this.developerAccountId = v; }
+    public String getApplicationKey() { return applicationKey; }
+    public void setApplicationKey(String v) { this.applicationKey = v; }
     public String getMerchantNumber() { return merchantNumber; }
     public void setMerchantNumber(String v) { this.merchantNumber = v; }
     public String getBusinessName() { return businessName; }

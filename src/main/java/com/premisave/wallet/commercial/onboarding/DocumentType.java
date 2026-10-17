@@ -7,5 +7,7 @@ public enum DocumentType {
     DIRECTOR_ID,
     PROOF_OF_ADDRESS,
     BANK_STATEMENT,
+    /** Written permission from the business, needed when someone applies on its behalf. */
+    AUTHORISATION_LETTER,
     OTHER
 }

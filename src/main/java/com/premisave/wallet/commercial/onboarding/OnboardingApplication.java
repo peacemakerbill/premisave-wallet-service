@@ -19,6 +19,11 @@ public class OnboardingApplication {
     @Indexed
     private OnboardingStatus status = OnboardingStatus.DRAFT;
     private BusinessForm form = new BusinessForm();
+    /** The wallet named on the form, resolved when the form was saved. */
+    private String linkedWalletId;
+    /** Its account number in lower case. The wallet owner finds the application by this. */
+    @Indexed
+    private String linkedWalletAccount;
     private List<OnboardingDocument> documents = new ArrayList<>();
     private List<ReturnItem> returnItems = new ArrayList<>();
     /** How many times the applicant has submitted. */
@@ -48,6 +53,10 @@ public class OnboardingApplication {
     public void setStatus(OnboardingStatus v) { this.status = v; }
     public BusinessForm getForm() { return form; }
     public void setForm(BusinessForm v) { this.form = v; }
+    public String getLinkedWalletId() { return linkedWalletId; }
+    public void setLinkedWalletId(String v) { this.linkedWalletId = v; }
+    public String getLinkedWalletAccount() { return linkedWalletAccount; }
+    public void setLinkedWalletAccount(String v) { this.linkedWalletAccount = v; }
     public List<OnboardingDocument> getDocuments() { return documents; }
     public void setDocuments(List<OnboardingDocument> v) { this.documents = v; }
     public List<ReturnItem> getReturnItems() { return returnItems; }

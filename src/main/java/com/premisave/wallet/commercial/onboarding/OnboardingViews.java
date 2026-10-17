@@ -59,6 +59,8 @@ public final class OnboardingViews {
         m.put("status", a.getStatus().name());
         m.put("businessName", a.getForm().getRegisteredName());
         m.put("country", a.getForm().getCountry());
+        m.put("walletAccount", a.getLinkedWalletAccount());
+        m.put("onBehalf", a.getForm().isOnBehalf());
         m.put("documents", a.getDocuments().size());
         m.put("submissions", a.getSubmissions());
         m.put("reviewerName", a.getReviewerName());
@@ -84,6 +86,9 @@ public final class OnboardingViews {
         m.put("contactName", f.getContactName());
         m.put("contactEmail", f.getContactEmail());
         m.put("contactPhone", f.getContactPhone());
+        m.put("walletAccountNumber", f.getWalletAccountNumber());
+        m.put("onBehalf", f.isOnBehalf());
+        m.put("applicantRole", f.getApplicantRole());
         List<Map<String, Object>> directors = new ArrayList<>();
         for (Director d : f.getDirectors() == null ? List.<Director>of() : f.getDirectors()) {
             Map<String, Object> dm = new LinkedHashMap<>();

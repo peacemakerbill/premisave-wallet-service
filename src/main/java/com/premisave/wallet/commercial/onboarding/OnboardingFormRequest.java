@@ -29,5 +29,19 @@ public record OnboardingFormRequest(
         @Size(max = 120) String contactName,
         @Email @Size(max = 160) String contactEmail,
         @Size(max = 20) String contactPhone,
-        @Valid List<DirectorDto> directors) {
+        @Valid List<DirectorDto> directors,
+        @Email @Size(max = 160) String walletAccountNumber,
+        Boolean onBehalf,
+        @Size(max = 80) String applicantRole) {
+
+    /** The form as it was before the wallet link and on behalf fields, which leave those unchanged. */
+    public OnboardingFormRequest(BusinessType businessType, String registeredName, String tradingName,
+                                 String registrationNumber, String taxPin, String country, String city,
+                                 String physicalAddress, String website, String industry, String businessDescription,
+                                 Long expectedMonthlyVolumeUsd, String contactName, String contactEmail,
+                                 String contactPhone, List<DirectorDto> directors) {
+        this(businessType, registeredName, tradingName, registrationNumber, taxPin, country, city, physicalAddress,
+                website, industry, businessDescription, expectedMonthlyVolumeUsd, contactName, contactEmail, contactPhone,
+                directors, null, null, null);
+    }
 }

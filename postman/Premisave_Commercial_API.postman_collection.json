@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "191f7950-7efe-57b8-844e-f773a8e9276e",
     "name": "Premisave Commercial API (PSP)",
-    "description": "Premisave commercial API (payment service provider), called only by the Developer Service. This is the wallet side: merchants, onboarding, payments, payouts and the rest. Apps, API keys and the public /v1 entry are on the developer service (see its own collection).\n\nSetup: import the collection and one of the two environments. Set internal_api_key (internal.api-key on the server). Run 'Create merchant', then set app_id to any app id you like (the developer service normally supplies it) and run 'Store app settings' once. The app headers (X-App-Status, X-App-Version, and the optional X-App-Methods and X-App-Limits) are sent on every merchant scoped request in place of the developer service's app lookup; enable the two optional ones to narrow the app. Folders 17 and 18 walk a merchant onboarding application through submit, review, return, approve and reject; folder 18 needs actor_id, actor_role and actor_name. Ids from create and list calls are saved to collection variables automatically.\n\nSandbox or live: the environment sets base_env and app_environment together. Every merchant scoped request goes to base_env. A mismatch between the path and X-App-Environment returns ENVIRONMENT_MISMATCH.\n\nSigning: if the server has commercial.signing.enabled=true, set signing_secret and the collection pre-request script adds X-Timestamp and X-Signature.\n\nIdempotency: money moving POSTs send a fresh Idempotency-Key. To test a replay, copy the key from the request and pin it.\n\nLive rails return 422 METHOD_UNAVAILABLE until they are enabled in application.yml. Sandbox helpers (folder 14) work in the sandbox only.",
+    "description": "Premisave commercial API (payment service provider), called only by the Developer Service. This is the wallet side: merchants, onboarding, payments, payouts and the rest. Apps, API keys and the public /v1 entry are on the developer service (see its own collection).\n\nSetup: import the collection and one of the two environments. Set internal_api_key (internal.api-key on the server). Run 'Create merchant', then set app_id to any app id you like (the developer service normally supplies it) and run 'Store app settings' once. The app headers (X-App-Status, X-App-Version, and the optional X-App-Methods and X-App-Limits) are sent on every merchant scoped request in place of the developer service's app lookup; enable the two optional ones to narrow the app. Folder 16 also has the wallet owner's view of merchant applications linked to the wallet and of the approved merchant numbers. Folders 17 and 18 walk a merchant onboarding application through submit, review, return, approve and reject; folder 18 needs actor_id, actor_role and actor_name. Ids from create and list calls are saved to collection variables automatically.\n\nSandbox or live: the environment sets base_env and app_environment together. Every merchant scoped request goes to base_env. A mismatch between the path and X-App-Environment returns ENVIRONMENT_MISMATCH.\n\nSigning: if the server has commercial.signing.enabled=true, set signing_secret and the collection pre-request script adds X-Timestamp and X-Signature.\n\nIdempotency: money moving POSTs send a fresh Idempotency-Key. To test a replay, copy the key from the request and pin it.\n\nLive rails return 422 METHOD_UNAVAILABLE until they are enabled in application.yml. Sandbox helpers (folder 14) work in the sandbox only.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -49,7 +49,7 @@
                 }
               }
             },
-            "description": "Also creates the merchant number (PRM- and ten digits, counted from 1) and a draft onboarding application."
+            "description": "Also creates the merchant number (PRM- and ten digits, counted from 1) and a draft onboarding application. One developer account can have many merchants; the same business name and country twice for one account is 409 DUPLICATE_REQUEST with the existing merchantId."
           },
           "response": [],
           "event": [
@@ -67,6 +67,43 @@
               }
             }
           ]
+        },
+        {
+          "name": "List merchants of a developer",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{internal_api_key}}"
+              },
+              {
+                "key": "X-Request-Id",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_provisioning}}/merchants?developerAccountId=dev_5521",
+              "host": [
+                "{{base_provisioning}}"
+              ],
+              "path": [
+                "merchants"
+              ],
+              "query": [
+                {
+                  "key": "developerAccountId",
+                  "value": "dev_5521"
+                }
+              ]
+            },
+            "description": "Every merchant of one developer account, oldest first, with each onboarding summary."
+          },
+          "response": []
         },
         {
           "name": "Get merchant",
@@ -8587,7 +8624,7 @@
       ]
     },
     {
-      "name": "16 Wallet owner (Premisave wallet consent; user login token, not the internal key)",
+      "name": "16 Wallet owner (Premisave wallet: consent, merchant applications and numbers; user login token, not the internal key)",
       "item": [
         {
           "name": "List consent requests and standing approvals",
@@ -8715,6 +8752,106 @@
                 "revoke"
               ]
             }
+          },
+          "response": []
+        },
+        {
+          "name": "List merchant applications linked to my wallet",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wallet_user_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url_wallet}}/wallet/merchant-applications",
+              "host": [
+                "{{base_url_wallet}}"
+              ],
+              "path": [
+                "wallet",
+                "merchant-applications"
+              ]
+            },
+            "description": "Every merchant application that names this wallet account on its form, whoever filled it in (a developer can apply on behalf of a business). Each has a progress line (FILL_IN, SUBMITTED, IN_REVIEW, DECISION), the business name and the status. The merchant number is not shown until the application is approved."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let body = {};",
+                  "try { body = pm.response.json(); } catch (e) {}",
+                  "const d = body.data || {};",
+                  "let v = (function () { return (d.applications && d.applications[0] && d.applications[0].applicationId); })();",
+                  "if (v) { pm.collectionVariables.set('application_id', String(v)); console.log('application_id = ' + v); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get merchant application (progress and details)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wallet_user_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url_wallet}}/wallet/merchant-applications/{{application_id}}",
+              "host": [
+                "{{base_url_wallet}}"
+              ],
+              "path": [
+                "wallet",
+                "merchant-applications",
+                "{{application_id}}"
+              ]
+            },
+            "description": "Everything about one application: progress, who applied (and whether on behalf of the business), the form with the tax pin masked and director ID numbers left out, documents, the items the officials sent back, the decision, and the timeline. Internal email events are left out. 404 APPLICATION_NOT_FOUND for an application that does not name this wallet."
+          },
+          "response": []
+        },
+        {
+          "name": "My merchant numbers (approved)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wallet_user_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url_wallet}}/wallet/merchant-numbers",
+              "host": [
+                "{{base_url_wallet}}"
+              ],
+              "path": [
+                "wallet",
+                "merchant-numbers"
+              ]
+            },
+            "description": "The PRM merchant numbers of the businesses linked to this wallet whose application was approved by the officials, with the business name, country, approval date and whether production is on."
           },
           "response": []
         }
@@ -8859,14 +8996,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"businessType\": \"LIMITED_COMPANY\",\n  \"registeredName\": \"Acme Traders Ltd\",\n  \"tradingName\": \"Acme\",\n  \"registrationNumber\": \"CPR/2020/1234\",\n  \"taxPin\": \"P051234567Z\",\n  \"country\": \"KE\",\n  \"city\": \"Nairobi\",\n  \"physicalAddress\": \"Moi Avenue 12\",\n  \"website\": \"https://acme.example.com\",\n  \"industry\": \"Retail\",\n  \"businessDescription\": \"Sells household goods online\",\n  \"expectedMonthlyVolumeUsd\": 25000,\n  \"contactName\": \"Jane Doe\",\n  \"contactEmail\": \"finance@acme.example.com\",\n  \"contactPhone\": \"254712345678\",\n  \"directors\": [\n    {\n      \"fullName\": \"Jane Doe\",\n      \"idNumber\": \"12345678\",\n      \"role\": \"Director\",\n      \"ownershipPercent\": 100\n    }\n  ]\n}",
+              "raw": "{\n  \"businessType\": \"LIMITED_COMPANY\",\n  \"registeredName\": \"Acme Traders Ltd\",\n  \"tradingName\": \"Acme\",\n  \"registrationNumber\": \"CPR/2020/1234\",\n  \"taxPin\": \"P051234567Z\",\n  \"country\": \"KE\",\n  \"city\": \"Nairobi\",\n  \"physicalAddress\": \"Moi Avenue 12\",\n  \"website\": \"https://acme.example.com\",\n  \"industry\": \"Retail\",\n  \"businessDescription\": \"Sells household goods online\",\n  \"expectedMonthlyVolumeUsd\": 25000,\n  \"contactName\": \"Jane Doe\",\n  \"contactEmail\": \"finance@acme.example.com\",\n  \"contactPhone\": \"254712345678\",\n  \"walletAccountNumber\": \"{{wallet_account}}\",\n  \"onBehalf\": false,\n  \"directors\": [\n    {\n      \"fullName\": \"Jane Doe\",\n      \"idNumber\": \"12345678\",\n      \"role\": \"Director\",\n      \"ownershipPercent\": 100\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Every field is optional while drafting. Only DRAFT and RETURNED applications can be changed."
+            "description": "walletAccountNumber is required to submit. It is the Premisave wallet account (the owner's email) this business is linked to; the owner follows the application and later sees the merchant number from that wallet. 422 if no wallet has that number or it is frozen. If a developer applies for someone else's business, set onBehalf to true, give applicantRole, and upload an AUTHORISATION_LETTER document."
           },
           "response": []
         },
@@ -9033,6 +9170,57 @@
                 }
               }
             }
+          },
+          "response": []
+        },
+        {
+          "name": "Upload document (authorisation letter)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{internal_api_key}}"
+              },
+              {
+                "key": "X-Request-Id",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "X-Actor-Id",
+                "value": "owner-1"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_provisioning}}/merchants/{{merchant_id}}/application/documents",
+              "host": [
+                "{{base_provisioning}}"
+              ],
+              "path": [
+                "merchants",
+                "{{merchant_id}}",
+                "application",
+                "documents"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"AUTHORISATION_LETTER\",\n  \"fileName\": \"authorisation-letter.pdf\",\n  \"contentType\": \"application/pdf\",\n  \"contentBase64\": \"JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZy9QYWdlcyAyIDAgUj4+ZW5kb2JqCjIgMCBvYmo8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PmVuZG9iagozIDAgb2JqPDwvVHlwZS9QYWdlL1BhcmVudCAyIDAgUi9NZWRpYUJveFswIDAgMjAwIDIwMF0+PmVuZG9iagp0cmFpbGVyPDwvUm9vdCAxIDAgUj4+CiUlRU9GCg==\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Needed when the form says onBehalf is true."
           },
           "response": []
         },

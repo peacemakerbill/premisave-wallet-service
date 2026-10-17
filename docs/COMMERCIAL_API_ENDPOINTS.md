@@ -711,7 +711,7 @@ Base: `{{base_provisioning}}` (not environment scoped). Called by the developer 
 
 `POST /merchants`
 
-Creates the merchant and provisions its two wallets (sandbox active immediately, live in `PENDING_APPROVAL` until activated by 3.3). Natural key is `developerAccountId`, so a repeated call for the same account returns `409 DUPLICATE_REQUEST` with the existing `merchantId` in `data`.
+Creates the merchant and provisions its two wallets (sandbox active immediately, live in `PENDING_APPROVAL` until activated by 3.3). A developer account can have many merchants. The natural key is `developerAccountId` plus the business name and country, compared in lower case with only letters and digits kept (`Acme Ltd.` and `acme ltd` in `KE` are the same business). A repeated call for the same business returns `409 DUPLICATE_REQUEST` with the existing `merchantId` in `data`; a different name or country makes another merchant.
 
 Request:
 
@@ -730,7 +730,7 @@ Request:
 
 | Field | Type | Required | Notes |
 |:-|:-|:-|:-|
-| `developerAccountId` | string | yes | Developer service account id |
+| `developerAccountId` | string | yes | Developer service account id. The wallet keeps no list of developers: staff find the id with `GET /internal/admin/developers?q=<email, name, username or company>` on the developer service (X-API-Key), which returns `developerId`, `email`, `fullName`, `status` and more for each match |
 | `businessName` | string | yes | Legal name |
 | `displayName` | string | no | Name shown to customers and used for name-check matching. Defaults to uppercased `businessName` |
 | `country` | string | yes | ISO 3166-1 alpha-2 |
@@ -760,6 +760,12 @@ Response `201`:
 ```
 
 Errors: `400 VALIDATION_FAILED`, `401 UNAUTHENTICATED`, `409 DUPLICATE_REQUEST`.
+
+#### List a developer's merchants
+
+`GET /merchants?developerAccountId=dev_5521`
+
+Every merchant of the account, oldest first, each in the shape of 3.2 with its onboarding summary (`applicationId`, `status`, `readyToSubmit`, `missing`). The developer service uses it to list an account's businesses and to link one it lost track of. Response `200`: `{ "businesses": [ ... ] }`, empty when the account has none. The migration for an existing database is in `DEVELOPER_SERVICE_SPLIT.md` section 8.
 
 ### 3.2 Get merchant
 
@@ -2396,10 +2402,15 @@ Rows 81 to 100 are the Stage 7 provisioning calls (row 80 is retired):
 | 98 | POST | `/onboarding/applications/{applicationId}/reject` | 15.4 |
 | 99 | POST | `/onboarding/applications/{applicationId}/reopen` | 15.4 |
 | 100 | POST | `/merchants/{merchantId}/application` | 15.3 |
+| 101 | GET | `/wallet/merchant-applications` (wallet owner login token) | 15.5 |
+| 102 | GET | `/wallet/merchant-applications/{applicationId}` (wallet owner login token) | 15.5 |
+| 103 | GET | `/wallet/merchant-numbers` (wallet owner login token) | 15.5 |
 
 Counting: 6 provisioning calls (rows 1 to 6), 65 operations (rows 8 to 72) available under both `/live` and `/sandbox` (130 routes), and 7 sandbox-only helpers, for 143 routes in total.
 
 With Stage 7 there are 20 more provisioning routes (rows 81 to 100; row 80 is retired), so 163 routes in total.
+
+The wallet owner view adds 3 more routes (rows 101 to 103). They are called with the owner's login token, not the internal key, so 166 routes in total.
 
 ## 15. Merchant onboarding and merchant numbers
 
@@ -2440,6 +2451,9 @@ Response `200`: a Merchant (2.1), with the `onboarding` block. Errors: `404 MERC
     "contactName": "Jane Doe",
     "contactEmail": "jane@acme.example",
     "contactPhone": "254712345678",
+    "walletAccountNumber": "owner@acme.example",
+    "onBehalf": false,
+    "applicantRole": null,
     "directors": [
       { "fullName": "Jane Doe", "idNumber": "12345678", "role": "Director", "ownershipPercent": 100 }
     ]
@@ -2479,7 +2493,9 @@ Response `200`: a Merchant (2.1), with the `onboarding` block. Errors: `404 MERC
 
 `status` is `DRAFT`, `SUBMITTED`, `IN_REVIEW`, `RETURNED`, `APPROVED` or `REJECTED`. The form and documents can be changed only in `DRAFT` and `RETURNED`. `missing` and `readyToSubmit` appear on applicant reads. `decision` appears once there is one: `{ "message", "decidedAt" }`, and staff reads add `decidedBy` and `decidedByRole`. Staff reads also add `reviewer` (`id`, `name`, `role`) and, on each document, `sha256`, `driveFileId`, `driveViewLink`, `verdictBy`, `verdictAt` and `uploadedBy`. A document `verdict` is `PENDING`, `ACCEPTED` or `REJECTED`.
 
-Business types: `SOLE_PROPRIETOR`, `PARTNERSHIP`, `LIMITED_COMPANY`, `NGO`, `OTHER`. Document types: `BUSINESS_REGISTRATION`, `CERTIFICATE_OF_INCORPORATION`, `TAX_COMPLIANCE`, `DIRECTOR_ID`, `PROOF_OF_ADDRESS`, `BANK_STATEMENT`, `OTHER`.
+Business types: `SOLE_PROPRIETOR`, `PARTNERSHIP`, `LIMITED_COMPANY`, `NGO`, `OTHER`. Document types: `BUSINESS_REGISTRATION`, `CERTIFICATE_OF_INCORPORATION`, `TAX_COMPLIANCE`, `DIRECTOR_ID`, `PROOF_OF_ADDRESS`, `BANK_STATEMENT`, `AUTHORISATION_LETTER`, `OTHER`.
+
+The merchant view's `onboarding` block (on `POST /merchants`, `GET /merchants`, `GET /merchants/{merchantId}` and `GET /merchants/by-number/{merchantNumber}`) is `{ applicationId, status, readyToSubmit, missing, walletAccount, contactEmail }`. `walletAccount` and `contactEmail` are for the developer service, which uses them to address transfer codes, and removes them before anything reaches a developer.
 
 ### 15.3 Applicant calls
 
@@ -2496,7 +2512,7 @@ Base: `/merchants/{merchantId}/application`. `X-Actor-Id` is optional and is onl
 | `POST /merchants/{merchantId}/application/submit` | Submit, or resubmit after a return |
 | `GET /merchants/{merchantId}/application/timeline` | Every step the applicant may see |
 
-**Save the form.** Body is the `form` object of 15.2. Every field is optional so a draft can be saved part way; a field left out keeps its value, and `directors`, when sent, replaces the whole list. `country` is a 2 letter code, `ownershipPercent` is 0 to 100 and the total across directors may not pass 100. Response `200`: the application. Errors: `400 VALIDATION_FAILED`, `404 APPLICATION_NOT_FOUND`, `409 INVALID_STATE` (not `DRAFT` or `RETURNED`).
+**Save the form.** Body is the `form` object of 15.2. Every field is optional so a draft can be saved part way; a field left out keeps its value, and `directors`, when sent, replaces the whole list. `country` is a 2 letter code, `ownershipPercent` is 0 to 100 and the total across directors may not pass 100. `walletAccountNumber` (an email) links the application to a Premisave wallet: it must exist and not be frozen, an empty value removes the link, and it is required to submit. `onBehalf` (true or false) and `applicantRole` (up to 80 characters) say that someone applies for a business that is not theirs. With `onBehalf` the role and an `AUTHORISATION_LETTER` document are required to submit. Response `200`: the application. Errors: `400 VALIDATION_FAILED`, `404 APPLICATION_NOT_FOUND`, `409 INVALID_STATE` (not `DRAFT` or `RETURNED`).
 
 **Upload a document.** The file travels as base64 inside the JSON body (this route accepts bodies up to 12 MB, other routes 1 MB).
 
@@ -2587,7 +2603,23 @@ A missing `X-Actor-Id` or `X-Actor-Role` returns `401 UNAUTHENTICATED`; a role t
 
 **Timeline.** Response `200`: `{ "events": [...] }` with, on each event, `actor` (`type`, `id`, `name`, `role`) and `visibleToApplicant`. Event types: `APPLICATION_CREATED`, `FORM_SAVED`, `DOCUMENT_UPLOADED`, `DOCUMENT_REMOVED`, `DOCUMENT_VERDICT`, `SUBMITTED`, `RESUBMITTED`, `REVIEW_STARTED`, `NOTE_ADDED`, `RETURNED`, `APPROVED`, `REJECTED`, `REOPENED`, `PRODUCTION_ENABLED`, `EMAIL_SENT`, `EMAIL_FAILED`.
 
-### 15.5 Related changes elsewhere
+### 15.5 Wallet owner calls
+
+Called from the Premisave app by the wallet owner, signed in with their login token (`Authorization: Bearer`), under `/wallet`. They show the owner the applications that name their wallet account on the form, whoever filled them in, and read only.
+
+| Call | Purpose |
+|:-|:-|
+| `GET /wallet/merchant-applications` | The applications that name this wallet, newest first |
+| `GET /wallet/merchant-applications/{applicationId}` | One application in full |
+| `GET /wallet/merchant-numbers` | The merchant numbers of the approved ones |
+
+**List.** Response `200`: `{ "applications": [ { "applicationId", "businessName", "country", "status", "progress", "appliedOnBehalf", "merchantNumber", "submittedAt", "decidedAt", "updatedAt" } ], "count" }`. `progress` is `{ "steps": [ { "code", "label", "state" } ], "currentStep", "summary" }`: the steps are `FILL_IN`, `SUBMITTED`, `IN_REVIEW` and `DECISION`, each `DONE`, `CURRENT` or `PENDING` (the decision step is `APPROVED` or `REJECTED` once decided), and `summary` is a sentence in plain words, for example that the application was sent back and the applicant has to fix it. `merchantNumber` is `null` until the application is `APPROVED`.
+
+**Get.** Response `200`: the list entry plus `applicant` (`name`, `onBehalf`, `role`), `form` (business details; the tax pin is masked to its last 3 characters and director ID numbers are left out), `documents` (`type`, `fileName`, `verdict`, `uploadedAt`), `returnItems` (`field`, `message`, `addressed`), `decision` (`message`, `decidedAt`, once there is one) and `timeline` (the steps the applicant may see, without the email events). Internal notes are never shown. Errors: `404 APPLICATION_NOT_FOUND` for an application that does not name this wallet.
+
+**Merchant numbers.** Response `200`: `{ "merchantNumbers": [ { "merchantNumber", "businessName", "country", "approvedAt", "applicationId", "productionStatus" } ], "count" }`, only approved applications.
+
+### 15.6 Related changes elsewhere
 
 * `PUT /merchants/{merchantId}/status` (3.3) cannot move the live environment from `PENDING_APPROVAL` to `ACTIVE` while the merchant has an application that is not `APPROVED`: `409 INVALID_STATE`. Merchants without an application (created before Stage 7, or with onboarding switched off) are unaffected.
 * `GET /merchants/{merchantId}` and `POST /merchants` return `onboarding: { applicationId, status }` when the merchant has an application.

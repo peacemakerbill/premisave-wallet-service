@@ -28,6 +28,7 @@ class OnboardingRulesTest {
         f.setContactName("Jane Doe");
         f.setContactEmail("jane@acme.test");
         f.setContactPhone("254712345678");
+        f.setWalletAccountNumber("jane@acme.test");
         f.setExpectedMonthlyVolumeUsd(25_000L);
         Director d = new Director();
         d.setFullName("Jane Doe");
@@ -61,7 +62,7 @@ class OnboardingRulesTest {
         List<String> fields = fields(OnboardingRules.missing(new BusinessForm(), List.of(), REQUIRED));
         for (String f : List.of("businessType", "registeredName", "registrationNumber", "taxPin", "country", "city",
                 "physicalAddress", "industry", "businessDescription", "contactName", "contactEmail", "contactPhone",
-                "expectedMonthlyVolumeUsd", "directors", "document:BUSINESS_REGISTRATION", "document:TAX_COMPLIANCE")) {
+                "expectedMonthlyVolumeUsd", "walletAccountNumber", "directors", "document:BUSINESS_REGISTRATION", "document:TAX_COMPLIANCE")) {
             assertTrue(fields.contains(f), f + " should be reported");
         }
     }
@@ -155,5 +156,32 @@ class OnboardingRulesTest {
         assertTrue(OnboardingStatus.DRAFT.editable() && OnboardingStatus.RETURNED.editable());
         assertFalse(OnboardingStatus.SUBMITTED.editable() || OnboardingStatus.IN_REVIEW.editable());
         assertTrue(OnboardingStatus.APPROVED.finished() && OnboardingStatus.REJECTED.finished());
+    }
+
+    @Test
+    void applyingOnBehalfNeedsARoleAndAnAuthorisationLetterThatWasNotRejected() {
+        BusinessForm f = completeForm();
+        f.setOnBehalf(true);
+        List<OnboardingDocument> docs = List.of(doc(DocumentType.BUSINESS_REGISTRATION, DocumentVerdict.PENDING),
+                doc(DocumentType.TAX_COMPLIANCE, DocumentVerdict.PENDING));
+        assertEquals(List.of("applicantRole", "document:AUTHORISATION_LETTER"), fields(OnboardingRules.missing(f, docs, REQUIRED)));
+
+        f.setApplicantRole("Accountant");
+        List<OnboardingDocument> withRejected = new ArrayList<>(docs);
+        withRejected.add(doc(DocumentType.AUTHORISATION_LETTER, DocumentVerdict.REJECTED));
+        assertEquals(List.of("document:AUTHORISATION_LETTER"), fields(OnboardingRules.missing(f, withRejected, REQUIRED)));
+
+        List<OnboardingDocument> withLetter = new ArrayList<>(docs);
+        withLetter.add(doc(DocumentType.AUTHORISATION_LETTER, DocumentVerdict.PENDING));
+        assertTrue(OnboardingRules.missing(f, withLetter, REQUIRED).isEmpty());
+    }
+
+    @Test
+    void anApplicantWhoIsNotApplyingOnBehalfNeedsNeitherRoleNorLetter() {
+        BusinessForm f = completeForm();
+        f.setOnBehalf(false);
+        List<OnboardingDocument> docs = List.of(doc(DocumentType.BUSINESS_REGISTRATION, DocumentVerdict.PENDING),
+                doc(DocumentType.TAX_COMPLIANCE, DocumentVerdict.PENDING));
+        assertTrue(OnboardingRules.missing(f, docs, REQUIRED).isEmpty());
     }
 }
