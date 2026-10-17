@@ -14,7 +14,6 @@ import com.premisave.wallet.commercial.util.Ids;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
@@ -62,7 +61,6 @@ public class WalletConsentService {
     private final RailResultSink sink;
     private final CommercialRailsProperties.Premisave props;
 
-    @Autowired
     public WalletConsentService(WalletConsentRepository consents, MongoTemplate mongo, CommercialTransactionStore store,
                                 PremisaveWalletDebit debit, PremisaveWalletCredit credit, MerchantProfileRepository merchants,
                                 @Lazy RailResultSink sink, CommercialRailsProperties props) {

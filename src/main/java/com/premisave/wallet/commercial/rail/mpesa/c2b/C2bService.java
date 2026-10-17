@@ -25,7 +25,6 @@ import com.premisave.wallet.commercial.util.Masking;
 import com.premisave.wallet.commercial.util.Money;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
@@ -72,7 +71,6 @@ public class C2bService {
     private final DeveloperServiceClient developer;
     private final JsonMapper json;
 
-    @Autowired
     public C2bService(CommercialC2bProperties props, AccountReferenceRepository references, C2bReceiptRepository receipts,
                       CommercialTransactionStore store, PricingService pricing, @Lazy RailResultSink sink,
                       CallbackRegistrationRepository registrations, DeveloperServiceClient developer, JsonMapper json) {
