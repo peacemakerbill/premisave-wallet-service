@@ -26,6 +26,7 @@ Status of this delivery: both services were compiled with `javac` against hand w
 | Merchant status, enabled methods, merchant limits | Wallet |
 | Payments, payouts, ledger, settlements, billing, refunds, disputes, subscriptions, rails | Wallet |
 | Premisave wallet lookup | Wallet (`GET /internal/commercial/v1/wallets/resolve`) |
+| Developer search for staff creating a merchant | Wallet (`GET /internal/commercial/v1/developers`), which asks the developer service (`GET /internal/admin/developers`) and returns its answer unchanged |
 
 The wallet is never called by merchants. Only the developer service calls it, with the internal key.
 
@@ -140,6 +141,8 @@ Developer service (`developer.*`):
 | database | `MONGODB_URI` | `mongodb://localhost:27017/premisave_developer` | A separate database from the wallet |
 
 Wallet: the `commercial.merchants` block is removed. Nothing is added. Keep `commercial.events.developer-service-url` (`DEVELOPER_SERVICE_URL`) empty for now (section 9).
+
+The developer search (`GET /internal/commercial/v1/developers`) uses the same two wallet settings as event delivery: `commercial.events.developer-service-url` (`DEVELOPER_SERVICE_URL`) and `commercial.events.api-key` (`DEVELOPER_SERVICE_API_KEY`, which must equal `DEVELOPER_INTERNAL_API_KEY` on the developer service). With `DEVELOPER_SERVICE_URL` empty, or the developer service offline, slow or refusing the key, the search answers `503 PROVIDER_UNAVAILABLE` with a message fit to show a person, and `GET /internal/commercial/v1/developers/status` reports the same state without failing. Setting it also switches on event forwarding, so set it only when the developer service accepts `/internal/events` (section 9).
 
 ## 8. Data migration
 

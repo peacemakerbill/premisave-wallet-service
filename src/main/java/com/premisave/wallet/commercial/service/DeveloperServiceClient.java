@@ -6,13 +6,18 @@ import com.premisave.wallet.commercial.util.Hashing;
 import com.premisave.wallet.commercial.util.Json;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
+import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.time.Duration;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -24,7 +29,9 @@ import java.util.regex.Pattern;
  * POST {base}/internal/callbacks/verify asks it to prove a merchant URL answers a challenge
  *                                       and reply {"verified": true}
  *
- * Both calls carry the internal API key; the event call is also signed.
+ * GET  {base}/internal/admin/developers searches developer accounts (used to find a developerId for a new merchant)
+ *
+ * Every call carries the internal API key; the event call is also signed.
  */
 @Component("commercialDeveloperServiceClient")
 public class DeveloperServiceClient {
@@ -37,11 +44,42 @@ public class DeveloperServiceClient {
     /** The merchant's answer to a validation callback. */
     public record ValidationReply(boolean accepted, String reason) {}
 
+    /**
+     * Whether the developer service can be used right now, and the sentence a person can be shown about it.
+     * The messages never carry a URL, a key or an exception text; those go to the log only.
+     */
+    public enum Reach {
+        ONLINE("The developer service is online."),
+        NOT_CONFIGURED("Developer search is not set up on this system yet. Please contact Premisave support."),
+        OFFLINE("The developer service is offline right now, so developers cannot be searched. Please try again in a few minutes."),
+        TIMEOUT("The developer service is taking too long to respond. Please try again in a moment."),
+        REJECTED("The developer service is online but did not accept this request. Please contact Premisave support."),
+        ERROR("The developer service is having trouble at the moment. Please try again shortly.");
+
+        private final String message;
+
+        Reach(String message) { this.message = message; }
+
+        public String message() { return message; }
+    }
+
+    /** What the developer service answered to a search: its HTTP status and JSON body (0 and null when it did not answer), and how reachable it was. */
+    public record SearchReply(int status, String body, Reach reach) {
+        static SearchReply failed(Reach reach) {
+            return new SearchReply(0, null, reach);
+        }
+    }
+
     private final CommercialProperties.Events config;
     private final HttpClient http;
 
+    @Autowired
     public DeveloperServiceClient(CommercialProperties props) {
-        this.config = props.events();
+        this(props.events());
+    }
+
+    public DeveloperServiceClient(CommercialProperties.Events config) {
+        this.config = config;
         this.http = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(config.httpTimeoutSeconds()))
                 .build();
@@ -49,6 +87,57 @@ public class DeveloperServiceClient {
 
     public boolean configured() {
         return config.configured();
+    }
+
+    /**
+     * Searches developer accounts on the developer service. Blank q and status are left out; page and size are sent
+     * only when set. The reply carries the developer service's own JSON, which is already the standard envelope, and
+     * says whether the service was online, offline, slow, refused the key or failed.
+     */
+    public SearchReply searchDevelopers(String q, String status, Integer page, Integer size) {
+        if (!configured()) return SearchReply.failed(Reach.NOT_CONFIGURED);
+        try {
+            StringBuilder url = new StringBuilder(base()).append("/internal/admin/developers");
+            String sep = "?";
+            if (q != null && !q.isBlank()) { url.append(sep).append("q=").append(encode(q.trim())); sep = "&"; }
+            if (status != null && !status.isBlank()) { url.append(sep).append("status=").append(encode(status.trim())); sep = "&"; }
+            if (page != null) { url.append(sep).append("page=").append(page); sep = "&"; }
+            if (size != null) { url.append(sep).append("size=").append(size); }
+            HttpRequest.Builder req = HttpRequest.newBuilder(URI.create(url.toString()))
+                    .timeout(Duration.ofSeconds(config.httpTimeoutSeconds()))
+                    .header("Accept", "application/json");
+            if (config.apiKey() != null && !config.apiKey().isBlank()) req.header("X-API-Key", config.apiKey());
+            HttpResponse<String> resp = http.send(req.GET().build(), HttpResponse.BodyHandlers.ofString());
+            int code = resp.statusCode();
+            boolean usable = code / 100 == 2 || code == 400;
+            Reach reach;
+            if (code == 401 || code == 403) reach = Reach.REJECTED;
+            else if (!usable || resp.body() == null || resp.body().isBlank()) reach = Reach.ERROR;
+            else reach = Reach.ONLINE;
+            if (reach != Reach.ONLINE) log.warn("Developer search answered {} ({})", code, reach);
+            return new SearchReply(code, resp.body(), reach);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return SearchReply.failed(Reach.ERROR);
+        } catch (HttpConnectTimeoutException e) {
+            log.warn("Developer service did not accept a connection in time: {}", e.toString());
+            return SearchReply.failed(Reach.OFFLINE);
+        } catch (HttpTimeoutException e) {
+            log.warn("Developer service did not answer in time: {}", e.toString());
+            return SearchReply.failed(Reach.TIMEOUT);
+        } catch (Exception e) {
+            log.warn("Developer service could not be reached: {}", e.toString());
+            return SearchReply.failed(Reach.OFFLINE);
+        }
+    }
+
+    /** A one row search that proves the service is up and accepts the key. */
+    public Reach check() {
+        return searchDevelopers(null, null, 0, 1).reach();
+    }
+
+    private static String encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     /** Sends an already serialised event body. Returns null on success, otherwise the reason it failed. */

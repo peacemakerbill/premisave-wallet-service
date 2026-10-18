@@ -2,13 +2,78 @@
   "info": {
     "_postman_id": "191f7950-7efe-57b8-844e-f773a8e9276e",
     "name": "Premisave Commercial API (PSP)",
-    "description": "Premisave commercial API (payment service provider), called only by the Developer Service. This is the wallet side: merchants, onboarding, payments, payouts and the rest. Apps, API keys and the public /v1 entry are on the developer service (see its own collection).\n\nSetup: import the collection and one of the two environments. Set internal_api_key (internal.api-key on the server). Run 'Create merchant', then set app_id to any app id you like (the developer service normally supplies it) and run 'Store app settings' once. The app headers (X-App-Status, X-App-Version, and the optional X-App-Methods and X-App-Limits) are sent on every merchant scoped request in place of the developer service's app lookup; enable the two optional ones to narrow the app. Folder 16 also has the wallet owner's view of merchant applications linked to the wallet and of the approved merchant numbers. Folders 17 and 18 walk a merchant onboarding application through submit, review, return, approve and reject; folder 18 needs actor_id, actor_role and actor_name. Ids from create and list calls are saved to collection variables automatically.\n\nSandbox or live: the environment sets base_env and app_environment together. Every merchant scoped request goes to base_env. A mismatch between the path and X-App-Environment returns ENVIRONMENT_MISMATCH.\n\nSigning: if the server has commercial.signing.enabled=true, set signing_secret and the collection pre-request script adds X-Timestamp and X-Signature.\n\nIdempotency: money moving POSTs send a fresh Idempotency-Key. To test a replay, copy the key from the request and pin it.\n\nLive rails return 422 METHOD_UNAVAILABLE until they are enabled in application.yml. Sandbox helpers (folder 14) work in the sandbox only.",
+    "description": "Premisave commercial API (payment service provider), called only by the Developer Service. This is the wallet side: merchants, onboarding, payments, payouts and the rest. Apps, API keys and the public /v1 entry are on the developer service (see its own collection).\n\nSetup: import the collection and one of the two environments. Set internal_api_key (internal.api-key on the server). To find the developerAccountId for a new merchant, set developer_internal_api_key (DEVELOPER_INTERNAL_API_KEY on the developer service) and run 'Find a developer'. Run 'Create merchant', then set app_id to any app id you like (the developer service normally supplies it) and run 'Store app settings' once. The app headers (X-App-Status, X-App-Version, and the optional X-App-Methods and X-App-Limits) are sent on every merchant scoped request in place of the developer service's app lookup; enable the two optional ones to narrow the app. Folder 16 also has the wallet owner's view of merchant applications linked to the wallet and of the approved merchant numbers. Folders 17 and 18 walk a merchant onboarding application through submit, review, return, approve and reject; folder 18 needs actor_id, actor_role and actor_name. Ids from create and list calls are saved to collection variables automatically.\n\nSandbox or live: the environment sets base_env and app_environment together. Every merchant scoped request goes to base_env. A mismatch between the path and X-App-Environment returns ENVIRONMENT_MISMATCH.\n\nSigning: if the server has commercial.signing.enabled=true, set signing_secret and the collection pre-request script adds X-Timestamp and X-Signature.\n\nIdempotency: money moving POSTs send a fresh Idempotency-Key. To test a replay, copy the key from the request and pin it.\n\nLive rails return 422 METHOD_UNAVAILABLE until they are enabled in application.yml. Sandbox helpers (folder 14) work in the sandbox only.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
     {
       "name": "00 Provisioning (provisioning headers, no merchant or app headers)",
       "item": [
+        {
+          "name": "Find a developer (developer service, to get developerAccountId)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{developer_internal_api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url_developer}}/internal/admin/developers?q=jane@",
+              "host": [
+                "{{base_url_developer}}"
+              ],
+              "path": [
+                "internal",
+                "admin",
+                "developers"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "jane@"
+                },
+                {
+                  "key": "status",
+                  "value": "ACTIVE",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "0",
+                  "disabled": true
+                },
+                {
+                  "key": "size",
+                  "value": "20",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "This is the developer service, not the wallet, which keeps no list of developers. q is matched anywhere in the email, username, full name or company name, or against the developer id exactly. The developerId of the first match is saved as developer_account_id, which Create merchant and List merchants of a developer then use."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let body = {};",
+                  "try { body = pm.response.json(); } catch (e) {}",
+                  "const d = body.data || {};",
+                  "let v = (function () { return d.content && d.content[0] && d.content[0].developerId; })();",
+                  "if (v) { pm.collectionVariables.set('developer_account_id', String(v)); console.log('developer_account_id = ' + v); }"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "Create merchant",
           "request": {
@@ -42,7 +107,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"developerAccountId\": \"dev_5521\",\n  \"businessName\": \"Acme Limited\",\n  \"displayName\": \"ACME LIMITED\",\n  \"country\": \"KE\",\n  \"contactEmail\": \"finance@acme.example.com\",\n  \"contactPhone\": \"254712345678\",\n  \"defaultCurrency\": \"USD\",\n  \"requestedMethods\": [\n    \"MOBILE_MONEY\",\n    \"CARD\"\n  ]\n}",
+              "raw": "{\n  \"developerAccountId\": \"{{developer_account_id}}\",\n  \"businessName\": \"Acme Limited\",\n  \"displayName\": \"ACME LIMITED\",\n  \"country\": \"KE\",\n  \"contactEmail\": \"finance@acme.example.com\",\n  \"contactPhone\": \"254712345678\",\n  \"defaultCurrency\": \"USD\",\n  \"requestedMethods\": [\n    \"MOBILE_MONEY\",\n    \"CARD\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -87,7 +152,7 @@
               }
             ],
             "url": {
-              "raw": "{{base_provisioning}}/merchants?developerAccountId=dev_5521",
+              "raw": "{{base_provisioning}}/merchants?developerAccountId={{developer_account_id}}",
               "host": [
                 "{{base_provisioning}}"
               ],
@@ -97,7 +162,7 @@
               "query": [
                 {
                   "key": "developerAccountId",
-                  "value": "dev_5521"
+                  "value": "{{developer_account_id}}"
                 }
               ]
             },
@@ -10182,6 +10247,21 @@
     {
       "key": "internal_api_key",
       "value": "",
+      "type": "string"
+    },
+    {
+      "key": "base_url_developer",
+      "value": "http://localhost:8091",
+      "type": "string"
+    },
+    {
+      "key": "developer_internal_api_key",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "developer_account_id",
+      "value": "dev_5521",
       "type": "string"
     },
     {
