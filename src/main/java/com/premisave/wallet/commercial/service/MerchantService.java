@@ -50,6 +50,7 @@ public class MerchantService {
     private final MerchantProfileRepository merchants;
     private final LedgerService ledger;
     private final MongoTemplate mongo;
+    /** Issues the merchant number, which a business gets when it is approved. */
     private final MerchantNumberService numbers;
     private final CommercialOnboardingProperties onboardingProps;
     private final OnboardingService onboarding;
@@ -88,7 +89,6 @@ public class MerchantService {
         Instant now = Instant.now();
         MerchantProfile p = new MerchantProfile();
         p.setMerchantId(Ids.next("mer"));
-        p.setMerchantNumber(numbers.next());
         p.setDeveloperAccountId(req.developerAccountId());
         p.setApplicationKey(key);
         p.setBusinessName(req.businessName().trim());
@@ -125,7 +125,7 @@ public class MerchantService {
     public Map<String, Object> listForDeveloper(String developerAccountId) {
         List<Map<String, Object>> businesses = new ArrayList<>();
         for (MerchantProfile p : merchants.findByDeveloperAccountIdOrderByCreatedAtAsc(developerAccountId)) {
-            businesses.add(withOnboarding(numbers.ensure(p)));
+            businesses.add(withOnboarding(numbers.issueIfLive(p)));
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("businesses", businesses);
@@ -198,6 +198,10 @@ public class MerchantService {
                 throw CommercialException.invalidState("There are " + subscriptions + " subscriptions still running; cancel them first");
             }
         }
+        if (env == Environment.LIVE && target == MerchantStatus.ACTIVE) {
+            // Switching production on by hand (no application to approve) is the other moment a number is issued.
+            p = numbers.issue(p);
+        }
         p.setStatusFor(env, target);
         p.setUpdatedAt(Instant.now());
         return Views.merchant(merchants.save(p));
@@ -227,7 +231,7 @@ public class MerchantService {
     // Helpers
 
     private MerchantProfile require(String merchantId) {
-        return numbers.ensure(merchants.findById(merchantId)
+        return numbers.issueIfLive(merchants.findById(merchantId)
                 .orElseThrow(() -> new CommercialException(ErrorCode.MERCHANT_NOT_FOUND, "Merchant not found")));
     }
 

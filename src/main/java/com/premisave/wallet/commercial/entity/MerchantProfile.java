@@ -32,7 +32,7 @@ public class MerchantProfile {
     /** See BusinessKeys. Unset only for merchants created before many businesses per account were allowed. */
     private String applicationKey;
 
-    /** PRM- followed by ten digits, counted up from 1. Unset only for merchants created before numbers existed. */
+    /** PRM- followed by ten digits, counted up from 1. Unset until the onboarding application is approved. */
     @Indexed(unique = true, sparse = true)
     private String merchantNumber;
 

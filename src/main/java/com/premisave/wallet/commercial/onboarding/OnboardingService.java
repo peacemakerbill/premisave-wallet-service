@@ -86,7 +86,7 @@ public class OnboardingService {
         }
         MerchantProfile p = merchants.findById(merchantId)
                 .orElseThrow(() -> new CommercialException(ErrorCode.MERCHANT_NOT_FOUND, "Merchant not found"));
-        OnboardingApplication a = createFor(numbers.ensure(p));
+        OnboardingApplication a = createFor(numbers.issueIfLive(p));
         return new Started(true, OnboardingViews.application(a, false, props.requiredDocuments(), missingFor(a)));
     }
 
@@ -175,7 +175,7 @@ public class OnboardingService {
 
         String documentId = Ids.next("doc");
         String safeName = OnboardingRules.safeFileName(fileName);
-        String storedName = a.getMerchantNumber() + "_" + type.name() + "_" + documentId + "_" + safeName;
+        String storedName = a.getApplicationId() + "_" + type.name() + "_" + documentId + "_" + safeName;
         DocumentStorage.StoredFile stored = storage.upload(storedName, ct, bytes);
 
         OnboardingDocument d = new OnboardingDocument();
@@ -273,8 +273,8 @@ public class OnboardingService {
                 OnboardingStatus.SUBMITTED, note == null ? (resubmission ? "Corrections submitted" : "Application submitted") : note, true);
 
         String name = a.getForm().getRegisteredName();
-        notifier.toApplicant(a, recipient(a), OnboardingEmails.received(name, a.getMerchantNumber(), resubmission));
-        notifier.toStaff(a, OnboardingEmails.staffAlert(name, a.getMerchantNumber(), resubmission));
+        notifier.toApplicant(a, recipient(a), OnboardingEmails.received(name, reference(a), resubmission));
+        notifier.toStaff(a, OnboardingEmails.staffAlert(name, reference(a), resubmission));
         String owner = a.getLinkedWalletAccount();
         if (!resubmission && owner != null && !owner.equalsIgnoreCase(recipient(a))) {
             notifier.toApplicant(a, owner, OnboardingEmails.walletOwnerNotice(name, a.getForm().isOnBehalf(),
@@ -300,6 +300,19 @@ public class OnboardingService {
         String email = a.getForm().getContactEmail();
         if (email != null && !email.isBlank()) return email;
         return merchants.findById(a.getMerchantId()).map(MerchantProfile::getContactEmail).orElse(null);
+    }
+
+    /**
+     * What an email calls the application: its merchant number once approved, its application id before that, because the
+     * number is only issued at approval.
+     */
+    static String reference(OnboardingApplication a) {
+        return a.getMerchantNumber() != null ? a.getMerchantNumber() : a.getApplicationId();
+    }
+
+    /** Issues the merchant number if the business has none yet. Called when an application is approved. */
+    MerchantProfile issueNumber(MerchantProfile merchant) {
+        return numbers.issue(merchant);
     }
 
     List<Map<String, String>> missingFor(OnboardingApplication a) {

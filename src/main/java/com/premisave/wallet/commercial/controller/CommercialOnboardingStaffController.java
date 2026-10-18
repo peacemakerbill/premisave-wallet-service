@@ -45,6 +45,7 @@ public class CommercialOnboardingStaffController {
     public ResponseEntity<ApiResponse<Map<String, Object>>> list(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String merchantNumber,
+            @RequestParam(required = false) String applicationId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size) {
         OnboardingStatus parsed = null;
@@ -56,7 +57,7 @@ public class CommercialOnboardingStaffController {
             }
         }
         return Responses.page("Applications retrieved",
-                review.list(parsed, merchantNumber, PageViews.pageable(page, size, null)), OnboardingViews::summary);
+                review.list(parsed, merchantNumber, applicationId, PageViews.pageable(page, size, null)), OnboardingViews::summary);
     }
 
     @GetMapping("/{applicationId}")

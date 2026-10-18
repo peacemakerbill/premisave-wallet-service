@@ -32,7 +32,7 @@ Built in Phase 2 so far: the live M-Pesa rail (STK push payments and B2C payouts
 
 Built in Phase 2, Stage 5: the live rails for Stripe cards, PayPal, Flutterwave (mobile money outside Kenya, bank and mobile money payouts), NOWPayments crypto collections and the Premisave wallet (collections by the wallet owner's consent, payouts as credits), with saved `CARD`, `PAYPAL` and `PREMISAVE_WALLET` methods for subscriptions. Stage 6: live account references paid to a paybill, and validation callbacks (11.13). Each live rail is off until its setting is enabled; see the Payment rails and Paybill account references sections of the README for what each does and its limits.
 
-Built in Phase 2, Stage 7: merchant numbers (`PRM-` and ten digits, counted from 1), and merchant onboarding with an application form, documents in a disk folder, review by finance, operations and admin staff, return for correction, approval and rejection, emails and a timeline (section 15, rows 80 to 100 of the index). See the Merchant numbers and onboarding section of the README.
+Built in Phase 2, Stage 7: merchant numbers (`PRM-` and ten digits, counted from 1, issued when the application is approved), and merchant onboarding with an application form, documents in a disk folder, review by finance, operations and admin staff, return for correction, approval and rejection, emails and a timeline (section 15, rows 80 to 100 of the index). See the Merchant numbers and onboarding section of the README.
 
 Changed after Stage 7, the developer service split: this service no longer manages apps. Apps (sandbox and production), API keys, test merchant numbers, the Premisave wallet link on production apps and the public `/v1` entry belong to the developer service (the Developer service split section of the README). It tells this service who is calling and what the app may do in the headers of section 1.2, and pushes app changes with 3.5. The calls `POST/GET/PUT /merchants/{merchantId}/apps` and `GET /merchants/test-numbers` were removed. Rows 5 to 7 and 80 of the index keep their numbers: rows 5 and 6 are now the app context push and the wallet lookup, rows 7 and 80 are retired.
 
@@ -225,7 +225,7 @@ Objects are defined once here and referenced by name in the endpoint sections.
 }
 ```
 
-`merchantNumber` is `PRM-` and ten digits, counted up from 1 (15.1). `onboarding` is present when the merchant has an onboarding application (section 15).
+`merchantNumber` is `PRM-` and ten digits, counted up from 1, and is `null` until the onboarding application is approved (15.1). `onboarding` is present when the merchant has an onboarding application (section 15).
 
 ### 2.2 App
 
@@ -2451,13 +2451,13 @@ Added in Stage 7. All calls here are provisioning calls (not environment scoped,
 
 ### 15.1 Merchant numbers
 
-Every merchant gets a number when it is created: `PRM-` followed by ten digits, counted up from 1 (`PRM-0000000001`, `PRM-0000000002` and so on). There is no randomness and a number is never reused. It is returned as `merchantNumber` on the Merchant (2.1) and on every App (2.2). Merchants created before Stage 7 receive their number the first time they are read or used, in the order they are first touched.
+A merchant gets its number when its onboarding application is approved: `PRM-` followed by ten digits, counted up from 1 (`PRM-0000000001`, `PRM-0000000002` and so on). There is no randomness and a number is never reused. Until then `merchantNumber` is `null` on the Merchant (2.1) and on the Application (15.2); the `applicationId` is the reference. After approval the number is on the Merchant, the Application, the approval email and every production App (2.2). Approval issues it once; repeating an approval after a failure reuses it. A business switched on by hand with `PUT /merchants/{merchantId}/status` (no application) gets its number then. A merchant that was already live before this rule and has no number gets one the first time it is read.
 
 A production app must carry the merchant's own number. A sandbox app carries one of the test merchant numbers (default `PRM-TEST-0001` to `PRM-TEST-0005`), which can never look like a real number. Both rules, and the list of test numbers (`GET /api/v1/meta/test-merchant-numbers`), now belong to the developer service.
 
 `GET /merchants/by-number/{merchantNumber}`
 
-Response `200`: a Merchant (2.1), with the `onboarding` block. Errors: `404 MERCHANT_NOT_FOUND`.
+Response `200`: a Merchant (2.1), with the `onboarding` block. Errors: `404 MERCHANT_NOT_FOUND`, which includes a business that has no number yet because it is not approved.
 
 ### 15.2 Application object
 
@@ -2604,7 +2604,7 @@ A missing `X-Actor-Id` or `X-Actor-Role` returns `401 UNAUTHENTICATED`; a role t
 | `POST /onboarding/applications/{applicationId}/reject` | reject (FINANCE, OPERATIONS, ADMIN) | `SUBMITTED`, `IN_REVIEW` | `REJECTED` |
 | `POST /onboarding/applications/{applicationId}/reopen` | reopen (ADMIN) | `REJECTED` | `IN_REVIEW` |
 
-**List.** Query parameters: `status`, `merchantNumber` (exact), `page`, `size`. Response `200`: paginated list (1.5) of summaries `{ applicationId, merchantId, merchantNumber, status, businessName, country, documents, submissions, reviewerName, submittedAt, updatedAt }`.
+**List.** Query parameters: `status`, `applicationId` (exact, the way to find an application that has no number yet), `merchantNumber` (exact, approved applications only), `page`, `size`. Response `200`: paginated list (1.5) of summaries `{ applicationId, merchantId, merchantNumber, status, businessName, country, documents, submissions, reviewerName, submittedAt, updatedAt }`.
 
 **Get.** Response `200`: the application with the staff additions of 15.2 and a `missing` list.
 
@@ -2628,13 +2628,13 @@ A missing `X-Actor-Id` or `X-Actor-Role` returns `401 UNAUTHENTICATED`; a role t
 
 `items` needs at least one entry. `field` is a form field name (including `directors[0].idNumber`) or `document:` followed by a document type. The applicant is emailed the message and every open item, and sees them in `returnItems`. Response `200`: the application. Errors: `400 VALIDATION_FAILED`, `409 INVALID_STATE`.
 
-**Approve.** Body `{ "message": "Welcome to Premisave" }` (optional). Refused with `422 APPLICATION_INCOMPLETE` while return items are still open, anything in `missing` remains, or a required document type has no `ACCEPTED` document. Refused with `409 INVALID_STATE` when production is suspended or closed for the merchant. Otherwise the live environment goes from `PENDING_APPROVAL` to `ACTIVE`, production apps can be created on the developer service and the applicant is emailed. Response `200`: the application.
+**Approve.** Body `{ "message": "Welcome to Premisave" }` (optional). Refused with `422 APPLICATION_INCOMPLETE` while return items are still open, anything in `missing` remains, or a required document type has no `ACCEPTED` document. Refused with `409 INVALID_STATE` when production is suspended or closed for the merchant. Otherwise the merchant number is issued (a business that already has one keeps it), the live environment goes from `PENDING_APPROVAL` to `ACTIVE`, production apps can be created on the developer service and the applicant is emailed, and the email carries the new number. The timeline records `MERCHANT_NUMBER_ISSUED`. Response `200`: the application.
 
 **Reject.** Body `{ "message": "Business type is not supported" }`; the reason is required, is shown to the applicant and is emailed. Response `200`: the application.
 
 **Reopen.** Body `{ "message": "Appeal accepted" }`, required. Moves the application back to `IN_REVIEW` with the caller as reviewer, clears the decision and emails the applicant. Response `200`: the application.
 
-**Timeline.** Response `200`: `{ "events": [...] }` with, on each event, `actor` (`type`, `id`, `name`, `role`) and `visibleToApplicant`. Event types: `APPLICATION_CREATED`, `FORM_SAVED`, `DOCUMENT_UPLOADED`, `DOCUMENT_REMOVED`, `DOCUMENT_VERDICT`, `SUBMITTED`, `RESUBMITTED`, `REVIEW_STARTED`, `NOTE_ADDED`, `RETURNED`, `APPROVED`, `REJECTED`, `REOPENED`, `PRODUCTION_ENABLED`, `EMAIL_SENT`, `EMAIL_FAILED`.
+**Timeline.** Response `200`: `{ "events": [...] }` with, on each event, `actor` (`type`, `id`, `name`, `role`) and `visibleToApplicant`. Event types: `APPLICATION_CREATED`, `FORM_SAVED`, `DOCUMENT_UPLOADED`, `DOCUMENT_REMOVED`, `DOCUMENT_VERDICT`, `SUBMITTED`, `RESUBMITTED`, `REVIEW_STARTED`, `NOTE_ADDED`, `RETURNED`, `APPROVED`, `REJECTED`, `REOPENED`, `MERCHANT_NUMBER_ISSUED`, `PRODUCTION_ENABLED`, `EMAIL_SENT`, `EMAIL_FAILED`.
 
 ### 15.5 Wallet owner calls
 

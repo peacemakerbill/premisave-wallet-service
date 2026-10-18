@@ -46,7 +46,17 @@ public class OnboardingReviewService {
         this.onboarding = onboarding;
     }
 
-    public Page<OnboardingApplication> list(OnboardingStatus status, String merchantNumber, Pageable pageable) {
+    /**
+     * The review queue. applicationId and merchantNumber each find one application exactly; the number exists only for
+     * approved applications, so an application still being worked on is found by its id.
+     */
+    public Page<OnboardingApplication> list(OnboardingStatus status, String merchantNumber, String applicationId, Pageable pageable) {
+        if (applicationId != null && !applicationId.isBlank()) {
+            var found = applications.findById(applicationId.trim());
+            List<OnboardingApplication> one = found.filter(a -> status == null || a.getStatus() == status)
+                    .map(List::of).orElse(List.of());
+            return new org.springframework.data.domain.PageImpl<>(one, pageable, one.size());
+        }
         if (merchantNumber != null && !merchantNumber.isBlank()) {
             var found = applications.findByMerchantNumber(MerchantNumbers.normalise(merchantNumber));
             List<OnboardingApplication> one = found.filter(a -> status == null || a.getStatus() == status)
@@ -81,7 +91,7 @@ public class OnboardingReviewService {
         applications.save(a);
         timeline.record(a, OnboardingEventType.REVIEW_STARTED, actor, from, OnboardingStatus.IN_REVIEW,
                 "Review started", true);
-        notifier.toApplicant(a, onboarding.recipient(a), OnboardingEmails.reviewStarted(name(a), a.getMerchantNumber()));
+        notifier.toApplicant(a, onboarding.recipient(a), OnboardingEmails.reviewStarted(name(a), OnboardingService.reference(a)));
         return get(applicationId);
     }
 
@@ -146,7 +156,7 @@ public class OnboardingReviewService {
                 req.message().trim() + " (" + req.items().size() + " item" + (req.items().size() == 1 ? "" : "s") + ")", true);
         List<ReturnItem> open = a.getReturnItems().stream().filter(i -> !i.isAddressed()).toList();
         notifier.toApplicant(a, onboarding.recipient(a),
-                OnboardingEmails.returned(name(a), a.getMerchantNumber(), req.message().trim(), open));
+                OnboardingEmails.returned(name(a), OnboardingService.reference(a), req.message().trim(), open));
         return get(applicationId);
     }
 
@@ -179,6 +189,13 @@ public class OnboardingReviewService {
                     + " for this merchant and cannot be switched on by an approval");
         }
 
+        // The merchant number is issued here and nowhere else. Issuing is repeat safe: a business that already has a number
+        // keeps it, so an approval repeated after a failure reuses it. It comes before the switch-on so the merchant is
+        // saved with its number.
+        m = onboarding.issueNumber(m);
+        boolean announceNumber = a.getMerchantNumber() == null;
+        a.setMerchantNumber(m.getMerchantNumber());
+
         // The merchant is switched on first, so if saving the application fails the approval can simply be repeated.
         if (enabling) {
             m.setStatusFor(Environment.LIVE, MerchantStatus.ACTIVE);
@@ -193,6 +210,10 @@ public class OnboardingReviewService {
         applications.save(a);
         timeline.record(a, OnboardingEventType.APPROVED, actor, from, OnboardingStatus.APPROVED,
                 message == null ? "Application approved" : message, true);
+        if (announceNumber) {
+            timeline.record(a, OnboardingEventType.MERCHANT_NUMBER_ISSUED, Actor.system(), null, null,
+                    "Merchant number " + a.getMerchantNumber() + " issued", true);
+        }
         if (enabling) {
             timeline.record(a, OnboardingEventType.PRODUCTION_ENABLED, Actor.system(), null, null,
                     "Production switched on for " + a.getMerchantNumber(), true);
@@ -211,7 +232,7 @@ public class OnboardingReviewService {
         decide(a, actor, reason);
         applications.save(a);
         timeline.record(a, OnboardingEventType.REJECTED, actor, from, OnboardingStatus.REJECTED, reason, true);
-        notifier.toApplicant(a, onboarding.recipient(a), OnboardingEmails.rejected(name(a), a.getMerchantNumber(), reason));
+        notifier.toApplicant(a, onboarding.recipient(a), OnboardingEmails.rejected(name(a), OnboardingService.reference(a), reason));
         return get(applicationId);
     }
 
@@ -232,7 +253,7 @@ public class OnboardingReviewService {
         touch(a);
         applications.save(a);
         timeline.record(a, OnboardingEventType.REOPENED, actor, from, OnboardingStatus.IN_REVIEW, reason, true);
-        notifier.toApplicant(a, onboarding.recipient(a), OnboardingEmails.reopened(name(a), a.getMerchantNumber(), reason));
+        notifier.toApplicant(a, onboarding.recipient(a), OnboardingEmails.reopened(name(a), OnboardingService.reference(a), reason));
         return get(applicationId);
     }
 

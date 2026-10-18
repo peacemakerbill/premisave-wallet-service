@@ -14,6 +14,7 @@ public enum OnboardingEventType {
     APPROVED,
     REJECTED,
     REOPENED,
+    MERCHANT_NUMBER_ISSUED,
     PRODUCTION_ENABLED,
     EMAIL_SENT,
     EMAIL_FAILED
