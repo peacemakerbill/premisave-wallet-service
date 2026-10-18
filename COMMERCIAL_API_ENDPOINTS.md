@@ -1,6 +1,6 @@
 # Premisave PSP API: Endpoint Reference (Wallet Service)
 
-Draft contract for every endpoint the wallet service will expose to the developer service for the commercial (payment service provider) API. Companion to [COMMERCIAL_API_README.md](COMMERCIAL_API_README.md), which explains the design, rails, routing and rules. This file is the request and response reference.
+Draft contract for every endpoint the wallet service will expose to the developer service for the commercial (payment service provider) API. Companion to the service [README](../README.md), which explains the service, rails, rules and setup. This file is the request and response reference.
 
 **Status:** Phase 1 is implemented (see Implementation status below); everything else is still draft. All values in examples are illustrative. Names, paths, headers and status values here are the intended contract.
 
@@ -30,11 +30,11 @@ Phase 1 runs on a simulated sandbox rail only. Under `/live`, a payment or payou
 
 Built in Phase 2 so far: the live M-Pesa rail (STK push payments and B2C payouts to phone numbers, KES), then settlements (54 to 57), transfers (58) and reports (70 to 72), then payment links (14 to 17), account references (18), bulk payouts (20, 23) and beneficiary checks (24 to 26, and `beneficiaryCheck` on payouts), then refunds and disputes (44 to 49, and sandbox 13.3), then subscriptions (27 to 43: plans, customers with saved payment methods, subscriptions and invoices, and sandbox 13.4). All of these are available under both `/live` and `/sandbox`.
 
-Built in Phase 2, Stage 5: the live rails for Stripe cards, PayPal, Flutterwave (mobile money outside Kenya, bank and mobile money payouts), NOWPayments crypto collections and the Premisave wallet (collections by the wallet owner's consent, payouts as credits), with saved `CARD`, `PAYPAL` and `PREMISAVE_WALLET` methods for subscriptions. Stage 6: live account references paid to a paybill, and validation callbacks (11.13). Each live rail is off until its setting is enabled; see `COMMERCIAL_STAGE5_RAILS.md` and `COMMERCIAL_STAGE6_C2B_VALIDATION.md` for what each does and its limits.
+Built in Phase 2, Stage 5: the live rails for Stripe cards, PayPal, Flutterwave (mobile money outside Kenya, bank and mobile money payouts), NOWPayments crypto collections and the Premisave wallet (collections by the wallet owner's consent, payouts as credits), with saved `CARD`, `PAYPAL` and `PREMISAVE_WALLET` methods for subscriptions. Stage 6: live account references paid to a paybill, and validation callbacks (11.13). Each live rail is off until its setting is enabled; see sections 8 and 13 of the README for what each does and its limits.
 
-Built in Phase 2, Stage 7: merchant numbers (`PRM-` and ten digits, counted from 1), and merchant onboarding with an application form, documents in a disk folder, review by finance, operations and admin staff, return for correction, approval and rejection, emails and a timeline (section 15, rows 80 to 100 of the index). See `COMMERCIAL_STAGE7_ONBOARDING.md`.
+Built in Phase 2, Stage 7: merchant numbers (`PRM-` and ten digits, counted from 1), and merchant onboarding with an application form, documents in a disk folder, review by finance, operations and admin staff, return for correction, approval and rejection, emails and a timeline (section 15, rows 80 to 100 of the index). See section 14 of the README.
 
-Changed after Stage 7, the developer service split: this service no longer manages apps. Apps (sandbox and production), API keys, test merchant numbers, the Premisave wallet link on production apps and the public `/v1` entry belong to the developer service (`DEVELOPER_SERVICE_SPLIT.md`). It tells this service who is calling and what the app may do in the headers of section 1.2, and pushes app changes with 3.5. The calls `POST/GET/PUT /merchants/{merchantId}/apps` and `GET /merchants/test-numbers` were removed. Rows 5 to 7 and 80 of the index keep their numbers: rows 5 and 6 are now the app context push and the wallet lookup, rows 7 and 80 are retired.
+Changed after Stage 7, the developer service split: this service no longer manages apps. Apps (sandbox and production), API keys, test merchant numbers, the Premisave wallet link on production apps and the public `/v1` entry belong to the developer service (section 16 of the README). It tells this service who is calling and what the app may do in the headers of section 1.2, and pushes app changes with 3.5. The calls `POST/GET/PUT /merchants/{merchantId}/apps` and `GET /merchants/test-numbers` were removed. Rows 5 to 7 and 80 of the index keep their numbers: rows 5 and 6 are now the app context push and the wallet lookup, rows 7 and 80 are retired.
 
 Not built: PayPal webhooks and PayPal disputes (PayPal results are found by lookup), crypto payouts, Flutterwave refunds, mobile money refunds outside Kenya, and the developer service endpoint that delivers validation callbacks (`POST /internal/validations`, described in the Stage 6 document). Sections describing these remain the intended contract.
 
@@ -765,7 +765,7 @@ Errors: `400 VALIDATION_FAILED`, `401 UNAUTHENTICATED`, `409 DUPLICATE_REQUEST`.
 
 `GET /merchants?developerAccountId=dev_5521`
 
-Every merchant of the account, oldest first, each in the shape of 3.2 with its onboarding summary (`applicationId`, `status`, `readyToSubmit`, `missing`). The developer service uses it to list an account's businesses and to link one it lost track of. Response `200`: `{ "businesses": [ ... ] }`, empty when the account has none. The migration for an existing database is in `DEVELOPER_SERVICE_SPLIT.md` section 8.
+Every merchant of the account, oldest first, each in the shape of 3.2 with its onboarding summary (`applicationId`, `status`, `readyToSubmit`, `missing`). The developer service uses it to list an account's businesses and to link one it lost track of. Response `200`: `{ "businesses": [ ... ] }`, empty when the account has none. The migration for an existing database is in section 16 of the README section 8.
 
 ### 3.2 Get merchant
 
@@ -2447,7 +2447,7 @@ Rows 104 and 105 are the developer search and its status check (3.8), provisioni
 
 ## 15. Merchant onboarding and merchant numbers
 
-Added in Stage 7. All calls here are provisioning calls (not environment scoped, base `{{base_provisioning}}`, header `X-API-Key`). Design, configuration and limits are in `COMMERCIAL_STAGE7_ONBOARDING.md`.
+Added in Stage 7. All calls here are provisioning calls (not environment scoped, base `{{base_provisioning}}`, header `X-API-Key`). Design, configuration and limits are in sections 14 and 15 of the README.
 
 ### 15.1 Merchant numbers
 

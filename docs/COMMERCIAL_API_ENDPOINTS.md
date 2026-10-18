@@ -1,6 +1,6 @@
 # Premisave PSP API: Endpoint Reference (Wallet Service)
 
-Draft contract for every endpoint the wallet service will expose to the developer service for the commercial (payment service provider) API. Companion to [COMMERCIAL_API_README.md](COMMERCIAL_API_README.md), which explains the design, rails, routing and rules. This file is the request and response reference.
+Draft contract for every endpoint the wallet service will expose to the developer service for the commercial (payment service provider) API. Companion to the service [README](../README.md) (see its Commercial API section), which explains the rails, rules and setup. This file is the request and response reference.
 
 **Status:** Phase 1 is implemented (see Implementation status below); everything else is still draft. All values in examples are illustrative. Names, paths, headers and status values here are the intended contract.
 
@@ -30,11 +30,11 @@ Phase 1 runs on a simulated sandbox rail only. Under `/live`, a payment or payou
 
 Built in Phase 2 so far: the live M-Pesa rail (STK push payments and B2C payouts to phone numbers, KES), then settlements (54 to 57), transfers (58) and reports (70 to 72), then payment links (14 to 17), account references (18), bulk payouts (20, 23) and beneficiary checks (24 to 26, and `beneficiaryCheck` on payouts), then refunds and disputes (44 to 49, and sandbox 13.3), then subscriptions (27 to 43: plans, customers with saved payment methods, subscriptions and invoices, and sandbox 13.4). All of these are available under both `/live` and `/sandbox`.
 
-Built in Phase 2, Stage 5: the live rails for Stripe cards, PayPal, Flutterwave (mobile money outside Kenya, bank and mobile money payouts), NOWPayments crypto collections and the Premisave wallet (collections by the wallet owner's consent, payouts as credits), with saved `CARD`, `PAYPAL` and `PREMISAVE_WALLET` methods for subscriptions. Stage 6: live account references paid to a paybill, and validation callbacks (11.13). Each live rail is off until its setting is enabled; see `COMMERCIAL_STAGE5_RAILS.md` and `COMMERCIAL_STAGE6_C2B_VALIDATION.md` for what each does and its limits.
+Built in Phase 2, Stage 5: the live rails for Stripe cards, PayPal, Flutterwave (mobile money outside Kenya, bank and mobile money payouts), NOWPayments crypto collections and the Premisave wallet (collections by the wallet owner's consent, payouts as credits), with saved `CARD`, `PAYPAL` and `PREMISAVE_WALLET` methods for subscriptions. Stage 6: live account references paid to a paybill, and validation callbacks (11.13). Each live rail is off until its setting is enabled; see the Payment rails and Paybill account references sections of the README for what each does and its limits.
 
-Built in Phase 2, Stage 7: merchant numbers (`PRM-` and ten digits, counted from 1), and merchant onboarding with an application form, documents on Google Drive, review by finance, operations and admin staff, return for correction, approval and rejection, emails and a timeline (section 15, rows 80 to 100 of the index). See `COMMERCIAL_STAGE7_ONBOARDING.md`.
+Built in Phase 2, Stage 7: merchant numbers (`PRM-` and ten digits, counted from 1), and merchant onboarding with an application form, documents in a disk folder, review by finance, operations and admin staff, return for correction, approval and rejection, emails and a timeline (section 15, rows 80 to 100 of the index). See the Merchant numbers and onboarding section of the README.
 
-Changed after Stage 7, the developer service split: this service no longer manages apps. Apps (sandbox and production), API keys, test merchant numbers, the Premisave wallet link on production apps and the public `/v1` entry belong to the developer service (`DEVELOPER_SERVICE_SPLIT.md`). It tells this service who is calling and what the app may do in the headers of section 1.2, and pushes app changes with 3.5. The calls `POST/GET/PUT /merchants/{merchantId}/apps` and `GET /merchants/test-numbers` were removed. Rows 5 to 7 and 80 of the index keep their numbers: rows 5 and 6 are now the app context push and the wallet lookup, rows 7 and 80 are retired.
+Changed after Stage 7, the developer service split: this service no longer manages apps. Apps (sandbox and production), API keys, test merchant numbers, the Premisave wallet link on production apps and the public `/v1` entry belong to the developer service (the Developer service split section of the README). It tells this service who is calling and what the app may do in the headers of section 1.2, and pushes app changes with 3.5. The calls `POST/GET/PUT /merchants/{merchantId}/apps` and `GET /merchants/test-numbers` were removed. Rows 5 to 7 and 80 of the index keep their numbers: rows 5 and 6 are now the app context push and the wallet lookup, rows 7 and 80 are retired.
 
 Not built: PayPal webhooks and PayPal disputes (PayPal results are found by lookup), crypto payouts, Flutterwave refunds, mobile money refunds outside Kenya, and the developer service endpoint that delivers validation callbacks (`POST /internal/validations`, described in the Stage 6 document). Sections describing these remain the intended contract.
 
@@ -730,7 +730,7 @@ Request:
 
 | Field | Type | Required | Notes |
 |:-|:-|:-|:-|
-| `developerAccountId` | string | yes | Developer service account id. The wallet keeps no list of developers: staff find the id with `GET /internal/admin/developers?q=<email, name, username or company>` on the developer service (X-API-Key), which returns `developerId`, `email`, `fullName`, `status` and more for each match |
+| `developerAccountId` | string | yes | Developer service account id. The wallet keeps no list of developers: staff find the id with `GET /developers?q=<email, name, username or company>` (3.8), which asks the developer service and returns `developerId`, `email`, `fullName`, `status` and more for each match |
 | `businessName` | string | yes | Legal name |
 | `displayName` | string | no | Name shown to customers and used for name-check matching. Defaults to uppercased `businessName` |
 | `country` | string | yes | ISO 3166-1 alpha-2 |
@@ -765,7 +765,7 @@ Errors: `400 VALIDATION_FAILED`, `401 UNAUTHENTICATED`, `409 DUPLICATE_REQUEST`.
 
 `GET /merchants?developerAccountId=dev_5521`
 
-Every merchant of the account, oldest first, each in the shape of 3.2 with its onboarding summary (`applicationId`, `status`, `readyToSubmit`, `missing`). The developer service uses it to list an account's businesses and to link one it lost track of. Response `200`: `{ "businesses": [ ... ] }`, empty when the account has none. The migration for an existing database is in `DEVELOPER_SERVICE_SPLIT.md` section 8.
+Every merchant of the account, oldest first, each in the shape of 3.2 with its onboarding summary (`applicationId`, `status`, `readyToSubmit`, `missing`). The developer service uses it to list an account's businesses and to link one it lost track of. Response `200`: `{ "businesses": [ ... ] }`, empty when the account has none. The migration for an existing database is in the Developer service split section of the README section 8.
 
 ### 3.2 Get merchant
 
@@ -879,6 +879,35 @@ Errors: `400 VALIDATION_FAILED` (empty reference), `404 WALLET_NOT_FOUND`. The d
 ### 3.7 Retired
 
 `POST`, `GET` and `PUT /merchants/{merchantId}/apps...` were removed with the developer service split. Use `/api/v1/apps` on the developer service. The index row is kept so the other row numbers stay the same.
+
+### 3.8 Search developers
+
+`GET /developers?q={text}&status={PENDING|ACTIVE|DISABLED}&page={n}&size={n}` (provisioning, no environment in the path: `/internal/commercial/v1/developers`)
+
+Used by staff to find the `developerAccountId` for Create merchant (3.1). The wallet keeps no list of developers, so it puts the search to the developer service (`GET /internal/admin/developers`, sent with `commercial.events.api-key` as `X-API-Key`) and returns the answer unchanged: the standard envelope with a paged `data`, newest accounts first.
+
+| Parameter | Required | Notes |
+|:-|:-|:-|
+| `q` | no | Matched anywhere in the email, username, full name or company name, or against the developer id exactly. At most 100 characters; trimmed |
+| `status` | no | `PENDING`, `ACTIVE` or `DISABLED` (any case). Blank means all |
+| `page` | no | Zero based, 0 or more |
+| `size` | no | 1 to 100 |
+
+Response `200`: `data` is `{ "content": [ { "developerId", "email", "username", "fullName", "companyName", "country", "role", "status", "emailVerified", "businessIds", "createdAt", "lastLoginAt" } ], "page", "size", "totalElements", "totalPages" }`. The `developerId` of the chosen row is the `developerAccountId`.
+
+Errors: `400 VALIDATION_FAILED` (a bad parameter, named in `details`), and `503 PROVIDER_UNAVAILABLE` when the developer service cannot be used. A `400` from the developer service is passed on as it came.
+
+The `503` is written for a person to read. `message` is a sentence the frontend can show as it is, `data.online` is `false`, `data.service` is `developer-service`, and `data.state` names the cause. No URL, key or error text is ever returned (they go to the log).
+
+| `data.state` | Meaning | `message` |
+|:-|:-|:-|
+| `OFFLINE` | The connection was refused or timed out, or the host is unknown | The developer service is offline right now, so developers cannot be searched. Please try again in a few minutes. |
+| `TIMEOUT` | It accepted the connection but did not answer in `commercial.events.http-timeout-seconds` | The developer service is taking too long to respond. Please try again in a moment. |
+| `REJECTED` | It answered 401 or 403: `DEVELOPER_SERVICE_API_KEY` is not `DEVELOPER_INTERNAL_API_KEY` there | The developer service is online but did not accept this request. Please contact Premisave support. |
+| `ERROR` | It answered 5xx, another unexpected status, or an empty body | The developer service is having trouble at the moment. Please try again shortly. |
+| `NOT_CONFIGURED` | `DEVELOPER_SERVICE_URL` is empty | Developer search is not set up on this system yet. Please contact Premisave support. |
+
+**Status.** `GET /developers/status` runs a one row search and reports the same states without failing, so the screen can show a notice when it opens. It always answers `200`: `data` is `{ "service": "developer-service", "online": true, "state": "ONLINE", "message": "The developer service is online." }`, and `online` is `true` only when the service is up and accepted the key.
 
 ## 4. Capabilities and quotes
 
@@ -2405,6 +2434,8 @@ Rows 81 to 100 are the Stage 7 provisioning calls (row 80 is retired):
 | 101 | GET | `/wallet/merchant-applications` (wallet owner login token) | 15.5 |
 | 102 | GET | `/wallet/merchant-applications/{applicationId}` (wallet owner login token) | 15.5 |
 | 103 | GET | `/wallet/merchant-numbers` (wallet owner login token) | 15.5 |
+| 104 | GET | `/developers` (provisioning, no environment in the path) | 3.8 |
+| 105 | GET | `/developers/status` (provisioning, no environment in the path) | 3.8 |
 
 Counting: 6 provisioning calls (rows 1 to 6), 65 operations (rows 8 to 72) available under both `/live` and `/sandbox` (130 routes), and 7 sandbox-only helpers, for 143 routes in total.
 
@@ -2412,9 +2443,11 @@ With Stage 7 there are 20 more provisioning routes (rows 81 to 100; row 80 is re
 
 The wallet owner view adds 3 more routes (rows 101 to 103). They are called with the owner's login token, not the internal key, so 166 routes in total.
 
+Rows 104 and 105 are the developer search and its status check (3.8), provisioning calls with the internal key, so 168 routes in total.
+
 ## 15. Merchant onboarding and merchant numbers
 
-Added in Stage 7. All calls here are provisioning calls (not environment scoped, base `{{base_provisioning}}`, header `X-API-Key`). Design, configuration and limits are in `COMMERCIAL_STAGE7_ONBOARDING.md`.
+Added in Stage 7. All calls here are provisioning calls (not environment scoped, base `{{base_provisioning}}`, header `X-API-Key`). Design, configuration and limits are in the Merchant numbers and onboarding and Document folder setup sections of the README.
 
 ### 15.1 Merchant numbers
 
@@ -2491,7 +2524,7 @@ Response `200`: a Merchant (2.1), with the `onboarding` block. Errors: `404 MERC
 }
 ```
 
-`status` is `DRAFT`, `SUBMITTED`, `IN_REVIEW`, `RETURNED`, `APPROVED` or `REJECTED`. The form and documents can be changed only in `DRAFT` and `RETURNED`. `missing` and `readyToSubmit` appear on applicant reads. `decision` appears once there is one: `{ "message", "decidedAt" }`, and staff reads add `decidedBy` and `decidedByRole`. Staff reads also add `reviewer` (`id`, `name`, `role`) and, on each document, `sha256`, `driveFileId`, `driveViewLink`, `verdictBy`, `verdictAt` and `uploadedBy`. A document `verdict` is `PENDING`, `ACCEPTED` or `REJECTED`.
+`status` is `DRAFT`, `SUBMITTED`, `IN_REVIEW`, `RETURNED`, `APPROVED` or `REJECTED`. The form and documents can be changed only in `DRAFT` and `RETURNED`. `missing` and `readyToSubmit` appear on applicant reads. `decision` appears once there is one: `{ "message", "decidedAt" }`, and staff reads add `decidedBy` and `decidedByRole`. Staff reads also add `reviewer` (`id`, `name`, `role`) and, on each document, `sha256`, `storageFileId`, `verdictBy`, `verdictAt` and `uploadedBy`. A document `verdict` is `PENDING`, `ACCEPTED` or `REJECTED`.
 
 Business types: `SOLE_PROPRIETOR`, `PARTNERSHIP`, `LIMITED_COMPANY`, `NGO`, `OTHER`. Document types: `BUSINESS_REGISTRATION`, `CERTIFICATE_OF_INCORPORATION`, `TAX_COMPLIANCE`, `DIRECTOR_ID`, `PROOF_OF_ADDRESS`, `BANK_STATEMENT`, `AUTHORISATION_LETTER`, `OTHER`.
 
@@ -2525,7 +2558,7 @@ Base: `/merchants/{merchantId}/application`. `X-Actor-Id` is optional and is onl
 }
 ```
 
-`contentType` must be `application/pdf`, `image/jpeg` or `image/png`, and the first bytes of the file must match it. The file may not be empty or larger than `commercial.onboarding.max-document-bytes` (default 5 MB, at most 8 MB), and an application holds at most `max-documents` files (default 20). The file is stored on Google Drive; only a reference is kept. Response `201`: the Document (15.2). Errors: `400 VALIDATION_FAILED`, `404 APPLICATION_NOT_FOUND`, `409 INVALID_STATE`, `503 PROVIDER_UNAVAILABLE` (Drive not configured or not reachable; nothing was recorded).
+`contentType` must be `application/pdf`, `image/jpeg` or `image/png`, and the first bytes of the file must match it. The file may not be empty or larger than `commercial.onboarding.max-document-bytes` (default 5 MB, at most 8 MB), and an application holds at most `max-documents` files (default 20). The file is stored in the document folder (`commercial.onboarding.storage.path`); only a reference is kept. Response `201`: the Document (15.2). Errors: `400 VALIDATION_FAILED`, `404 APPLICATION_NOT_FOUND`, `409 INVALID_STATE`, `503 PROVIDER_UNAVAILABLE` (the document folder is not configured or not reachable; nothing was recorded).
 
 **Remove a document.** Response `200`: the application. Errors: `404 NOT_FOUND`, `409 INVALID_STATE`.
 
