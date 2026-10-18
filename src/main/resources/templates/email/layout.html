@@ -8,8 +8,12 @@
 <meta name="x-apple-disable-message-reformatting">
 <title>{{title}}</title>
 <style>
+  @media only screen and (min-width: 621px) {
+    .px { padding-left: 36px !important; padding-right: 36px !important; }
+  }
   @media only screen and (max-width: 620px) {
-    .px { padding-left: 22px !important; padding-right: 22px !important; }
+    .px { padding-left: 18px !important; padding-right: 18px !important; }
+    .hero { font-size: 26px !important; }
     .h1 { font-size: 24px !important; }
   }
   @media (prefers-color-scheme: dark) {
@@ -30,7 +34,7 @@
     <td align="center" style="padding:32px 12px;">
       <table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background-color:#ffffff;border:1px solid #dfe4ec;border-radius:12px;overflow:hidden;">
         <tr>
-          <td style="background-color:#0b1f3a;padding:26px 36px;" class="px">
+          <td style="background-color:#0b1f3a;padding:24px 24px;" class="px">
             <table role="presentation" cellpadding="0" cellspacing="0" border="0">
               <tr>
                 <td width="40" height="40" align="center" valign="middle" style="width:40px;height:40px;background-color:#1d6bff;border-radius:10px;font-family:'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:22px;font-weight:700;color:#ffffff;line-height:40px;">P</td>
@@ -44,12 +48,12 @@
         </tr>
         <tr><td height="4" style="height:4px;line-height:4px;font-size:4px;background-color:#1d6bff;">&nbsp;</td></tr>
         <tr>
-          <td class="px txt" style="padding:40px 36px 36px 36px;font-family:'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:16px;line-height:1.65;color:#1b2430;">
+          <td class="px txt" style="padding:32px 24px 28px 24px;font-family:'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:16px;line-height:1.65;color:#1b2430;">
             {{contentHtml}}
           </td>
         </tr>
         <tr>
-          <td class="px foot muted" style="padding:24px 36px;background-color:#f6f8fb;border-top:1px solid #dfe4ec;font-family:'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.7;color:#6b7686;">
+          <td class="px foot muted" style="padding:22px 24px;background-color:#f6f8fb;border-top:1px solid #dfe4ec;font-family:'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.7;color:#6b7686;">
             {{footnote}}
           </td>
         </tr>

@@ -45,6 +45,8 @@ public final class EmailLayout {
         }
     }
 
+    /** Lets a long unbroken value, such as a reference or an email address, wrap instead of pushing the page wider. */
+    private static final String WRAP = "overflow-wrap:anywhere;word-break:break-word;";
     private static final String FONT = "'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif";
     private static final String PATH = "templates/email/";
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{(\\w+)}}");
@@ -102,8 +104,8 @@ public final class EmailLayout {
     }
 
     public static String heading(String text) {
-        return "<h1 class=\"h1 txt\" style=\"margin:0 0 20px 0;font-family:" + FONT + ";font-size:28px;line-height:1.25;"
-                + "font-weight:700;letter-spacing:-0.3px;color:#0b1f3a;\">" + esc(text) + "</h1>";
+        return "<h1 class=\"h1 txt\" style=\"margin:0 0 18px 0;font-family:" + FONT + ";font-size:26px;line-height:1.25;"
+                + "font-weight:700;letter-spacing:-0.3px;color:#0b1f3a;" + WRAP + "\">" + esc(text) + "</h1>";
     }
 
     public static String paragraph(String text) {
@@ -124,7 +126,7 @@ public final class EmailLayout {
         sb.append("<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"margin:0 0 24px 0;\"><tr>")
                 .append("<td class=\"box txt\" style=\"background-color:").append(tone.noteBackground).append(";border-left:4px solid ")
                 .append(tone.bar).append(";border-radius:6px;padding:14px 16px;font-family:").append(FONT)
-                .append(";font-size:14px;line-height:1.6;color:#1b2430;\">");
+                .append(";font-size:14px;line-height:1.6;color:#1b2430;").append(WRAP).append("\">");
         if (title != null && !title.isBlank()) sb.append("<strong>").append(esc(title)).append("</strong>");
         for (String line : lines) {
             sb.append("<div style=\"margin-top:6px;\">").append(esc(line)).append("</div>");
@@ -132,14 +134,19 @@ public final class EmailLayout {
         return sb.append("</td></tr></table>").toString();
     }
 
-    /** One label and value row of a detail table. Returns nothing when the value is blank. */
+    /**
+     * One row of a detail table: the label small above the value. Stacking them, rather than putting them side by side,
+     * keeps long values such as references and phone numbers readable on a narrow phone. Returns nothing when the value
+     * is blank.
+     */
     public static String detailRow(String label, String value, boolean last) {
         if (value == null || value.isBlank()) return "";
         String border = last ? "" : "border-bottom:1px solid #dfe4ec;";
-        return "<tr><td class=\"muted rule\" width=\"150\" valign=\"top\" style=\"padding:12px 16px;" + border + "font-family:" + FONT
-                + ";font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#6b7686;\">" + esc(label) + "</td>"
-                + "<td class=\"txt rule\" valign=\"top\" style=\"padding:12px 16px;" + border + "font-family:" + FONT
-                + ";font-size:15px;font-weight:600;color:#1b2430;word-break:break-word;\">" + esc(value) + "</td></tr>";
+        return "<tr><td class=\"rule\" style=\"padding:12px 16px;" + border + "font-family:" + FONT + ";\">"
+                + "<div class=\"muted\" style=\"font-size:11px;line-height:1.4;letter-spacing:1px;text-transform:uppercase;color:#6b7686;\">"
+                + esc(label) + "</div>"
+                + "<div class=\"txt\" style=\"margin-top:3px;font-size:15px;line-height:1.45;font-weight:600;color:#1b2430;" + WRAP + "\">"
+                + esc(value) + "</div></td></tr>";
     }
 
     /** The rounded box around detail rows. rowsHtml is the rows built with detailRow. */
