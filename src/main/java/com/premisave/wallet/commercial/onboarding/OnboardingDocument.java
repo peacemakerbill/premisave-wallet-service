@@ -2,7 +2,7 @@ package com.premisave.wallet.commercial.onboarding;
 
 import java.time.Instant;
 
-/** A file the applicant uploaded. The bytes live on Google Drive, only the reference is kept here. */
+/** A file the applicant uploaded. The bytes live in the document folder, only the reference is kept here. */
 public class OnboardingDocument {
 
     private String documentId;
@@ -12,9 +12,8 @@ public class OnboardingDocument {
     private long sizeBytes;
     /** Hex digest of the stored bytes. */
     private String sha256;
-    private String driveFileId;
-    /** Opens for people who have access to the Drive folder. */
-    private String driveViewLink;
+    /** Path of the file inside the document folder. */
+    private String storageFileId;
     private DocumentVerdict verdict = DocumentVerdict.PENDING;
     private String verdictNote;
     private String verdictBy;
@@ -36,10 +35,8 @@ public class OnboardingDocument {
     public void setSizeBytes(long v) { this.sizeBytes = v; }
     public String getSha256() { return sha256; }
     public void setSha256(String v) { this.sha256 = v; }
-    public String getDriveFileId() { return driveFileId; }
-    public void setDriveFileId(String v) { this.driveFileId = v; }
-    public String getDriveViewLink() { return driveViewLink; }
-    public void setDriveViewLink(String v) { this.driveViewLink = v; }
+    public String getStorageFileId() { return storageFileId; }
+    public void setStorageFileId(String v) { this.storageFileId = v; }
     public DocumentVerdict getVerdict() { return verdict; }
     public void setVerdict(DocumentVerdict v) { this.verdict = v; }
     public String getVerdictNote() { return verdictNote; }

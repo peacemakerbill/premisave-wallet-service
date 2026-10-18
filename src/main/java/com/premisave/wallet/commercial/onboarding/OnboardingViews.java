@@ -114,8 +114,7 @@ public final class OnboardingViews {
         m.put("uploadedAt", Views.iso(d.getUploadedAt()));
         if (staff) {
             m.put("sha256", d.getSha256());
-            m.put("driveFileId", d.getDriveFileId());
-            m.put("driveViewLink", d.getDriveViewLink());
+            m.put("storageFileId", d.getStorageFileId());
             m.put("verdictBy", d.getVerdictBy());
             m.put("verdictAt", Views.iso(d.getVerdictAt()));
             m.put("uploadedBy", d.getUploadedBy());

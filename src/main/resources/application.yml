@@ -510,14 +510,11 @@ commercial:
       approve: [FINANCE, ADMIN]
       reject: [FINANCE, OPERATIONS, ADMIN]
       reopen: [ADMIN]
-    drive:
-      # Documents are stored in a Google Drive folder through a service account. Share the folder with the
-      # service account's email as Editor. Give the key as a file path (preferred) or as the JSON itself.
-      enabled: ${COMMERCIAL_DRIVE_ENABLED:false}
-      service-account-json-path: ${COMMERCIAL_DRIVE_SERVICE_ACCOUNT_PATH:}
-      service-account-json: ${COMMERCIAL_DRIVE_SERVICE_ACCOUNT_JSON:}
-      folder-id: ${COMMERCIAL_DRIVE_FOLDER_ID:}
-      http-timeout-seconds: 30
+    storage:
+      # Folder where onboarding documents are stored: a directory on this server, or the mount point of a
+      # network share (Synology or any NAS, mounted over NFS or SMB). It must exist and be writable by the
+      # user running the service. Empty refuses document uploads.
+      path: ${COMMERCIAL_ONBOARDING_STORAGE_PATH:}
   recovery-interval-ms: 30000
   expiry-interval-ms: 60000
   # Fee rules per method. Unset methods use the built in placeholder rates,

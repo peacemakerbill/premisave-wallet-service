@@ -1239,31 +1239,9 @@
       ]
     },
     {
-      "name": "commercial.onboarding.drive.enabled",
-      "type": "java.lang.Boolean",
-      "description": "Stores onboarding documents in Google Drive. Needs a service account key and a folder id; without them uploads are refused.",
-      "defaultValue": false
-    },
-    {
-      "name": "commercial.onboarding.drive.service-account-json-path",
+      "name": "commercial.onboarding.storage.path",
       "type": "java.lang.String",
-      "description": "Path of the Google service account key file. Preferred over the inline form."
-    },
-    {
-      "name": "commercial.onboarding.drive.service-account-json",
-      "type": "java.lang.String",
-      "description": "The Google service account key as JSON text, for platforms that only offer environment variables."
-    },
-    {
-      "name": "commercial.onboarding.drive.folder-id",
-      "type": "java.lang.String",
-      "description": "Id of the Drive folder (or shared drive folder) documents are stored in. Share it with the service account as Editor."
-    },
-    {
-      "name": "commercial.onboarding.drive.http-timeout-seconds",
-      "type": "java.lang.Integer",
-      "description": "Seconds to wait for Google. At least 2.",
-      "defaultValue": 30
+      "description": "Folder where onboarding documents are stored: a directory on the server or the mount point of a network share (Synology or any NAS over NFS or SMB). It must exist and be writable by the service user. Empty refuses document uploads."
     }
   ],
   "hints": [

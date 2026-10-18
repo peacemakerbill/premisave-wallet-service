@@ -29,7 +29,7 @@ public record OnboardingFormRequest(
         @Size(max = 120) String contactName,
         @Email @Size(max = 160) String contactEmail,
         @Size(max = 20) String contactPhone,
-        @Valid List<DirectorDto> directors,
+        List<@Valid DirectorDto> directors,
         @Email @Size(max = 160) String walletAccountNumber,
         Boolean onBehalf,
         @Size(max = 80) String applicantRole) {

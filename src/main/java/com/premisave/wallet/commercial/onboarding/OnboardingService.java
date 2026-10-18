@@ -175,8 +175,8 @@ public class OnboardingService {
 
         String documentId = Ids.next("doc");
         String safeName = OnboardingRules.safeFileName(fileName);
-        String driveName = a.getMerchantNumber() + "_" + type.name() + "_" + documentId + "_" + safeName;
-        DocumentStorage.StoredFile stored = storage.upload(driveName, ct, bytes);
+        String storedName = a.getMerchantNumber() + "_" + type.name() + "_" + documentId + "_" + safeName;
+        DocumentStorage.StoredFile stored = storage.upload(storedName, ct, bytes);
 
         OnboardingDocument d = new OnboardingDocument();
         d.setDocumentId(documentId);
@@ -185,8 +185,7 @@ public class OnboardingService {
         d.setContentType(ct);
         d.setSizeBytes(bytes.length);
         d.setSha256(Hashing.sha256Hex(bytes));
-        d.setDriveFileId(stored.fileId());
-        d.setDriveViewLink(stored.viewLink());
+        d.setStorageFileId(stored.fileId());
         d.setUploadedBy(actor.id());
         d.setUploadedAt(Instant.now());
         a.getDocuments().add(d);
@@ -209,7 +208,7 @@ public class OnboardingService {
         a.getDocuments().remove(d);
         a.setUpdatedAt(Instant.now());
         applications.save(a);
-        discard(d.getDriveFileId());
+        discard(d.getStorageFileId());
         timeline.record(a, OnboardingEventType.DOCUMENT_REMOVED, actor, a.getStatus(), a.getStatus(),
                 d.getType().name() + " removed: " + d.getFileName(), true);
         return OnboardingViews.application(a, false, props.requiredDocuments(), missingFor(a));
@@ -223,7 +222,7 @@ public class OnboardingService {
     public DocumentFile fetch(OnboardingApplication a, String documentId) {
         OnboardingDocument d = a.getDocuments().stream().filter(x -> x.getDocumentId().equals(documentId)).findFirst()
                 .orElseThrow(() -> CommercialException.notFound("Document"));
-        return new DocumentFile(d.getFileName(), d.getContentType(), storage.download(d.getDriveFileId()));
+        return new DocumentFile(d.getFileName(), d.getContentType(), storage.download(d.getStorageFileId()));
     }
 
     public Map<String, Object> submit(String merchantId, SubmitApplicationRequest req, Actor actor) {

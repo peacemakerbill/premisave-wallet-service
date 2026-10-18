@@ -12,7 +12,7 @@ import java.util.Locale;
  * staffNotifyEmails: addresses told when an application is submitted or resubmitted. Leave empty to skip.
  * mailFrom: sender address of onboarding emails. Empty uses the mail account's own address.
  * roles: which staff roles may do what. Role names come from the X-Actor-Role header, compared without case.
- * drive: where uploaded documents are stored.
+ * storage: the folder uploaded documents are stored in.
  */
 @ConfigurationProperties(prefix = "commercial.onboarding")
 public record CommercialOnboardingProperties(
@@ -23,7 +23,7 @@ public record CommercialOnboardingProperties(
         List<String> staffNotifyEmails,
         String mailFrom,
         Roles roles,
-        Drive drive) {
+        Storage storage) {
 
     /** Documents travel as base64 in a JSON body capped at 12 MB by the request filter, which allows files up to 8 MB. */
     public static final long MAX_DOCUMENT_BYTES_LIMIT = 8L * 1024 * 1024;
@@ -41,7 +41,7 @@ public record CommercialOnboardingProperties(
                 : staffNotifyEmails.stream().filter(s -> s != null && !s.isBlank()).map(String::trim).toList();
         mailFrom = mailFrom == null || mailFrom.isBlank() ? null : mailFrom.trim();
         if (roles == null) roles = new Roles(null, null, null, null, null);
-        if (drive == null) drive = new Drive(null, null, null, null, null, null, null, null);
+        if (storage == null) storage = new Storage(null);
     }
 
     /**
@@ -68,24 +68,18 @@ public record CommercialOnboardingProperties(
     }
 
     /**
-     * Google Drive storage through a service account. Give the key either inline (serviceAccountJson, for
-     * example from an environment variable) or as a file (serviceAccountJsonPath). folderId is the Drive
-     * folder, or shared drive folder, the service account has been shared on with Editor access.
+     * Where documents are stored. path is a directory on the server, for example /mnt/synology/premisave-onboarding.
+     * A Synology or any other file server is used by mounting its shared folder on the server (NFS or SMB) and giving
+     * that mount point here. The directory must already exist and be writable by the user running the service.
+     * Leave it empty to refuse uploads.
      */
-    public record Drive(Boolean enabled, String serviceAccountJson, String serviceAccountJsonPath, String folderId,
-                        Integer httpTimeoutSeconds, String tokenUrl, String apiBase, String uploadBase) {
-        public Drive {
-            if (enabled == null) enabled = Boolean.FALSE;
-            if (httpTimeoutSeconds == null || httpTimeoutSeconds < 2) httpTimeoutSeconds = 30;
-            if (tokenUrl == null || tokenUrl.isBlank()) tokenUrl = "https://oauth2.googleapis.com/token";
-            if (apiBase == null || apiBase.isBlank()) apiBase = "https://www.googleapis.com/drive/v3";
-            if (uploadBase == null || uploadBase.isBlank()) uploadBase = "https://www.googleapis.com/upload/drive/v3";
+    public record Storage(String path) {
+        public Storage {
+            path = path == null || path.isBlank() ? null : path.trim();
         }
 
         public boolean configured() {
-            boolean hasKey = (serviceAccountJson != null && !serviceAccountJson.isBlank())
-                    || (serviceAccountJsonPath != null && !serviceAccountJsonPath.isBlank());
-            return enabled && hasKey && folderId != null && !folderId.isBlank();
+            return path != null;
         }
     }
 

@@ -96,7 +96,7 @@ public final class OnboardingRules {
         };
     }
 
-    /** A file name safe to use in Drive and in a download header: letters, digits, dot, dash and underscore. */
+    /** A file name safe to use on disk and in a download header: letters, digits, dot, dash and underscore. */
     public static String safeFileName(String original) {
         String base = original == null ? "" : original;
         int slash = Math.max(base.lastIndexOf('/'), base.lastIndexOf('\\'));

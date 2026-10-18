@@ -1,14 +1,14 @@
 package com.premisave.wallet.commercial.config;
 
 import com.premisave.wallet.commercial.onboarding.DocumentStorage;
-import com.premisave.wallet.commercial.onboarding.GoogleDriveStorage;
+import com.premisave.wallet.commercial.onboarding.LocalDiskStorage;
 import com.premisave.wallet.commercial.onboarding.UnconfiguredDocumentStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import tools.jackson.databind.json.JsonMapper;
+import java.nio.file.Path;
 
 /**
  * Registers the settings classes of the commercial API (payment links, bulk payouts, beneficiary checks, refunds,
@@ -32,16 +32,18 @@ public class CommercialSettingsConfig {
     private static final Logger log = LoggerFactory.getLogger(CommercialSettingsConfig.class);
 
     @Bean("commercialDocumentStorage")
-    DocumentStorage commercialDocumentStorage(CommercialOnboardingProperties props, JsonMapper json) {
-        if (props.drive().configured()) {
-            return new GoogleDriveStorage(props.drive(), json);
+    DocumentStorage commercialDocumentStorage(CommercialOnboardingProperties props) {
+        if (!props.storage().configured()) {
+            log.info("Onboarding document storage has no folder (commercial.onboarding.storage.path is empty); uploads will be refused");
+            return new UnconfiguredDocumentStorage();
         }
-        if (Boolean.TRUE.equals(props.drive().enabled())) {
-            log.warn("Onboarding document storage is switched on but incomplete: set the service account key and "
-                    + "commercial.onboarding.drive.folder-id; uploads will be refused until then");
+        LocalDiskStorage disk = new LocalDiskStorage(Path.of(props.storage().path()));
+        if (disk.available()) {
+            log.info("Onboarding documents are stored in {}", disk.root());
         } else {
-            log.info("Onboarding document storage is switched off (commercial.onboarding.drive.enabled=false); uploads will be refused");
+            log.warn("Onboarding document folder {} does not exist or is not writable; uploads will be refused until it is "
+                    + "created or the network share is mounted", disk.root());
         }
-        return new UnconfiguredDocumentStorage();
+        return disk;
     }
 }

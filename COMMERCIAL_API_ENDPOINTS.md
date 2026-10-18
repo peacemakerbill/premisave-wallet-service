@@ -32,7 +32,7 @@ Built in Phase 2 so far: the live M-Pesa rail (STK push payments and B2C payouts
 
 Built in Phase 2, Stage 5: the live rails for Stripe cards, PayPal, Flutterwave (mobile money outside Kenya, bank and mobile money payouts), NOWPayments crypto collections and the Premisave wallet (collections by the wallet owner's consent, payouts as credits), with saved `CARD`, `PAYPAL` and `PREMISAVE_WALLET` methods for subscriptions. Stage 6: live account references paid to a paybill, and validation callbacks (11.13). Each live rail is off until its setting is enabled; see `COMMERCIAL_STAGE5_RAILS.md` and `COMMERCIAL_STAGE6_C2B_VALIDATION.md` for what each does and its limits.
 
-Built in Phase 2, Stage 7: merchant numbers (`PRM-` and ten digits, counted from 1), and merchant onboarding with an application form, documents on Google Drive, review by finance, operations and admin staff, return for correction, approval and rejection, emails and a timeline (section 15, rows 80 to 100 of the index). See `COMMERCIAL_STAGE7_ONBOARDING.md`.
+Built in Phase 2, Stage 7: merchant numbers (`PRM-` and ten digits, counted from 1), and merchant onboarding with an application form, documents in a disk folder, review by finance, operations and admin staff, return for correction, approval and rejection, emails and a timeline (section 15, rows 80 to 100 of the index). See `COMMERCIAL_STAGE7_ONBOARDING.md`.
 
 Changed after Stage 7, the developer service split: this service no longer manages apps. Apps (sandbox and production), API keys, test merchant numbers, the Premisave wallet link on production apps and the public `/v1` entry belong to the developer service (`DEVELOPER_SERVICE_SPLIT.md`). It tells this service who is calling and what the app may do in the headers of section 1.2, and pushes app changes with 3.5. The calls `POST/GET/PUT /merchants/{merchantId}/apps` and `GET /merchants/test-numbers` were removed. Rows 5 to 7 and 80 of the index keep their numbers: rows 5 and 6 are now the app context push and the wallet lookup, rows 7 and 80 are retired.
 
@@ -2524,7 +2524,7 @@ Response `200`: a Merchant (2.1), with the `onboarding` block. Errors: `404 MERC
 }
 ```
 
-`status` is `DRAFT`, `SUBMITTED`, `IN_REVIEW`, `RETURNED`, `APPROVED` or `REJECTED`. The form and documents can be changed only in `DRAFT` and `RETURNED`. `missing` and `readyToSubmit` appear on applicant reads. `decision` appears once there is one: `{ "message", "decidedAt" }`, and staff reads add `decidedBy` and `decidedByRole`. Staff reads also add `reviewer` (`id`, `name`, `role`) and, on each document, `sha256`, `driveFileId`, `driveViewLink`, `verdictBy`, `verdictAt` and `uploadedBy`. A document `verdict` is `PENDING`, `ACCEPTED` or `REJECTED`.
+`status` is `DRAFT`, `SUBMITTED`, `IN_REVIEW`, `RETURNED`, `APPROVED` or `REJECTED`. The form and documents can be changed only in `DRAFT` and `RETURNED`. `missing` and `readyToSubmit` appear on applicant reads. `decision` appears once there is one: `{ "message", "decidedAt" }`, and staff reads add `decidedBy` and `decidedByRole`. Staff reads also add `reviewer` (`id`, `name`, `role`) and, on each document, `sha256`, `storageFileId`, `verdictBy`, `verdictAt` and `uploadedBy`. A document `verdict` is `PENDING`, `ACCEPTED` or `REJECTED`.
 
 Business types: `SOLE_PROPRIETOR`, `PARTNERSHIP`, `LIMITED_COMPANY`, `NGO`, `OTHER`. Document types: `BUSINESS_REGISTRATION`, `CERTIFICATE_OF_INCORPORATION`, `TAX_COMPLIANCE`, `DIRECTOR_ID`, `PROOF_OF_ADDRESS`, `BANK_STATEMENT`, `AUTHORISATION_LETTER`, `OTHER`.
 
@@ -2558,7 +2558,7 @@ Base: `/merchants/{merchantId}/application`. `X-Actor-Id` is optional and is onl
 }
 ```
 
-`contentType` must be `application/pdf`, `image/jpeg` or `image/png`, and the first bytes of the file must match it. The file may not be empty or larger than `commercial.onboarding.max-document-bytes` (default 5 MB, at most 8 MB), and an application holds at most `max-documents` files (default 20). The file is stored on Google Drive; only a reference is kept. Response `201`: the Document (15.2). Errors: `400 VALIDATION_FAILED`, `404 APPLICATION_NOT_FOUND`, `409 INVALID_STATE`, `503 PROVIDER_UNAVAILABLE` (Drive not configured or not reachable; nothing was recorded).
+`contentType` must be `application/pdf`, `image/jpeg` or `image/png`, and the first bytes of the file must match it. The file may not be empty or larger than `commercial.onboarding.max-document-bytes` (default 5 MB, at most 8 MB), and an application holds at most `max-documents` files (default 20). The file is stored in the document folder (`commercial.onboarding.storage.path`); only a reference is kept. Response `201`: the Document (15.2). Errors: `400 VALIDATION_FAILED`, `404 APPLICATION_NOT_FOUND`, `409 INVALID_STATE`, `503 PROVIDER_UNAVAILABLE` (the document folder is not configured or not reachable; nothing was recorded).
 
 **Remove a document.** Response `200`: the application. Errors: `404 NOT_FOUND`, `409 INVALID_STATE`.
 
