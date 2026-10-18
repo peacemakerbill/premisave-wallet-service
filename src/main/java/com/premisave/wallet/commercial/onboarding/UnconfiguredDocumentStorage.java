@@ -14,5 +14,6 @@ public class UnconfiguredDocumentStorage implements DocumentStorage {
     @Override public StoredFile upload(String fileName, String contentType, byte[] bytes) { throw unavailable(); }
     @Override public byte[] download(String fileId) { throw unavailable(); }
     @Override public void delete(String fileId) { throw unavailable(); }
+    @Override public boolean exists(String fileId) { throw unavailable(); }
     @Override public boolean available() { return false; }
 }

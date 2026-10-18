@@ -901,7 +901,7 @@ When an application that names a wallet is first submitted, that wallet's owner 
 
 #### Documents
 
-* Types: `BUSINESS_REGISTRATION`, `CERTIFICATE_OF_INCORPORATION`, `TAX_COMPLIANCE`, `DIRECTOR_ID`, `PROOF_OF_ADDRESS`, `BANK_STATEMENT`, `AUTHORISATION_LETTER`, `OTHER`. `commercial.onboarding.required-documents` says which must be present (default registration, tax compliance and director ID).
+* Types: `BUSINESS_REGISTRATION`, `CERTIFICATE_OF_INCORPORATION`, `TAX_COMPLIANCE`, `DIRECTOR_ID`, `PROOF_OF_ADDRESS`, `BANK_STATEMENT`, `AUTHORISATION_LETTER`, `OTHER`. `commercial.onboarding.required-documents` says which must be present (default registration, tax compliance and director ID). An unknown name in that setting stops the service at startup, so a typo cannot make every application impossible to submit. An application cannot be submitted, and `readyToSubmit` stays false, until each required type has an upload that a reviewer has not rejected. When it is submitted, each required type is also checked against the document folder, so a file that was deleted from the share is reported as `document:TYPE` in the `422` details and has to be uploaded again; if the folder itself cannot be reached the answer is `503` instead.
 * PDF, JPEG or PNG only, and the first bytes must match the claimed type, so a renamed web page or executable is refused. Default limit 5 MB per file (hard ceiling 8 MB) and 20 files per application.
 * The file is sent as base64 inside the JSON body of `POST .../application/documents`. This keeps request signing working (the signature covers the body) and avoids multipart handling. The request filter allows 12 MB for that one route and 1 MB for every other.
 * The bytes go to the document folder ([Document folder setup](#document-folder-setup)). The application keeps the file's path inside the folder (`storageFileId`), the SHA-256, the size and the review verdict. File names are cleaned (letters, digits, dot, dash, underscore) and stored as `PRM-number_TYPE_documentId_filename` in a folder per month such as `2026-10/`.
@@ -927,13 +927,15 @@ These defaults are a suggestion: finance verifies the numbers and approves, oper
 
 #### Return for correction
 
-A reviewer returns an application with a message and one or more items, each pointing at a form field (`taxPin`, `directors[0].idNumber`) or a document (`document:TAX_COMPLIANCE`) with text saying what to fix. The applicant sees them in `returnItems`, receives them by email, edits, and submits again, optionally answering each item. Resubmitting marks every open item addressed and puts the application back in `SUBMITTED`; a reviewer has to start the review again. Approval is refused while items are open.
+A reviewer returns an application with a message and one or more items, each pointing at a form field (`taxPin`, `directors[0].idNumber`) or a document (`document:TAX_COMPLIANCE`) with text saying what to fix. The applicant sees them in `returnItems`, receives them by email, edits, and submits again, optionally answering each item. An open `document:TYPE` item is not cleared by the old file: a new document of that type must be uploaded after the return, and until then it is listed in `missing`. Resubmitting marks every open item addressed and puts the application back in `SUBMITTED`; a reviewer has to start the review again. Approval is refused while items are open.
 
 #### The wallet owner's view
 
 The owner of the wallet named on the form follows the application with their login token. Only applications whose `linkedWalletAccount` equals the signed in email are visible; anything else is `404 APPLICATION_NOT_FOUND`. The owner only reads. The list shows business name, status, a four step progress line (`FILL_IN`, `SUBMITTED`, `IN_REVIEW`, `DECISION`), whether it was applied for on behalf, and the merchant number only once approved. The detail adds who applied, the form (tax PIN masked to its last 3 characters, director ID numbers left out), documents with verdicts, return items, the decision, and the timeline without email events. `GET /wallet/merchant-numbers` lists the numbers of approved applications.
 
 #### Emails
+
+Every email the wallet sends, the transaction ones (deposit, withdrawal, failed withdrawal, payment, transfer) and the onboarding ones below, shares one look with the developer service emails: navy header with the Premisave mark, a status label (green, blue, amber or red), a heading, a detail box, a coloured note, and a footer, with a dark theme for mail programs that ask for it and a layout that fits a phone. The page frame is `src/main/resources/templates/email/layout.html`; each transaction email is a body file next to it, and `util/EmailLayout` builds the onboarding bodies. To change the look for all of them, edit `layout.html`. Every value is escaped when it is put in, so a name containing markup shows as plain text.
 
 Sent through the existing `JavaMailSender` (`spring.mail.*`) on a separate thread, so a slow mail server never slows a request and a failed email never fails a step. Text typed by people is escaped. The outcome of each is written to the timeline as `EMAIL_SENT` or `EMAIL_FAILED`. The applicant address is the form's contact email, falling back to the merchant's. `mail-from` overrides the sender.
 
@@ -1143,9 +1145,11 @@ premisave-wallet-service/
 │   ├── security/         # JWT & internal API key filters
 │   ├── filter/           # Servlet filters (callback request logging, etc.)
 │   ├── commercial/       # Commercial API: merchants, rails, billing, onboarding, disputes, settlements
+│   ├── util/             # Shared helpers, including EmailLayout (the look of every email)
 │   └── PremisaveWalletApplication.java
 ├── src/main/resources/
-│   └── application.yml
+│   ├── application.yml
+│   └── templates/email/  # layout.html (shared page frame) and one body file per transaction email
 ├── docs/
 │   └── COMMERCIAL_API_ENDPOINTS.md   # Commercial API request and response reference
 ├── postman/              # Commercial API collections and environments

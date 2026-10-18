@@ -10,6 +10,12 @@ public interface DocumentStorage {
     /** Removes the file. A file that is already gone is not an error. */
     void delete(String fileId);
 
+    /**
+     * Whether the file is really there. Throws when the storage cannot be reached at all, so a folder that dropped
+     * off the server is reported as unreachable instead of as a file that went missing.
+     */
+    boolean exists(String fileId);
+
     /** True when files can be written right now. A network folder that dropped off the server reports false. */
     boolean available();
 

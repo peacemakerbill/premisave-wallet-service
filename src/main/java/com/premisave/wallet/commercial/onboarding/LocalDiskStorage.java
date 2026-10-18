@@ -54,6 +54,16 @@ public class LocalDiskStorage implements DocumentStorage {
     }
 
     @Override
+    public boolean exists(String fileId) {
+        if (!Files.isDirectory(root)) {
+            log.warn("Document folder {} is missing", root);
+            throw unreachable();
+        }
+        if (fileId == null || !ID.matcher(fileId).matches() || fileId.contains("..")) return false;
+        return Files.isRegularFile(root.resolve(fileId).normalize());
+    }
+
+    @Override
     public StoredFile upload(String fileName, String contentType, byte[] bytes) {
         requireAvailable();
         String name = diskName(fileName);

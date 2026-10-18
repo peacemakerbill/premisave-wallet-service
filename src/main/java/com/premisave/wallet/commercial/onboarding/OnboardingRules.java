@@ -17,6 +17,15 @@ public final class OnboardingRules {
 
     /** What is still missing before the application can be submitted: one entry per field with the issue. */
     public static List<Map<String, String>> missing(BusinessForm f, List<OnboardingDocument> docs, List<String> requiredDocuments) {
+        return missing(f, docs, requiredDocuments, List.of());
+    }
+
+    /**
+     * Same as above, and also checks the items a reviewer sent back. A returned document:TYPE item stays outstanding
+     * until a new document of that type has been uploaded after it was raised.
+     */
+    public static List<Map<String, String>> missing(BusinessForm f, List<OnboardingDocument> docs, List<String> requiredDocuments,
+                                                     List<ReturnItem> returnItems) {
         List<Map<String, String>> out = new ArrayList<>();
         if (f.getBusinessType() == null) add(out, "businessType", "is required");
         text(out, "registeredName", f.getRegisteredName());
@@ -54,6 +63,28 @@ public final class OnboardingRules {
         for (String type : requiredDocuments) {
             if (!hasUsable(docs, type)) add(out, "document:" + type, "a " + type + " document is required");
         }
+        for (ReturnItem item : returnItems) {
+            String field = item.getField();
+            if (item.isAddressed() || field == null || !field.regionMatches(true, 0, "document:", 0, 9)) continue;
+            String type = field.substring(9).trim().toUpperCase(Locale.ROOT);
+            if (out.stream().anyMatch(m -> field.equalsIgnoreCase(m.get("field")))) continue;
+            if (!uploadedAfter(docs, type, item.getRaisedAt())) {
+                add(out, "document:" + type, "the reviewer asked for a new " + type + " document: " + item.getMessage());
+            }
+        }
+        return out;
+    }
+
+    private static boolean uploadedAfter(List<OnboardingDocument> docs, String type, java.time.Instant since) {
+        return docs.stream().anyMatch(d -> d.getType() != null && d.getType().name().equals(type)
+                && d.getVerdict() != DocumentVerdict.REJECTED
+                && (since == null || (d.getUploadedAt() != null && d.getUploadedAt().isAfter(since))));
+    }
+
+    /** The document types an application needs before it can be submitted: the configured ones, plus the letter when applying on behalf. */
+    public static List<String> neededTypes(BusinessForm f, List<String> requiredDocuments) {
+        List<String> out = new ArrayList<>(requiredDocuments);
+        if (f.isOnBehalf() && !out.contains("AUTHORISATION_LETTER")) out.add("AUTHORISATION_LETTER");
         return out;
     }
 

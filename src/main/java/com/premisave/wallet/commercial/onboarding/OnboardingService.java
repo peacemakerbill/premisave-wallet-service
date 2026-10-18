@@ -232,6 +232,7 @@ public class OnboardingService {
                     + " cannot be submitted");
         }
         List<Map<String, String>> missing = missingFor(a);
+        if (missing.isEmpty()) missing = lostFiles(a);
         if (!missing.isEmpty()) {
             throw new CommercialException(ErrorCode.APPLICATION_INCOMPLETE,
                     "The application is missing " + missing.size() + " required " + (missing.size() == 1 ? "item" : "items"))
@@ -302,7 +303,26 @@ public class OnboardingService {
     }
 
     List<Map<String, String>> missingFor(OnboardingApplication a) {
-        return OnboardingRules.missing(a.getForm(), a.getDocuments(), props.requiredDocuments());
+        return OnboardingRules.missing(a.getForm(), a.getDocuments(), props.requiredDocuments(), a.getReturnItems());
+    }
+
+    /**
+     * Required document types whose uploaded files are no longer in storage, for example because someone deleted them
+     * from the shared folder. Only run when the application is submitted, so reading an application never touches the disk.
+     * Throws when the storage cannot be reached, because then nothing can be said about the files.
+     */
+    private List<Map<String, String>> lostFiles(OnboardingApplication a) {
+        List<Map<String, String>> out = new java.util.ArrayList<>();
+        for (String type : OnboardingRules.neededTypes(a.getForm(), props.requiredDocuments())) {
+            boolean found = a.getDocuments().stream()
+                    .filter(d -> d.getType() != null && d.getType().name().equals(type) && d.getVerdict() != DocumentVerdict.REJECTED)
+                    .anyMatch(d -> storage.exists(d.getStorageFileId()));
+            if (!found) {
+                out.add(Map.of("field", "document:" + type,
+                        "issue", "the uploaded " + type + " file can no longer be found, please upload it again"));
+            }
+        }
+        return out;
     }
 
     /** Links the wallet named on the form, or clears the link when the account number is blank. */

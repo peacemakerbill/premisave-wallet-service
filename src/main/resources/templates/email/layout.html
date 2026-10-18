@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<meta name="x-apple-disable-message-reformatting">
+<title>{{title}}</title>
+<style>
+  @media only screen and (max-width: 620px) {
+    .px { padding-left: 22px !important; padding-right: 22px !important; }
+    .h1 { font-size: 24px !important; }
+  }
+  @media (prefers-color-scheme: dark) {
+    .bg { background-color: #0e1117 !important; }
+    .card { background-color: #171b23 !important; border-color: #2a303b !important; }
+    .txt { color: #e8ebf0 !important; }
+    .muted { color: #9aa4b2 !important; }
+    .box { background-color: #1e2430 !important; border-color: #313a49 !important; }
+    .foot { background-color: #12161d !important; border-color: #2a303b !important; }
+    .rule { border-color: #2a303b !important; }
+  }
+</style>
+</head>
+<body class="bg" style="margin:0;padding:0;background-color:#eef1f6;">
+<span style="display:none;visibility:hidden;opacity:0;color:transparent;height:0;width:0;overflow:hidden;mso-hide:all;">{{preheader}}</span>
+<table role="presentation" class="bg" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eef1f6;">
+  <tr>
+    <td align="center" style="padding:32px 12px;">
+      <table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background-color:#ffffff;border:1px solid #dfe4ec;border-radius:12px;overflow:hidden;">
+        <tr>
+          <td style="background-color:#0b1f3a;padding:26px 36px;" class="px">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td width="40" height="40" align="center" valign="middle" style="width:40px;height:40px;background-color:#1d6bff;border-radius:10px;font-family:'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:22px;font-weight:700;color:#ffffff;line-height:40px;">P</td>
+                <td style="padding-left:14px;font-family:'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;color:#ffffff;">
+                  <div style="font-size:20px;font-weight:700;letter-spacing:0.3px;line-height:1.1;">Premisave</div>
+                  <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#9db4d6;margin-top:3px;">{{product}}</div>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr><td height="4" style="height:4px;line-height:4px;font-size:4px;background-color:#1d6bff;">&nbsp;</td></tr>
+        <tr>
+          <td class="px txt" style="padding:40px 36px 36px 36px;font-family:'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:16px;line-height:1.65;color:#1b2430;">
+            {{contentHtml}}
+          </td>
+        </tr>
+        <tr>
+          <td class="px foot muted" style="padding:24px 36px;background-color:#f6f8fb;border-top:1px solid #dfe4ec;font-family:'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.7;color:#6b7686;">
+            {{footnote}}
+          </td>
+        </tr>
+      </table>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;">
+        <tr>
+          <td align="center" class="muted" style="padding:18px 12px 0 12px;font-family:'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;color:#8892a2;">
+            &copy; {{year}} Premisave. All rights reserved.
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>

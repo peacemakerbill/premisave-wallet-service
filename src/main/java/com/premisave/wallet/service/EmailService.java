@@ -1,16 +1,14 @@
 package com.premisave.wallet.service;
 
+import com.premisave.wallet.util.EmailLayout;
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
@@ -21,6 +19,11 @@ import java.util.Map;
  * disbursement success/failure, transfers, payments) from plain HTML
  * templates stored as classpath resources under templates/email/.
  *
+ * Every email shares one look, defined by EmailLayout and
+ * templates/email/layout.html (the same design as the developer service
+ * emails). Each template file holds only the body; send() puts it inside
+ * the shared page.
+ *
  * Every public method here runs asynchronously (@Async, enabled via
  * AsyncConfig) — sending an email involves a real SMTP round-trip, and
  * without this, that latency would sit directly in the HTTP response
@@ -29,14 +32,18 @@ import java.util.Map;
  * thread shortly after.
  *
  * Templates use simple {{placeholder}} string substitution, not a real
- * templating engine — deliberate, see earlier reasoning. To still
- * support OPTIONAL detail rows (gateway, exchange rate, sender/recipient
- * name, account info, provider receipt) without a real conditional
- * syntax, each template has a single {{extraRows}} placeholder that this
- * class populates with zero or more pre-built <tr> HTML fragments — see
- * row()/rows() below. A row whose value is null/blank contributes
- * nothing at all, so the placeholder is simply empty when a piece of
- * data doesn't apply (e.g. no exchange rate for a USD-native gateway).
+ * templating engine — deliberate, see earlier reasoning. Every value is
+ * HTML escaped when it is put in, so a name or reference that contains
+ * markup can never change the email. To still support OPTIONAL detail
+ * rows (gateway, exchange rate, sender/recipient name, account info,
+ * provider receipt) without a real conditional syntax, each template has
+ * a single {{extraRowsHtml}} placeholder that this class populates with
+ * zero or more pre-built <tr> HTML fragments — see row()/rows() below
+ * (their values are escaped there). A row whose value is null/blank
+ * contributes nothing at all, so the placeholder is simply empty when a
+ * piece of data doesn't apply (e.g. no exchange rate for a USD-native
+ * gateway). Only a placeholder whose name ends in Html is inserted as it
+ * is.
  *
  * NO MASKING — every value (phone number, email, contact info) is shown
  * in full, exactly as the caller supplies it.
@@ -63,13 +70,12 @@ public class EmailService {
 
     private final JavaMailSender mailSender;
 
-    private static final String TEMPLATE_PATH = "templates/email/";
     private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("dd MMM yyyy, h:mm a");
 
-    /** Matches every existing detail row's exact styling in every template — see class javadoc on {{extraRows}}. */
-    private static final String ROW_HTML =
-            "<tr><td style=\"padding: 10px 0; color:#6b7280; border-bottom: 1px solid #F0F1F3;\">%s</td>"
-                    + "<td style=\"padding: 10px 0; color:#1a1a1a; font-weight:600; text-align:right; border-bottom: 1px solid #F0F1F3;\">%s</td></tr>";
+    private static final String PRODUCT = "Wallet";
+    private static final String FOOTNOTE =
+            "You are receiving this email because of activity on your Premisave wallet. "
+                    + "This is an automated message, please do not reply.";
 
     /**
      * Optional extra detail rows for a deposit confirmation — bundled
@@ -132,7 +138,7 @@ public class EmailService {
         vars.put("currency", currency);
         vars.put("reference", reference);
         vars.put("newBalance", newBalance);
-        vars.put("extraRows", rows(
+        vars.put("extraRowsHtml", rows(
                 "Payment Gateway", details.gateway(),
                 "Exchange Rate Used", details.exchangeRateInfo(),
                 "Sender Name", details.senderName(),
@@ -142,7 +148,8 @@ public class EmailService {
                 "Account Number", details.accountNumber(),
                 "Account ID", details.accountId()
         ));
-        send(toEmail, "Deposit Confirmation - Premisave", "deposit-confirmation-email.html", vars);
+        send(toEmail, "Deposit Confirmation - Premisave", "deposit-confirmation-email",
+                "Your wallet was credited with " + amount + " " + currency + ".", vars);
     }
 
     /** destination: shown exactly as given, no masking. */
@@ -154,14 +161,15 @@ public class EmailService {
         vars.put("currency", currency);
         vars.put("destination", destination);
         vars.put("reference", reference);
-        vars.put("extraRows", rows(
+        vars.put("extraRowsHtml", rows(
                 "Payment Gateway", details.gateway(),
                 "Exchange Rate Used", details.exchangeRateInfo(),
                 "Sender Name", details.senderName(),
                 "Account Number", details.accountNumber(),
                 "Account ID", details.accountId()
         ));
-        send(toEmail, "Withdrawal Successful - Premisave", "disbursement-success-email.html", vars);
+        send(toEmail, "Withdrawal Successful - Premisave", "disbursement-success-email",
+                amount + " " + currency + " was sent from your wallet.", vars);
     }
 
     /**
@@ -177,14 +185,15 @@ public class EmailService {
         vars.put("amount", amount);
         vars.put("currency", currency);
         vars.put("reason", reason);
-        vars.put("extraRows", rows(
+        vars.put("extraRowsHtml", rows(
                 "Payment Gateway", details.gateway(),
                 "Intended Destination", destination,
                 "Sender Name", details.senderName(),
                 "Account Number", details.accountNumber(),
                 "Account ID", details.accountId()
         ));
-        send(toEmail, "Disbursement Failed - Premisave", "disbursement-failed-email.html", vars);
+        send(toEmail, "Disbursement Failed - Premisave", "disbursement-failed-email",
+                "Your withdrawal of " + amount + " " + currency + " could not be processed.", vars);
     }
 
     /**
@@ -213,7 +222,7 @@ public class EmailService {
         vars.put("currency", currency);
         vars.put("counterpartyEmail", counterpartyEmail);
         vars.put("reference", reference);
-        vars.put("extraRows", rows(
+        vars.put("extraRowsHtml", rows(
                 isSenderCopy ? "Recipient Name" : "Sender Name", counterpartyName
         ));
 
@@ -228,7 +237,8 @@ public class EmailService {
         }
 
         String subject = (isSenderCopy ? "Transfer Sent" : "Transfer Received") + " - Premisave";
-        send(toEmail, subject, "transfer-notification-email.html", vars);
+        send(toEmail, subject, "transfer-notification-email",
+                (isSenderCopy ? "You sent " : "You received ") + amount + " " + currency + ".", vars);
     }
 
     /**
@@ -249,15 +259,16 @@ public class EmailService {
         vars.put("currency", currency);
         vars.put("service", service);
         vars.put("reference", reference);
-        vars.put("extraRows", rows(
+        vars.put("extraRowsHtml", rows(
                 "Sender Name", senderName,
                 "Account Number", accountNumber,
                 "Account ID", accountId
         ));
-        send(toEmail, "Payment Confirmation - Premisave", "payment-confirmation-email.html", vars);
+        send(toEmail, "Payment Confirmation - Premisave", "payment-confirmation-email",
+                "Your payment of " + amount + " " + currency + " went through.", vars);
     }
 
-    private void send(String toEmail, String subject, String templateFile, Map<String, String> vars) {
+    private void send(String toEmail, String subject, String templateName, String preheader, Map<String, String> vars) {
         if (toEmail == null || toEmail.isBlank()) {
             log.warn("Skipping email '{}' — no recipient email address available", subject);
             return;
@@ -272,11 +283,8 @@ public class EmailService {
         vars.put("timestamp", LocalDateTime.now().format(TIMESTAMP_FORMAT));
 
         try {
-            String html = loadTemplate(templateFile);
-            for (Map.Entry<String, String> entry : vars.entrySet()) {
-                String value = entry.getValue() != null ? entry.getValue() : "";
-                html = html.replace("{{" + entry.getKey() + "}}", value);
-            }
+            String body = EmailLayout.fill(EmailLayout.template(templateName), vars);
+            String html = EmailLayout.wrap(PRODUCT, subject, preheader, FOOTNOTE, body);
 
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
@@ -292,14 +300,7 @@ public class EmailService {
         }
     }
 
-    private String loadTemplate(String filename) throws IOException {
-        ClassPathResource resource = new ClassPathResource(TEMPLATE_PATH + filename);
-        try (var inputStream = resource.getInputStream()) {
-            return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
-        }
-    }
-
-    // ─── Optional-row building (see class javadoc on {{extraRows}}) ────────
+    // ─── Optional-row building (see class javadoc on {{extraRowsHtml}}) ────────
 
     /** Builds zero or more <tr> rows from label/value pairs, in order, skipping any pair whose value is null/blank entirely — no empty row ever renders. */
     private static String rows(String... labelValuePairs) {
@@ -314,6 +315,6 @@ public class EmailService {
         if (value == null || value.isBlank()) {
             return "";
         }
-        return String.format(ROW_HTML, label, value);
+        return EmailLayout.detailRow(label, value, false);
     }
 }

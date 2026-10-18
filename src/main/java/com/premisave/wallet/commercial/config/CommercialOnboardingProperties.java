@@ -1,5 +1,6 @@
 package com.premisave.wallet.commercial.config;
 
+import com.premisave.wallet.commercial.onboarding.DocumentType;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.List;
@@ -8,7 +9,8 @@ import java.util.Locale;
 /**
  * Merchant onboarding (commercial.onboarding.*).
  *
- * requiredDocuments: document types that must be uploaded before an application can be submitted.
+ * requiredDocuments: document types that must be uploaded before an application can be submitted. Names must be
+ * DocumentType values, anything else stops the service at startup so a typo cannot lock every applicant out.
  * staffNotifyEmails: addresses told when an application is submitted or resubmitted. Leave empty to skip.
  * mailFrom: sender address of onboarding emails. Empty uses the mail account's own address.
  * roles: which staff roles may do what. Role names come from the X-Actor-Role header, compared without case.
@@ -34,6 +36,12 @@ public record CommercialOnboardingProperties(
                 ? List.of("BUSINESS_REGISTRATION", "TAX_COMPLIANCE", "DIRECTOR_ID")
                 : requiredDocuments.stream().filter(s -> s != null && !s.isBlank())
                         .map(s -> s.trim().toUpperCase(Locale.ROOT)).toList();
+        for (String type : requiredDocuments) {
+            if (java.util.Arrays.stream(DocumentType.values()).noneMatch(t -> t.name().equals(type))) {
+                throw new IllegalArgumentException("commercial.onboarding.required-documents has an unknown type '" + type
+                        + "'. Use any of " + java.util.Arrays.toString(DocumentType.values()));
+            }
+        }
         if (maxDocumentBytes == null || maxDocumentBytes < 1024) maxDocumentBytes = 5L * 1024 * 1024;
         if (maxDocumentBytes > MAX_DOCUMENT_BYTES_LIMIT) maxDocumentBytes = MAX_DOCUMENT_BYTES_LIMIT;
         if (maxDocuments == null || maxDocuments < 1) maxDocuments = 20;
