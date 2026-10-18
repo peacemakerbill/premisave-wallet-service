@@ -328,16 +328,18 @@ commercial:
     replay-window-seconds: 300
   events:
     # Where outbox events are forwarded for delivery to merchant URLs.
-    # Leave empty for now. The developer service does not accept events yet (a later slice adds
-    # POST /internal/events), so with an address here the dispatcher would only fail and retry.
-    # Events stay safely in the outbox while this is empty.
+    # This address is also used by the developer search (GET /internal/commercial/v1/developers).
+    # The developer service does not accept events yet (a later slice adds POST /internal/events),
+    # so while it does not, set COMMERCIAL_EVENTS_DISPATCHER_ENABLED=false: the search works and
+    # events wait safely in the outbox instead of failing and retrying. With the address empty the
+    # search answers NOT_CONFIGURED and the dispatcher logs a warning once at startup.
     developer-service-url: ${DEVELOPER_SERVICE_URL:}
     api-key: ${DEVELOPER_SERVICE_API_KEY:}
     signing-secret: ${COMMERCIAL_EVENTS_SIGNING_SECRET:}
     max-attempts: 12
     dispatch-batch-size: 50
     http-timeout-seconds: 10
-    dispatcher-enabled: true
+    dispatcher-enabled: ${COMMERCIAL_EVENTS_DISPATCHER_ENABLED:true}
     dispatch-interval-ms: 2000
   sandbox:
     # Delay before a sandbox payment or payout that follows the test amount

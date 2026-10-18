@@ -36,7 +36,12 @@ public class CommercialSettingsConfig {
         if (props.drive().configured()) {
             return new GoogleDriveStorage(props.drive(), json);
         }
-        log.warn("Onboarding document storage is not configured (commercial.onboarding.drive.*); uploads will be refused");
+        if (Boolean.TRUE.equals(props.drive().enabled())) {
+            log.warn("Onboarding document storage is switched on but incomplete: set the service account key and "
+                    + "commercial.onboarding.drive.folder-id; uploads will be refused until then");
+        } else {
+            log.info("Onboarding document storage is switched off (commercial.onboarding.drive.enabled=false); uploads will be refused");
+        }
         return new UnconfiguredDocumentStorage();
     }
 }

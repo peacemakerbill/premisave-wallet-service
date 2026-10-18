@@ -25,10 +25,11 @@ import org.springframework.stereotype.Component;
  * unique indexes would silently not exist.
  *
  * Only documents (classes annotated with @Document) in the commercial package are touched; the rest of the wallet
- * service keeps whatever index handling it has today. A failure on one document
- * (for example duplicates already stored under a unique index) is logged and
- * does not stop the others or the service from starting. Creating an index that
- * already exists with the same definition does nothing.
+ * service keeps whatever index handling it has today. A failure on one index
+ * (for example duplicates already stored under a unique index, or an older index
+ * of the same name with different options) is logged as one warning and does not
+ * stop the other indexes, the other documents or the service from starting.
+ * Creating an index that already exists with the same definition does nothing.
  */
 @Component("commercialIndexInitializer")
 @ConditionalOnProperty(prefix = "commercial.indexes", name = "ensure", havingValue = "true", matchIfMissing = true)
@@ -49,6 +50,7 @@ public class CommercialIndexInitializer {
                 mongo.getConverter().getMappingContext();
         IndexResolver resolver = new MongoPersistentEntityIndexResolver(mapping);
         int types = 0;
+        int failed = 0;
         for (MongoPersistentEntity<?> entity : mapping.getPersistentEntities()) {
             Class<?> type = entity.getType();
             if (!type.getName().startsWith(PACKAGE)) continue;
@@ -57,13 +59,29 @@ public class CommercialIndexInitializer {
             try {
                 IndexOperations ops = mongo.indexOps(type);
                 for (IndexDefinition definition : resolver.resolveIndexFor(type)) {
-                    ops.createIndex(definition);
+                    try {
+                        ops.createIndex(definition);
+                    } catch (RuntimeException e) {
+                        failed++;
+                        String collection = mongo.getCollectionName(type);
+                        log.warn("Could not create an index on {} ({}): {}. If an older index with the same name exists, list it with "
+                                + "db.{}.getIndexes() in mongosh, drop it with db.{}.dropIndex(\"<name>\") and restart.",
+                                type.getSimpleName(), collection, rootMessage(e), collection, collection);
+                    }
                 }
                 types++;
             } catch (RuntimeException e) {
-                log.error("Could not create the indexes for {}", type.getSimpleName(), e);
+                failed++;
+                log.error("Could not work out the indexes for {}", type.getSimpleName(), e);
             }
         }
-        log.info("Commercial indexes checked for {} document types", types);
+        log.info("Commercial indexes checked for {} document types, {} index(es) could not be created", types, failed);
+    }
+
+    private static String rootMessage(Throwable e) {
+        Throwable t = e;
+        while (t.getCause() != null && t.getCause() != t) t = t.getCause();
+        String m = t.getMessage();
+        return m == null ? t.getClass().getSimpleName() : m;
     }
 }
