@@ -8,7 +8,7 @@ public class UnconfiguredDocumentStorage implements DocumentStorage {
 
     private static CommercialException unavailable() {
         return new CommercialException(ErrorCode.PROVIDER_UNAVAILABLE,
-                "Document storage is not configured. Set commercial.onboarding.storage.path and try again");
+                "Document storage is not configured. Set STORAGE_MODE and the matching folder settings in .env and restart");
     }
 
     @Override public StoredFile upload(String fileName, String contentType, byte[] bytes) { throw unavailable(); }

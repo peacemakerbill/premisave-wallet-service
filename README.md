@@ -303,8 +303,19 @@ PAYPAL_CLIENT_ID=...
 FLUTTERWAVE_CLIENT_ID=...
 NOWPAYMENTS_API_KEY=...
 
+# Onboarding document storage (see Document folder setup). LOCAL keeps files on this server,
+# NETWORK keeps them on a share (NAS, office server, over a VPN) that is mounted on this server.
+STORAGE_MODE=LOCAL
+STORAGE_ROOT=/var/lib/premisave/onboarding
+# Used only when STORAGE_MODE=NETWORK:
+STORAGE_NETWORK_PROTOCOL=SMB
+STORAGE_NETWORK_HOST=
+STORAGE_NETWORK_SHARE=
+STORAGE_NETWORK_MOUNT_PATH=
+STORAGE_NETWORK_DIRECTORY=premisave-wallet
+STORAGE_NETWORK_REQUIRE_MOUNT=true
+
 # Commercial API (optional, see the Commercial API section)
-COMMERCIAL_ONBOARDING_STORAGE_PATH=/mnt/synology/premisave-onboarding
 DEVELOPER_SERVICE_URL=
 DEVELOPER_SERVICE_API_KEY=
 ```
@@ -389,7 +400,8 @@ The service **refuses to start** if `INTERNAL_API_KEY` is missing, by design.
 | Commission and rates | `COMMISSION_INTERNAL_TRANSFER_RATE`, `COMMISSION_GATEWAY_RATE`, `EXCHANGE_RATE_REFRESH_INTERVAL_MS`, `EXCHANGE_RATE_BASE_CURRENCY`, `EXCHANGE_RATE_MAX_RETRIES` |
 | Commercial general | `COMMERCIAL_ENABLED`, `COMMERCIAL_SERVES` (`live`, `sandbox` or `both`), `COMMERCIAL_CURRENCIES`, `COMMERCIAL_SANDBOX_REDIRECT_BASE`, `COMMERCIAL_SIGNING_ENABLED`, `COMMERCIAL_SIGNING_SECRETS` |
 | Events to the developer service | `DEVELOPER_SERVICE_URL`, `DEVELOPER_SERVICE_API_KEY`, `COMMERCIAL_EVENTS_DISPATCHER_ENABLED`, `COMMERCIAL_EVENTS_SIGNING_SECRET` |
-| Onboarding | `COMMERCIAL_ONBOARDING_ENABLED`, `COMMERCIAL_ONBOARDING_STAFF_EMAILS`, `COMMERCIAL_ONBOARDING_MAIL_FROM`, `COMMERCIAL_ONBOARDING_STORAGE_PATH` |
+| Onboarding | `COMMERCIAL_ONBOARDING_ENABLED`, `COMMERCIAL_ONBOARDING_STAFF_EMAILS`, `COMMERCIAL_ONBOARDING_MAIL_FROM` |
+| Onboarding document storage | `STORAGE_MODE`, `STORAGE_ROOT`, `STORAGE_NETWORK_PROTOCOL`, `STORAGE_NETWORK_HOST`, `STORAGE_NETWORK_SHARE`, `STORAGE_NETWORK_MOUNT_PATH`, `STORAGE_NETWORK_DIRECTORY`, `STORAGE_NETWORK_REQUIRE_MOUNT` (`COMMERCIAL_ONBOARDING_STORAGE_PATH` is the old name for `STORAGE_ROOT` and still works) |
 | Payment links | `COMMERCIAL_LINKS_CHECKOUT_BASE_URL`, `COMMERCIAL_LINKS_SANDBOX_CHECKOUT_BASE_URL` |
 | Commercial rails | `COMMERCIAL_MPESA_ENABLED`, `COMMERCIAL_MPESA_CALLBACK_BASE_URL`, `COMMERCIAL_MPESA_CALLBACK_SECRET`, `COMMERCIAL_STRIPE_ENABLED`, `COMMERCIAL_STRIPE_PUBLISHABLE_KEY`, `COMMERCIAL_STRIPE_WEBHOOK_SECRET`, `COMMERCIAL_PAYPAL_ENABLED`, `COMMERCIAL_FLUTTERWAVE_ENABLED`, `COMMERCIAL_NOWPAYMENTS_ENABLED`, `COMMERCIAL_PREMISAVE_ENABLED` |
 
@@ -421,7 +433,8 @@ commercial.refunds.approval-threshold-usd, recovery-interval-ms
 commercial.disputes.evidence-window-days, recovery-interval-ms
 commercial.billing.scheduler-enabled, scheduler-interval-ms, upcoming-days, stuck-minutes, batch-size, clock-wait-ms
 commercial.onboarding.enabled, required-documents, max-document-bytes, max-documents,
-                staff-notify-emails, mail-from, roles.*, storage.path
+                staff-notify-emails, mail-from, roles.*, storage.mode, storage.path,
+                storage.network.protocol, host, share, mount-path, directory, require-mount
 ```
 
 The service refuses to start if the M-Pesa rail or the C2B paybill settings are enabled but invalid: a callback address that is not https, a secret under 16 characters, or a shortcode that is not 5 to 7 digits. The other rails do not check their settings at startup; a missing provider key shows up as a failed call.
@@ -955,33 +968,64 @@ Every step is written to `onboarding_events`, append only: who (applicant, staff
 
 ### Document folder setup
 
-Documents are written to a folder on the server that runs the wallet service. It can be a local directory, or a network share from a file server you already run (a Synology NAS or any NFS or SMB server) mounted on that server. The service only sees a path; there is no address, user name or password in its settings, because the operating system handles the connection.
+Documents are written to a folder on the server that runs the wallet service. The folder can be on the server's own disk (`STORAGE_MODE=LOCAL`) or on a network location mounted on that server (`STORAGE_MODE=NETWORK`): a Synology or other NAS, a Windows share, an NFS export, or an office file server reached over a VPN. The service only sees a folder. It never opens a network connection to the file server and holds no address, user name or password for it, because the operating system handles the connection. That is also why a VPN works: bring the VPN up, mount the share, and the service just writes to the mount.
 
-```yaml
-commercial:
-  onboarding:
-    storage:
-      path: /mnt/synology/premisave-onboarding     # COMMERCIAL_ONBOARDING_STORAGE_PATH
+```env
+# LOCAL: documents stay on this server's disk
+STORAGE_MODE=LOCAL
+STORAGE_ROOT=/var/lib/premisave/onboarding
+
+# NETWORK: documents go to a folder on a mounted share (STORAGE_ROOT is ignored)
+STORAGE_MODE=NETWORK
+STORAGE_NETWORK_PROTOCOL=SMB                 # SMB, NFS, SFTP, WEBDAV or OTHER
+STORAGE_NETWORK_HOST=10.8.0.5                # optional: the mount must come from this server
+STORAGE_NETWORK_SHARE=premisave              # optional: and from this share
+STORAGE_NETWORK_MOUNT_PATH=/mnt/nas          # where the share is mounted
+STORAGE_NETWORK_DIRECTORY=premisave-wallet   # sub folder on the share
+STORAGE_NETWORK_REQUIRE_MOUNT=true
 ```
 
-The folder must already exist and be writable by the user that runs the service. The service never creates it, on purpose: if a share is not mounted and the service created the folder, documents would quietly land on the local disk instead of the NAS. If the folder is missing or not writable, uploads fail with `503 PROVIDER_UNAVAILABLE`, the startup log says why, and nothing else in onboarding is affected. An upload writes a temporary file and renames it into place, then records it; if recording fails the file is deleted again. Removing a document deletes its file. The file id is checked against a strict pattern before it touches the disk, so a stored or supplied id cannot point outside the folder.
+| Setting | Meaning |
+|:-|:-|
+| `STORAGE_MODE` | `LOCAL` (default) or `NETWORK`. Anything else stops the service at startup. |
+| `STORAGE_ROOT` | LOCAL only. An existing folder the service user can write to. |
+| `STORAGE_NETWORK_PROTOCOL` | The kind of share that is mounted: `SMB` (default), `NFS`, `SFTP` (sshfs), `WEBDAV` or `OTHER` (no type check). |
+| `STORAGE_NETWORK_HOST`, `STORAGE_NETWORK_SHARE` | Optional but recommended. When set, the mount's source must contain them, so a different server or share mounted at the same path is refused. Write the host the way `/etc/fstab` does. |
+| `STORAGE_NETWORK_MOUNT_PATH` | NETWORK only, required. The local folder the share is mounted on. |
+| `STORAGE_NETWORK_DIRECTORY` | Sub folder on the share for this service. Plain name, no `..`. Empty uses the root of the share. Created on the share at startup if missing, and only once the share is confirmed mounted. |
+| `STORAGE_NETWORK_REQUIRE_MOUNT` | `true` (default): before every read and write the service confirms the mount path really is a mounted share of that type (from `/proc/self/mountinfo`). If the VPN drops or the NAS is down, uploads fail with `503` instead of landing on the local disk. `false` skips the check and is meant for macOS or Windows development machines, where mounts cannot be checked. |
+
+Every document setting is also in `application.yml` under `commercial.onboarding.storage`, with comments for the next developer.
+
+The folder must already exist and be writable by the user that runs the service. In LOCAL mode the service never creates it, on purpose: a typo in the path would otherwise start filling the wrong disk. If the folder is missing, not writable, or (NETWORK mode) not mounted, uploads fail with `503 PROVIDER_UNAVAILABLE`, the startup log says why, and nothing else in onboarding is affected. An upload writes a temporary file and renames it into place, then records it; if recording fails the file is deleted again. Removing a document deletes its file. The file id is checked against a strict pattern before it touches the disk, so a stored or supplied id cannot point outside the folder.
+
+**Switching modes.** Documents already stored stay where they were written; the application keeps only each file's path inside the folder. To move from LOCAL to NETWORK, copy the contents of the old folder (the month folders such as `2026-10/`) into the same place on the share first, then change `STORAGE_MODE` and restart. Switching without copying makes older documents report as missing at submit time.
 
 **Local directory.** `sudo mkdir -p /var/lib/premisave/onboarding`, then `sudo chown premisave:premisave /var/lib/premisave/onboarding` and `sudo chmod 750 /var/lib/premisave/onboarding` (use the account that runs the service).
 
 **Synology over NFS (Linux servers).**
 
 1. In DSM create a shared folder such as `premisave-onboarding`. Under Control Panel, File Services, NFS, enable NFS. On the shared folder, NFS Permissions, add a rule for the wallet server's IP address with read/write access.
-2. On the wallet server: `sudo apt install nfs-common` and `sudo mkdir -p /mnt/synology/premisave-onboarding`.
-3. Add to `/etc/fstab` (use the Synology's IP or host name, and check the export path in the DSM NFS permissions dialog): `192.168.1.50:/volume1/premisave-onboarding /mnt/synology/premisave-onboarding nfs4 defaults,_netdev,nofail 0 0`
-4. `sudo mount -a`, then confirm the service user can write: `sudo -u premisave touch /mnt/synology/premisave-onboarding/.probe && sudo -u premisave rm /mnt/synology/premisave-onboarding/.probe`. If it cannot, adjust the squash and user mapping on the DSM NFS rule.
+2. On the wallet server: `sudo apt install nfs-common` and `sudo mkdir -p /mnt/nas`.
+3. Add to `/etc/fstab` (use the Synology's IP or host name, and check the export path in the DSM NFS permissions dialog): `192.168.1.50:/volume1/premisave-onboarding /mnt/nas nfs4 defaults,_netdev,nofail 0 0`
+4. `sudo mount -a`, then confirm the service user can write: `sudo -u premisave touch /mnt/nas/.probe && sudo -u premisave rm /mnt/nas/.probe`. If it cannot, adjust the squash and user mapping on the DSM NFS rule.
+5. In `.env`: `STORAGE_MODE=NETWORK`, `STORAGE_NETWORK_PROTOCOL=NFS`, `STORAGE_NETWORK_HOST=192.168.1.50`, `STORAGE_NETWORK_SHARE=premisave-onboarding`, `STORAGE_NETWORK_MOUNT_PATH=/mnt/nas`, `STORAGE_NETWORK_DIRECTORY=premisave-wallet`.
 
-**Synology over SMB.** Install `cifs-utils`, create a DSM user with read/write on the shared folder, keep its credentials in a root only file (`/etc/premisave-smb.cred` with `username=` and `password=` lines, `chmod 600`), and mount with `//192.168.1.50/premisave-onboarding /mnt/synology/premisave-onboarding cifs credentials=/etc/premisave-smb.cred,uid=premisave,gid=premisave,file_mode=0640,dir_mode=0750,_netdev,nofail 0 0`.
+**SMB (Synology, Windows server, Samba).** Install `cifs-utils`, create a user with read/write on the shared folder, keep its credentials in a root only file (`/etc/premisave-smb.cred` with `username=` and `password=` lines, `chmod 600`), and mount with `//192.168.1.50/premisave-onboarding /mnt/nas cifs credentials=/etc/premisave-smb.cred,uid=premisave,gid=premisave,file_mode=0640,dir_mode=0750,_netdev,nofail 0 0`. In `.env` use `STORAGE_NETWORK_PROTOCOL=SMB` with the same host and share.
 
-**Docker.** Mount the share on the host as above and bind it into the container (`-v /mnt/synology/premisave-onboarding:/data/onboarding`), then set the path to `/data/onboarding`.
+**Over a VPN.** The share lives in an office or another network and the wallet server reaches it through a VPN (WireGuard, OpenVPN, IPsec).
 
-**Keep an unmounted share from filling the local disk.** Before mounting, run `sudo chattr +i /mnt/synology/premisave-onboarding` on the empty mount point. While the share is mounted the flag is hidden by the mount; if the mount drops, the empty directory cannot be written to, so uploads fail with 503 instead of being stored locally.
+1. Bring the VPN up on the server as a system service so it starts at boot, and use the file server's VPN address in the mount (for example `10.8.0.5`).
+2. Mount with options that tolerate the network not being there yet and that mount again when it returns. For SMB or NFS add `_netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=30,x-systemd.idle-timeout=0` to the fstab line. Run `sudo systemctl daemon-reload` and then `sudo systemctl restart remote-fs.target` after editing.
+3. Keep `STORAGE_NETWORK_REQUIRE_MOUNT=true`. While the VPN is down the mount is gone, uploads and downloads return `503`, the log line says the share is not mounted, and nothing is written locally. When the VPN is back and the share mounts again, the service works again with no restart.
+4. Expect more delay than on a local network. Documents are at most 8 MB each, which is fine over a normal VPN link.
+5. Prefer SMB 3 or NFS over a private tunnel, and never expose SMB or NFS ports to the public internet.
 
-**Backups and privacy.** These are identity and tax documents. Keep the share private to the wallet server and the reviewing staff, take Synology snapshots or Hyper Backup on a schedule, and never expose the folder to the internet.
+**Docker.** Mount the share on the host as above and bind it into the container (`-v /mnt/nas:/data/nas`), then set `STORAGE_NETWORK_MOUNT_PATH=/data/nas`. A bind mount of a mounted share is normally still reported as a mount inside the container; if your setup hides it, the startup log says the folder is not a mount point, and you can set `STORAGE_NETWORK_REQUIRE_MOUNT=false` after protecting the host side with the `chattr` step below.
+
+**Mount check as a second layer.** With `REQUIRE_MOUNT=true` the service refuses to write unless the share is mounted. As an extra guard on the server itself, run `sudo chattr +i /mnt/nas` on the empty mount point before mounting. While the share is mounted the flag is hidden by the mount; if the mount drops, nothing else can write to that empty directory either.
+
+**Backups and privacy.** These are identity and tax documents. Keep the share private to the wallet server and the reviewing staff, take snapshots or backups on a schedule, and never expose the folder to the internet.
 
 ### Developer service split
 
@@ -1185,7 +1229,7 @@ Check `EXCHANGE_RATE_REFRESH_INTERVAL_MS` and the scheduled job's own logs (`Exc
 <details>
 <summary><b>Document uploads return 503 PROVIDER_UNAVAILABLE</b></summary>
 
-The document folder is not set, does not exist, or is not writable by the user running the service. Set `COMMERCIAL_ONBOARDING_STORAGE_PATH` to an existing folder (for a NAS, mount the share first). The service never creates the folder itself, so an unmounted share cannot silently fill the local disk. The startup log says which case it is. See [Document folder setup](#document-folder-setup).
+The document folder is not set, does not exist, or is not writable by the user running the service. Set `STORAGE_ROOT` (LOCAL mode) or `STORAGE_NETWORK_MOUNT_PATH` (NETWORK mode) to an existing folder and make sure the share is mounted: the log line "is not a mount point" means the share dropped or was never mounted. The service never creates a LOCAL folder itself, so an unmounted share cannot silently fill the local disk. The startup log says which case it is. See [Document folder setup](#document-folder-setup).
 </details>
 
 <details>
@@ -1217,7 +1261,7 @@ List the unmatched receipts with `GET /internal/commercial/v1/c2b/unmatched`. Ea
 * `SecurityConfig` and `WebConfig` need the line `"/payments/commercial/rail/**",` ([Setup notes for the commercial API](#setup-notes-for-the-commercial-api)).
 * `CommercialStage2Config` to `CommercialStage7Config` were merged into one class, `CommercialSettingsConfig`, which also builds the document store bean. Delete the six old classes.
 * Apps moved to the developer service. Delete `commercial/entity/MerchantApp.java`, `commercial/repository/MerchantAppRepository.java`, `commercial/dto/CreateAppRequest.java`, `commercial/dto/UpdateAppRequest.java` and `commercial/config/CommercialMerchantsProperties.java` with its test and `MerchantAppRulesTest`. Remove the `merchants:` block under `commercial:` in `application.yml`. The wallet's `POST/GET/PUT /merchants/{merchantId}/apps` and `GET /merchants/test-numbers` no longer exist, so this is a breaking change for anything that called them. The old `merchant_apps` collection is no longer used and can be dropped; recreate any test apps through the developer service.
-* Google Drive was removed. Delete `GoogleDriveStorage`, `GoogleServiceAccount`, `DriveMultipart` and their tests, remove every `COMMERCIAL_DRIVE_*` line from `.env`, and set `COMMERCIAL_ONBOARDING_STORAGE_PATH`. In Google Cloud delete the service account and any OAuth client created for it. The application document fields `driveFileId` and `driveViewLink` became `storageFileId`; nothing was ever stored successfully, so there is no data to migrate.
+* Google Drive was removed. Delete `GoogleDriveStorage`, `GoogleServiceAccount`, `DriveMultipart` and their tests, remove every `COMMERCIAL_DRIVE_*` line from `.env`, and set `STORAGE_MODE` and `STORAGE_ROOT` (the old `COMMERCIAL_ONBOARDING_STORAGE_PATH` still works). In Google Cloud delete the service account and any OAuth client created for it. The application document fields `driveFileId` and `driveViewLink` became `storageFileId`; nothing was ever stored successfully, so there is no data to migrate.
 * Merchant numbers are now issued at approval instead of when the merchant is created. Merchants that already have a number keep it. A merchant that is already live but has no number gets one the first time it is read, so it keeps working. A merchant that is not live yet has none until its application is approved. No migration is needed: the unique index on `merchantNumber` already ignores merchants without one. Stored document names for new uploads start with the application id; files already stored keep their old names and still download, because the application keeps each file's own path. Existing merchants have no onboarding application; to put one through onboarding, call `POST /merchants/{merchantId}/application` once.
 * Order for the split: update the wallet first, then start the developer service, which needs `DEVELOPER_JWT_SECRET` (32+ characters), `API_KEY_PEPPER` (16+), `INTERNAL_API_KEY` (same as the wallet's), `WALLET_SERVICE_URL`, `MONGODB_URI` (separate database, default `premisave_developer`). It reads `spring.mongodb.uri`; Spring Boot 4 no longer reads `spring.data.mongodb.uri`.
 

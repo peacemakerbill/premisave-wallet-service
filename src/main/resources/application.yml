@@ -511,10 +511,55 @@ commercial:
       reject: [FINANCE, OPERATIONS, ADMIN]
       reopen: [ADMIN]
     storage:
-      # Folder where onboarding documents are stored: a directory on this server, or the mount point of a
-      # network share (Synology or any NAS, mounted over NFS or SMB). It must exist and be writable by the
-      # user running the service. Empty refuses document uploads.
-      path: ${COMMERCIAL_ONBOARDING_STORAGE_PATH:}
+      # ------------------------------------------------------------------------------------------------
+      # Where onboarding documents (identity and tax papers) are kept.
+      #
+      # The service only ever writes to a FOLDER. It never connects to a file server itself, so there is no
+      # address, user name or password to put here. To keep documents on a network location (a NAS, a Windows
+      # share, an office server reached over a VPN), mount that location on the server first, with fstab,
+      # systemd or your VPN script, and point NETWORK mode at the mount. The README section "Document folder
+      # setup" has ready made fstab lines for SMB and NFS and a VPN checklist.
+      #
+      # MODE: LOCAL   documents go to the folder in STORAGE_ROOT, on this server's own disk.
+      #       NETWORK documents go to STORAGE_NETWORK_DIRECTORY inside the share mounted at
+      #               STORAGE_NETWORK_MOUNT_PATH. STORAGE_ROOT is ignored.
+      # Any other value stops the service at startup. Folders are never created in LOCAL mode, so a typo in
+      # the path cannot start filling the wrong disk. If the folder is missing, uploads fail with
+      # 503 PROVIDER_UNAVAILABLE and the startup log says why.
+      mode: ${STORAGE_MODE:LOCAL}
+
+      # LOCAL mode only. An existing folder that the user running the service can write to.
+      # Example: /var/lib/premisave/onboarding
+      # COMMERCIAL_ONBOARDING_STORAGE_PATH is the old name and is still read when STORAGE_ROOT is empty.
+      path: ${STORAGE_ROOT:${COMMERCIAL_ONBOARDING_STORAGE_PATH:}}
+
+      # NETWORK mode only.
+      network:
+        # What kind of share is mounted: SMB (Windows share, Samba, Synology), NFS, SFTP (sshfs),
+        # WEBDAV or OTHER (no type check). Used to confirm the mount at the path is the right kind of mount.
+        protocol: ${STORAGE_NETWORK_PROTOCOL:SMB}
+
+        # Optional but recommended. When set, the mount's source must contain them, so a different server
+        # or share mounted at the same path is refused. Use the same host name or address as in /etc/fstab,
+        # for example host 10.8.0.5 (a VPN address) and share premisave on //10.8.0.5/premisave.
+        host: ${STORAGE_NETWORK_HOST:}
+        share: ${STORAGE_NETWORK_SHARE:}
+
+        # Required. The local folder the share is mounted on, for example /mnt/nas. The mount itself is done
+        # outside this service. Use options that survive a missing network at boot (_netdev, nofail) and, over
+        # a VPN, x-systemd.automount so the share is mounted again after the VPN comes back.
+        mount-path: ${STORAGE_NETWORK_MOUNT_PATH:}
+
+        # Sub folder on the share for this service, for example premisave-wallet. Plain name, no "..".
+        # Created on the share at startup if it is missing (only once the share is confirmed mounted).
+        # Empty uses the root of the share.
+        directory: ${STORAGE_NETWORK_DIRECTORY:}
+
+        # true (default): every read and write first confirms mount-path really is a mounted share of the
+        # type above. If the VPN drops or the NAS is down, uploads fail with 503 instead of being saved on
+        # this server's local disk. Set false only where mounts cannot be checked (macOS or Windows
+        # development machines); the service then writes to the folder whether or not it is a mount.
+        require-mount: ${STORAGE_NETWORK_REQUIRE_MOUNT:true}
   recovery-interval-ms: 30000
   expiry-interval-ms: 60000
   # Fee rules per method. Unset methods use the built in placeholder rates,

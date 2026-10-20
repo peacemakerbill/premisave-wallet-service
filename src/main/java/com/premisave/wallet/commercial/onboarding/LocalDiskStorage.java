@@ -18,8 +18,9 @@ import java.util.regex.Pattern;
 /**
  * Keeps onboarding documents in a folder on disk. The folder can be a local directory or a network share
  * (a Synology or any NAS) that the operating system has mounted at a path, so the service only ever sees a path.
+ * For a share, NETWORK mode wraps this class in MountCheckedStorage, which refuses calls while the share is not mounted.
  *
- * Files are grouped by month, for example 2026-10/PRM-0000000001_TAX_COMPLIANCE_doc_x_pin.pdf. The file id kept on
+ * Files are grouped by month, for example 2026-10/onb_x_TAX_COMPLIANCE_doc_x_pin.pdf. The file id kept on
  * the application is that relative path. Ids are checked against a strict pattern before they touch the disk, so
  * a stored or supplied id can never point outside the folder.
  *

@@ -9,12 +9,12 @@
     {
       "name": "auth.service.api-key",
       "type": "java.lang.String",
-      "description": "Shared secret injected as X-API-Key on internal service-to-service calls (e.g. C2B email validation). Must match AUTH_SERVICE_API_KEY on the auth service. Never used for user-facing Feign calls \u2014 those forward the caller's Bearer JWT instead."
+      "description": "Shared secret injected as X-API-Key on internal service-to-service calls (e.g. C2B email validation). Must match AUTH_SERVICE_API_KEY on the auth service. Never used for user-facing Feign calls — those forward the caller's Bearer JWT instead."
     },
     {
       "name": "internal.api-key",
       "type": "java.lang.String",
-      "description": "Shared secret internal services present via X-API-Key when calling wallet-service's /internal/** endpoints (see InternalApiKeyFilter). Must match property-service's app.api-key (INTERNAL_API_KEY env var) \u2014 both services read the same INTERNAL_API_KEY name, but from their own separate .env files."
+      "description": "Shared secret internal services present via X-API-Key when calling wallet-service's /internal/** endpoints (see InternalApiKeyFilter). Must match property-service's app.api-key (INTERNAL_API_KEY env var) — both services read the same INTERNAL_API_KEY name, but from their own separate .env files."
     },
     {
       "name": "jwt.secret",
@@ -62,7 +62,7 @@
     {
       "name": "mpesa.daraja.certificate-path",
       "type": "java.lang.String",
-      "description": "Path to Safaricom's public X.509 certificate (.cer) used to RSA-encrypt initiator passwords into a SecurityCredential for B2C and B2B (see MpesaSecurityCredentialService). Bare paths (e.g. 'certs/SandboxCertificate.cer') resolve from the classpath \u2014 place files under src/main/resources/certs/. Prefix with 'file:' to load from an external path instead (e.g. a mounted secret). Sandbox and production use DIFFERENT certificate files.",
+      "description": "Path to Safaricom's public X.509 certificate (.cer) used to RSA-encrypt initiator passwords into a SecurityCredential for B2C and B2B (see MpesaSecurityCredentialService). Bare paths (e.g. 'certs/SandboxCertificate.cer') resolve from the classpath — place files under src/main/resources/certs/. Prefix with 'file:' to load from an external path instead (e.g. a mounted secret). Sandbox and production use DIFFERENT certificate files.",
       "defaultValue": "certs/SandboxCertificate.cer"
     },
     {
@@ -73,7 +73,7 @@
     {
       "name": "mpesa.daraja.b2c.initiator-password",
       "type": "java.lang.String",
-      "description": "Plaintext M-Pesa B2C API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService \u2014 never sent to Safaricom directly, and no separate security-credential property is needed."
+      "description": "Plaintext M-Pesa B2C API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService — never sent to Safaricom directly, and no separate security-credential property is needed."
     },
     {
       "name": "mpesa.daraja.b2c.shortcode",
@@ -95,7 +95,7 @@
     {
       "name": "mpesa.daraja.b2c.result-url",
       "type": "java.lang.String",
-      "description": "Publicly accessible HTTPS URL Safaricom POSTs the final B2C transaction result to. This \u2014 not the initial paymentrequest response \u2014 is the actual source of truth for success/failure."
+      "description": "Publicly accessible HTTPS URL Safaricom POSTs the final B2C transaction result to. This — not the initial paymentrequest response — is the actual source of truth for success/failure."
     },
     {
       "name": "mpesa.daraja.b2c.min-amount",
@@ -117,7 +117,7 @@
     {
       "name": "mpesa.daraja.b2b.initiator-password",
       "type": "java.lang.String",
-      "description": "Plaintext M-Pesa B2B API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService \u2014 never sent to Safaricom directly, and no separate security-credential property is needed."
+      "description": "Plaintext M-Pesa B2B API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService — never sent to Safaricom directly, and no separate security-credential property is needed."
     },
     {
       "name": "mpesa.daraja.b2b.shortcode",
@@ -157,7 +157,7 @@
     {
       "name": "mpesa.daraja.b2b.result-url",
       "type": "java.lang.String",
-      "description": "Publicly accessible HTTPS URL Safaricom POSTs the final B2B transaction result to. This \u2014 not the initial paymentrequest response \u2014 is the actual source of truth for success/failure. Note: B2B is a permissioned Safaricom API; confirm it's enabled for your shortcode before relying on it in production."
+      "description": "Publicly accessible HTTPS URL Safaricom POSTs the final B2B transaction result to. This — not the initial paymentrequest response — is the actual source of truth for success/failure. Note: B2B is a permissioned Safaricom API; confirm it's enabled for your shortcode before relying on it in production."
     },
     {
       "name": "mpesa.daraja.b2b.min-amount",
@@ -196,7 +196,7 @@
     {
       "name": "mpesa.daraja.express-checkout.receiver-shortcode",
       "type": "java.lang.String",
-      "description": "M-Pesa till shortcode being paid via B2B Express Checkout (USSD Push to Till). No initiator/security-credential needed \u2014 authenticated via the normal OAuth bearer token.",
+      "description": "M-Pesa till shortcode being paid via B2B Express Checkout (USSD Push to Till). No initiator/security-credential needed — authenticated via the normal OAuth bearer token.",
       "defaultValue": "174379"
     },
     {
@@ -218,7 +218,7 @@
     {
       "name": "mpesa.daraja.account-top-up.initiator-password",
       "type": "java.lang.String",
-      "description": "Plaintext M-Pesa API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService \u2014 never sent to Safaricom directly, and no separate security-credential property is needed."
+      "description": "Plaintext M-Pesa API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService — never sent to Safaricom directly, and no separate security-credential property is needed."
     },
     {
       "name": "mpesa.daraja.account-top-up.party-a",
@@ -239,12 +239,12 @@
     {
       "name": "mpesa.daraja.transaction-status.initiator-name",
       "type": "java.lang.String",
-      "description": "M-Pesa API operator username used to query the status of a prior transaction. Not yet wired to a service \u2014 reserved for automatic reconciliation of stuck B2C/B2B disbursements."
+      "description": "M-Pesa API operator username used to query the status of a prior transaction. Not yet wired to a service — reserved for automatic reconciliation of stuck B2C/B2B disbursements."
     },
     {
       "name": "mpesa.daraja.transaction-status.initiator-password",
       "type": "java.lang.String",
-      "description": "Plaintext M-Pesa API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService \u2014 never sent to Safaricom directly, and no separate security-credential property is needed."
+      "description": "Plaintext M-Pesa API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService — never sent to Safaricom directly, and no separate security-credential property is needed."
     },
     {
       "name": "mpesa.daraja.transaction-status.party-a",
@@ -276,7 +276,7 @@
     {
       "name": "mpesa.daraja.account-balance.initiator-password",
       "type": "java.lang.String",
-      "description": "Plaintext M-Pesa API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService \u2014 never sent to Safaricom directly, and no separate security-credential property is needed."
+      "description": "Plaintext M-Pesa API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService — never sent to Safaricom directly, and no separate security-credential property is needed."
     },
     {
       "name": "mpesa.daraja.account-balance.party-a",
@@ -303,12 +303,12 @@
     {
       "name": "mpesa.daraja.reversal.initiator-name",
       "type": "java.lang.String",
-      "description": "M-Pesa API operator username used to reverse a completed C2B transaction. Note: B2C payouts cannot be reversed via API \u2014 portal only."
+      "description": "M-Pesa API operator username used to reverse a completed C2B transaction. Note: B2C payouts cannot be reversed via API — portal only."
     },
     {
       "name": "mpesa.daraja.reversal.initiator-password",
       "type": "java.lang.String",
-      "description": "Plaintext M-Pesa API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService \u2014 never sent to Safaricom directly, and no separate security-credential property is needed."
+      "description": "Plaintext M-Pesa API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService — never sent to Safaricom directly, and no separate security-credential property is needed."
     },
     {
       "name": "mpesa.daraja.reversal.receiver-party",
@@ -340,7 +340,7 @@
     {
       "name": "mpesa.daraja.b2-pochi.initiator-password",
       "type": "java.lang.String",
-      "description": "Plaintext M-Pesa API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService \u2014 never sent to Safaricom directly, and no separate security-credential property is needed."
+      "description": "Plaintext M-Pesa API operator password. RSA-encrypted at runtime using mpesa.daraja.certificate-path via MpesaSecurityCredentialService — never sent to Safaricom directly, and no separate security-credential property is needed."
     },
     {
       "name": "mpesa.daraja.b2-pochi.party-a",
@@ -379,13 +379,13 @@
     {
       "name": "mpesa.daraja.pull-transactions.nominated-number",
       "type": "java.lang.String",
-      "description": "The Safaricom MSISDN tied to this shortcode's KYC, found on the M-PESA portal \u2014 not something you choose arbitrarily. Required for the Pull Transactions API.",
+      "description": "The Safaricom MSISDN tied to this shortcode's KYC, found on the M-PESA portal — not something you choose arbitrarily. Required for the Pull Transactions API.",
       "defaultValue": "254722000000"
     },
     {
       "name": "mpesa.daraja.pull-transactions.callback-url",
       "type": "java.lang.String",
-      "description": "Publicly accessible HTTPS URL Safaricom POSTs pulled transaction batches to. Unlike every other operational M-Pesa API above, Pull Transactions needs NO initiator name/password/SecurityCredential \u2014 just the OAuth bearer token, same as STK Push and C2B Register URL."
+      "description": "Publicly accessible HTTPS URL Safaricom POSTs pulled transaction batches to. Unlike every other operational M-Pesa API above, Pull Transactions needs NO initiator name/password/SecurityCredential — just the OAuth bearer token, same as STK Push and C2B Register URL."
     },
     {
       "name": "mpesa.daraja.pull-transactions.pull-days",
@@ -402,12 +402,12 @@
     {
       "name": "stripe.secret-key",
       "type": "java.lang.String",
-      "description": "Stripe secret API key (sk_test_* for sandbox, sk_live_* for production). Found in the Stripe Dashboard under Developers \u2192 API keys."
+      "description": "Stripe secret API key (sk_test_* for sandbox, sk_live_* for production). Found in the Stripe Dashboard under Developers → API keys."
     },
     {
       "name": "stripe.webhook-secret",
       "type": "java.lang.String",
-      "description": "Stripe platform webhook signing secret (whsec_*) \u2014 verifies /payments/stripe/webhook (deposits, saved cards). Found in Stripe Dashboard \u2192 Webhooks \u2192 your platform endpoint \u2192 Signing secret. Distinct from stripe.connect.webhook-secret below, which is a separate destination for events on connected accounts."
+      "description": "Stripe platform webhook signing secret (whsec_*) — verifies /payments/stripe/webhook (deposits, saved cards). Found in Stripe Dashboard → Webhooks → your platform endpoint → Signing secret. Distinct from stripe.connect.webhook-secret below, which is a separate destination for events on connected accounts."
     },
     {
       "name": "stripe.connect.refresh-url",
@@ -417,12 +417,12 @@
     {
       "name": "stripe.connect.return-url",
       "type": "java.lang.String",
-      "description": "Frontend URL Stripe redirects the user to after finishing or exiting Connect onboarding. Reaching this URL does not guarantee onboarding fully succeeded \u2014 the frontend should call POST /wallet/stripe/connect/refresh or GET /wallet/stripe/connect/account to confirm actual status."
+      "description": "Frontend URL Stripe redirects the user to after finishing or exiting Connect onboarding. Reaching this URL does not guarantee onboarding fully succeeded — the frontend should call POST /wallet/stripe/connect/refresh or GET /wallet/stripe/connect/account to confirm actual status."
     },
     {
       "name": "stripe.connect.webhook-secret",
       "type": "java.lang.String",
-      "description": "Stripe Connect webhook signing secret (whsec_*) \u2014 verifies /payments/stripe/connect/webhook (account.updated, payout.paid, payout.failed on connected accounts). Created as a SEPARATE destination from stripe.webhook-secret above via Dashboard \u2192 Webhooks \u2192 new destination \u2192 'Listen to events on Connected accounts' \u2014 Stripe does not deliver connected-account events to the platform webhook's destination."
+      "description": "Stripe Connect webhook signing secret (whsec_*) — verifies /payments/stripe/connect/webhook (account.updated, payout.paid, payout.failed on connected accounts). Created as a SEPARATE destination from stripe.webhook-secret above via Dashboard → Webhooks → new destination → 'Listen to events on Connected accounts' — Stripe does not deliver connected-account events to the platform webhook's destination."
     },
     {
       "name": "paypal.client-id",
@@ -458,7 +458,7 @@
     {
       "name": "flutterwave.client-id",
       "type": "java.lang.String",
-      "description": "Flutterwave v4 OAuth2 client_credentials client ID. Replaces v3's static Secret Key/Public Key model entirely \u2014 v4 has no 'public key'. Found in the Flutterwave Dashboard under API keys."
+      "description": "Flutterwave v4 OAuth2 client_credentials client ID. Replaces v3's static Secret Key/Public Key model entirely — v4 has no 'public key'. Found in the Flutterwave Dashboard under API keys."
     },
     {
       "name": "flutterwave.client-secret",
@@ -473,13 +473,13 @@
     {
       "name": "flutterwave.environment",
       "type": "java.lang.String",
-      "description": "Flutterwave environment to target: 'sandbox' or 'production'. Unlike v3, this DOES determine the base URL (see FlutterwaveConfig.baseUrl()) \u2014 sandbox and production are genuinely different hosts, not just different key prefixes on one URL.",
+      "description": "Flutterwave environment to target: 'sandbox' or 'production'. Unlike v3, this DOES determine the base URL (see FlutterwaveConfig.baseUrl()) — sandbox and production are genuinely different hosts, not just different key prefixes on one URL.",
       "defaultValue": "sandbox"
     },
     {
       "name": "flutterwave.webhook-secret-hash",
       "type": "java.lang.String",
-      "description": "Arbitrary shared-secret string configured in the Flutterwave Dashboard (Settings \u2192 Webhooks \u2192 Secret Hash). Used as the HMAC-SHA256 key to verify the 'flutterwave-signature' header on incoming /payments/flutterwave/webhook requests (see FlutterwaveService.verifyWebhookSignature) \u2014 NOT a plain string comparison the way v3's 'verif-hash' worked."
+      "description": "Arbitrary shared-secret string configured in the Flutterwave Dashboard (Settings → Webhooks → Secret Hash). Used as the HMAC-SHA256 key to verify the 'flutterwave-signature' header on incoming /payments/flutterwave/webhook requests (see FlutterwaveService.verifyWebhookSignature) — NOT a plain string comparison the way v3's 'verif-hash' worked."
     },
     {
       "name": "flutterwave.redirect-url",
@@ -489,7 +489,7 @@
     {
       "name": "flutterwave.sandbox-scenario-key",
       "type": "java.lang.String",
-      "description": "SANDBOX TESTING ONLY. When set, every write call to Flutterwave carries this value as the 'X-Scenario-Key' header, forcing a deterministic mock outcome (e.g. 'scenario:successful', 'scenario:failed', 'scenario:auth_redirect') instead of default sandbox behavior. Leave unset in production \u2014 sending this against the live API is rejected or ignored depending on endpoint, and its presence in production config is a signal something is misconfigured."
+      "description": "SANDBOX TESTING ONLY. When set, every write call to Flutterwave carries this value as the 'X-Scenario-Key' header, forcing a deterministic mock outcome (e.g. 'scenario:successful', 'scenario:failed', 'scenario:auth_redirect') instead of default sandbox behavior. Leave unset in production — sending this against the live API is rejected or ignored depending on endpoint, and its presence in production config is a signal something is misconfigured."
     },
     {
       "name": "flutterwave.transfer.min-amount",
@@ -506,50 +506,50 @@
     {
       "name": "flutterwave.transfer.source-currency",
       "type": "java.lang.String",
-      "description": "The currency your Flutterwave balance actually holds \u2014 used as payment_instruction.source_currency on every payout. NOT automatically the same as the destination currency the recipient receives in. Confirm your actual settlement/balance currency in the Flutterwave dashboard before relying on this in production.",
+      "description": "The currency your Flutterwave balance actually holds — used as payment_instruction.source_currency on every payout. NOT automatically the same as the destination currency the recipient receives in. Confirm your actual settlement/balance currency in the Flutterwave dashboard before relying on this in production.",
       "defaultValue": "KES"
     },
     {
       "name": "nowpayments.base-url",
       "type": "java.lang.String",
-      "description": "NOWPayments API host. Sandbox and production are genuinely separate hosts with separate accounts/keys, not just different key prefixes on one URL \u2014 'https://api-sandbox.nowpayments.io' for testing, 'https://api.nowpayments.io' for production. No trailing slash.",
+      "description": "NOWPayments API host. Sandbox and production are genuinely separate hosts with separate accounts/keys, not just different key prefixes on one URL — 'https://api-sandbox.nowpayments.io' for testing, 'https://api.nowpayments.io' for production. No trailing slash.",
       "defaultValue": "https://api-sandbox.nowpayments.io"
     },
     {
       "name": "nowpayments.api-key",
       "type": "java.lang.String",
-      "description": "NOWPayments API key, sent as the 'x-api-key' header on every request. Found in Dashboard \u2192 Settings \u2192 Payments \u2192 API keys. Requires at least one wallet added under Payout wallets before a key can be generated."
+      "description": "NOWPayments API key, sent as the 'x-api-key' header on every request. Found in Dashboard → Settings → Payments → API keys. Requires at least one wallet added under Payout wallets before a key can be generated."
     },
     {
       "name": "nowpayments.ipn-secret",
       "type": "java.lang.String",
-      "description": "Verifies the 'x-nowpayments-sig' header on incoming IPN webhooks (see NowPaymentsService.verifyIpnSignature) \u2014 HMAC-SHA512 over the recursively-key-sorted JSON body. Found in Dashboard \u2192 Settings \u2192 Payments \u2192 Instant payment notifications. NOT the same value as nowpayments.api-key above, and NOT interchangeable between sandbox/production."
+      "description": "Verifies the 'x-nowpayments-sig' header on incoming IPN webhooks (see NowPaymentsService.verifyIpnSignature) — HMAC-SHA512 over the recursively-key-sorted JSON body. Found in Dashboard → Settings → Payments → Instant payment notifications. NOT the same value as nowpayments.api-key above, and NOT interchangeable between sandbox/production."
     },
     {
       "name": "nowpayments.callback-url",
       "type": "java.lang.String",
-      "description": "Your own public HTTPS URL for /payments/nowpayments/webhook, sent as ipn_callback_url on every Create Payment request. No sandbox tunnel/CLI tooling exists here the way Stripe CLI's 'stripe listen' does \u2014 this needs to be a real reachable URL (e.g. via zrok/ngrok in dev) even while testing in sandbox."
+      "description": "Your own public HTTPS URL for /payments/nowpayments/webhook, sent as ipn_callback_url on every Create Payment request. No sandbox tunnel/CLI tooling exists here the way Stripe CLI's 'stripe listen' does — this needs to be a real reachable URL (e.g. via zrok/ngrok in dev) even while testing in sandbox."
     },
     {
       "name": "nowpayments.payout-email",
       "type": "java.lang.String",
-      "description": "Your NOWPayments DASHBOARD LOGIN email \u2014 NOT the same thing as nowpayments.api-key, and a meaningfully more sensitive secret. Required only for payouts: obtains a short-lived JWT via POST /v1/auth (see NowPaymentsService.getAuthToken), needed in addition to the x-api-key header every other call uses. Deposits never touch this."
+      "description": "Your NOWPayments DASHBOARD LOGIN email — NOT the same thing as nowpayments.api-key, and a meaningfully more sensitive secret. Required only for payouts: obtains a short-lived JWT via POST /v1/auth (see NowPaymentsService.getAuthToken), needed in addition to the x-api-key header every other call uses. Deposits never touch this."
     },
     {
       "name": "nowpayments.payout-password",
       "type": "java.lang.String",
-      "description": "Your NOWPayments DASHBOARD LOGIN password \u2014 paired with nowpayments.payout-email above for the same POST /v1/auth call. Treat this with real secrets-management discipline, more so than a typical API key \u2014 whoever holds it can log into the dashboard directly, not just make scoped API calls."
+      "description": "Your NOWPayments DASHBOARD LOGIN password — paired with nowpayments.payout-email above for the same POST /v1/auth call. Treat this with real secrets-management discipline, more so than a typical API key — whoever holds it can log into the dashboard directly, not just make scoped API calls."
     },
     {
       "name": "commission.internal-transfer-rate",
       "type": "java.math.BigDecimal",
-      "description": "Commission rate taken on internal wallet-to-wallet transfers (POST /wallet/transfer, POST /internal/transfer) \u2014 a decimal fraction, e.g. 0.01 for 1%, not 1. Expected lower than commission.gateway-rate, matching real payment-processing economics (an internal transfer costs nothing external, unlike a gateway withdrawal).",
+      "description": "Commission rate taken on internal wallet-to-wallet transfers (POST /wallet/transfer, POST /internal/transfer) — a decimal fraction, e.g. 0.01 for 1%, not 1. Expected lower than commission.gateway-rate, matching real payment-processing economics (an internal transfer costs nothing external, unlike a gateway withdrawal).",
       "defaultValue": 0.01
     },
     {
       "name": "commission.gateway-rate",
       "type": "java.math.BigDecimal",
-      "description": "Commission rate taken on gateway-bound disbursements (M-Pesa B2C/B2Pochi, PayPal, Stripe, Flutterwave, NOWPayments) \u2014 a decimal fraction, e.g. 0.03 for 3%, not 3. Expected higher than commission.internal-transfer-rate, roughly in line with typical real-world gateway processing fees.",
+      "description": "Commission rate taken on gateway-bound disbursements (M-Pesa B2C/B2Pochi, PayPal, Stripe, Flutterwave, NOWPayments) — a decimal fraction, e.g. 0.03 for 3%, not 3. Expected higher than commission.internal-transfer-rate, roughly in line with typical real-world gateway processing fees.",
       "defaultValue": 0.03
     },
     {
@@ -561,7 +561,7 @@
     {
       "name": "notifications.b2b-recipients",
       "type": "java.lang.String",
-      "description": "Comma-separated admin/finance email addresses notified on every B2B success/failure (see MpesaDisbursementService.notifyB2BRecipients). B2B never touches a customer wallet, so there's no wallet owner's email to notify the way B2C/B2Pochi have \u2014 this is who gets it instead. Whitespace around commas is trimmed. Left empty/unset is safe: logs a warning and sends no email, never throws."
+      "description": "Comma-separated admin/finance email addresses notified on every B2B success/failure (see MpesaDisbursementService.notifyB2BRecipients). B2B never touches a customer wallet, so there's no wallet owner's email to notify the way B2C/B2Pochi have — this is who gets it instead. Whitespace around commas is trimmed. Left empty/unset is safe: logs a warning and sends no email, never throws."
     },
     {
       "name": "exchange-rate.refresh-interval-ms",
@@ -1239,9 +1239,47 @@
       ]
     },
     {
+      "name": "commercial.onboarding.storage.mode",
+      "type": "java.lang.String",
+      "description": "Where onboarding documents are stored: LOCAL (the folder in path) or NETWORK (a folder on a share mounted at network.mount-path). Env: STORAGE_MODE.",
+      "defaultValue": "LOCAL"
+    },
+    {
       "name": "commercial.onboarding.storage.path",
       "type": "java.lang.String",
-      "description": "Folder where onboarding documents are stored: a directory on the server or the mount point of a network share (Synology or any NAS over NFS or SMB). It must exist and be writable by the service user. Empty refuses document uploads."
+      "description": "LOCAL mode folder for onboarding documents. It must exist and be writable by the service user. Empty refuses document uploads. Env: STORAGE_ROOT (the old COMMERCIAL_ONBOARDING_STORAGE_PATH is still read)."
+    },
+    {
+      "name": "commercial.onboarding.storage.network.protocol",
+      "type": "java.lang.String",
+      "description": "Kind of share mounted for NETWORK mode: SMB, NFS, SFTP, WEBDAV or OTHER. Env: STORAGE_NETWORK_PROTOCOL.",
+      "defaultValue": "SMB"
+    },
+    {
+      "name": "commercial.onboarding.storage.network.host",
+      "type": "java.lang.String",
+      "description": "Optional server name or address the mount must come from, as written in /etc/fstab. Env: STORAGE_NETWORK_HOST."
+    },
+    {
+      "name": "commercial.onboarding.storage.network.share",
+      "type": "java.lang.String",
+      "description": "Optional share or export name the mount must come from. Env: STORAGE_NETWORK_SHARE."
+    },
+    {
+      "name": "commercial.onboarding.storage.network.mount-path",
+      "type": "java.lang.String",
+      "description": "Local folder where the share is mounted by the operating system. Required in NETWORK mode. Env: STORAGE_NETWORK_MOUNT_PATH."
+    },
+    {
+      "name": "commercial.onboarding.storage.network.directory",
+      "type": "java.lang.String",
+      "description": "Sub folder on the share where documents go. Empty uses the root of the share. Env: STORAGE_NETWORK_DIRECTORY."
+    },
+    {
+      "name": "commercial.onboarding.storage.network.require-mount",
+      "type": "java.lang.Boolean",
+      "description": "Refuse reads and writes unless mount-path is really a mounted share, so a dropped VPN or NAS never sends documents to the local disk. Env: STORAGE_NETWORK_REQUIRE_MOUNT.",
+      "defaultValue": true
     }
   ],
   "hints": [
@@ -1361,11 +1399,11 @@
       "values": [
         {
           "value": "sandbox",
-          "description": "Flutterwave sandbox environment \u2014 hits developersandbox-api.flutterwave.com."
+          "description": "Flutterwave sandbox environment — hits developersandbox-api.flutterwave.com."
         },
         {
           "value": "production",
-          "description": "Flutterwave live environment \u2014 hits f4bexperience.flutterwave.com."
+          "description": "Flutterwave live environment — hits f4bexperience.flutterwave.com."
         }
       ]
     },
