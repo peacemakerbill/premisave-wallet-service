@@ -766,12 +766,12 @@
     },
     {
       "name": "commercial.fees.collection",
-      "type": "java.util.Map<java.lang.String,com.premisave.wallet.commercial.config.CommercialProperties$FeeRule>",
+      "type": "java.util.Map<java.lang.String,com.premisave.wallet.commercial.config.properties.CommercialProperties$FeeRule>",
       "description": "Fee rules for incoming payments, keyed by method name (for example MOBILE_MONEY or CARD). Each rule has percent-bps (100 = 1%), flat-cents, min-cents and max-cents. A method without a rule uses the built-in default rule."
     },
     {
       "name": "commercial.fees.payout",
-      "type": "java.util.Map<java.lang.String,com.premisave.wallet.commercial.config.CommercialProperties$FeeRule>",
+      "type": "java.util.Map<java.lang.String,com.premisave.wallet.commercial.config.properties.CommercialProperties$FeeRule>",
       "description": "Fee rules for payouts, keyed by method name. Same rule shape as commercial.fees.collection. A method without a rule uses the built-in default rule."
     },
     {

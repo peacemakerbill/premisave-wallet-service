@@ -1,6 +1,6 @@
 package com.premisave.wallet.commercial.rail.paypal;
 
-import com.premisave.wallet.commercial.config.CommercialRailsProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialRailsProperties;
 import com.premisave.wallet.commercial.rail.http.ProviderHttp;
 import com.premisave.wallet.service.PaypalService;
 import org.springframework.beans.factory.annotation.Value;

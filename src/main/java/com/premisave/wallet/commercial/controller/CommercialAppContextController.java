@@ -1,7 +1,7 @@
 package com.premisave.wallet.commercial.controller;
 
-import com.premisave.wallet.commercial.dto.AppContextRequest;
-import com.premisave.wallet.commercial.dto.LimitsDto;
+import com.premisave.wallet.commercial.dto.merchant.AppContextRequest;
+import com.premisave.wallet.commercial.dto.merchant.LimitsDto;
 import com.premisave.wallet.commercial.entity.Limits;
 import com.premisave.wallet.commercial.enums.Environment;
 import com.premisave.wallet.commercial.enums.ErrorCode;

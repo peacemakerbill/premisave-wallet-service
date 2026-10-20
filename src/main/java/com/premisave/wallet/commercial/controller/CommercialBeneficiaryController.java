@@ -1,9 +1,9 @@
 package com.premisave.wallet.commercial.controller;
 
-import com.premisave.wallet.commercial.beneficiary.BeneficiaryService;
-import com.premisave.wallet.commercial.dto.LookupAccountRequest;
-import com.premisave.wallet.commercial.dto.VerifyBeneficiaryRequest;
+import com.premisave.wallet.commercial.dto.beneficiary.LookupAccountRequest;
+import com.premisave.wallet.commercial.dto.beneficiary.VerifyBeneficiaryRequest;
 import com.premisave.wallet.commercial.security.CommercialContextHolder;
+import com.premisave.wallet.commercial.service.beneficiary.BeneficiaryService;
 import com.premisave.wallet.dto.ApiResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;

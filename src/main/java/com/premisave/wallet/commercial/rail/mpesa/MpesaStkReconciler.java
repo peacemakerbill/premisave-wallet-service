@@ -1,6 +1,6 @@
 package com.premisave.wallet.commercial.rail.mpesa;
 
-import com.premisave.wallet.commercial.config.CommercialMpesaProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialMpesaProperties;
 import com.premisave.wallet.commercial.entity.CommercialTransaction;
 import com.premisave.wallet.commercial.enums.RailId;
 import com.premisave.wallet.commercial.enums.TxStatus;

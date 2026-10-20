@@ -1,6 +1,6 @@
 package com.premisave.wallet.commercial.controller;
 
-import com.premisave.wallet.commercial.dto.QuoteRequest;
+import com.premisave.wallet.commercial.dto.payment.QuoteRequest;
 import com.premisave.wallet.commercial.security.CommercialContextHolder;
 import com.premisave.wallet.commercial.service.CapabilityService;
 import com.premisave.wallet.commercial.service.QuoteService;

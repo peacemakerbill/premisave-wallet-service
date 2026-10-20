@@ -1,11 +1,11 @@
 package com.premisave.wallet.commercial.controller;
 
-import com.premisave.wallet.commercial.batch.BulkPayoutService;
-import com.premisave.wallet.commercial.dto.BulkPayoutRequest;
+import com.premisave.wallet.commercial.dto.batch.BulkPayoutRequest;
 import com.premisave.wallet.commercial.security.CommercialContext;
 import com.premisave.wallet.commercial.security.CommercialContextHolder;
 import com.premisave.wallet.commercial.security.CommercialRequestFilter;
 import com.premisave.wallet.commercial.service.CommercialIdempotencyService;
+import com.premisave.wallet.commercial.service.batch.BulkPayoutService;
 import com.premisave.wallet.dto.ApiResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;

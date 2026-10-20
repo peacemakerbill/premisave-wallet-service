@@ -1,6 +1,6 @@
 package com.premisave.wallet.commercial.rail;
 
-import com.premisave.wallet.commercial.config.CommercialRailsProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialRailsProperties;
 import com.premisave.wallet.commercial.entity.CommercialTransaction;
 import com.premisave.wallet.commercial.enums.TxStatus;
 import com.premisave.wallet.commercial.enums.TxType;

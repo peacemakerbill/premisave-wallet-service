@@ -1,6 +1,6 @@
 package com.premisave.wallet.commercial.rail.mpesa.c2b;
 
-import com.premisave.wallet.commercial.link.AccountReference;
+import com.premisave.wallet.commercial.entity.link.AccountReference;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;

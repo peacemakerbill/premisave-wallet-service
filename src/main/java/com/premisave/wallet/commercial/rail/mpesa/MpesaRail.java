@@ -1,8 +1,8 @@
 package com.premisave.wallet.commercial.rail.mpesa;
 
-import com.premisave.wallet.commercial.config.CommercialMpesaProperties;
-import com.premisave.wallet.commercial.enums.Direction;
+import com.premisave.wallet.commercial.config.properties.CommercialMpesaProperties;
 import com.premisave.wallet.commercial.enums.DestinationType;
+import com.premisave.wallet.commercial.enums.Direction;
 import com.premisave.wallet.commercial.enums.Environment;
 import com.premisave.wallet.commercial.enums.MethodType;
 import com.premisave.wallet.commercial.enums.RailId;

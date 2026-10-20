@@ -1,17 +1,17 @@
 package com.premisave.wallet.commercial.controller;
 
-import com.premisave.wallet.dto.ApiResponse;
 import com.premisave.wallet.commercial.dto.PageViews;
+import com.premisave.wallet.commercial.dto.onboarding.DecisionRequest;
+import com.premisave.wallet.commercial.dto.onboarding.DocumentVerdictRequest;
+import com.premisave.wallet.commercial.dto.onboarding.NoteRequest;
+import com.premisave.wallet.commercial.dto.onboarding.OnboardingViews;
+import com.premisave.wallet.commercial.dto.onboarding.ReturnApplicationRequest;
+import com.premisave.wallet.commercial.entity.onboarding.Actor;
 import com.premisave.wallet.commercial.enums.ErrorCode;
+import com.premisave.wallet.commercial.enums.onboarding.OnboardingStatus;
 import com.premisave.wallet.commercial.exception.CommercialException;
-import com.premisave.wallet.commercial.onboarding.Actor;
-import com.premisave.wallet.commercial.onboarding.DecisionRequest;
-import com.premisave.wallet.commercial.onboarding.DocumentVerdictRequest;
-import com.premisave.wallet.commercial.onboarding.NoteRequest;
-import com.premisave.wallet.commercial.onboarding.OnboardingReviewService;
-import com.premisave.wallet.commercial.onboarding.OnboardingStatus;
-import com.premisave.wallet.commercial.onboarding.OnboardingViews;
-import com.premisave.wallet.commercial.onboarding.ReturnApplicationRequest;
+import com.premisave.wallet.commercial.service.onboarding.OnboardingReviewService;
+import com.premisave.wallet.dto.ApiResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;

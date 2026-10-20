@@ -1,15 +1,15 @@
 package com.premisave.wallet.commercial.rail.stripe;
 
-import com.premisave.wallet.commercial.billing.BillingCustomer;
-import com.premisave.wallet.commercial.billing.CredentialSetup;
-import com.premisave.wallet.commercial.billing.CustomerPaymentMethod;
-import com.premisave.wallet.commercial.config.CommercialRailsProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialRailsProperties;
+import com.premisave.wallet.commercial.entity.billing.BillingCustomer;
+import com.premisave.wallet.commercial.entity.billing.CustomerPaymentMethod;
 import com.premisave.wallet.commercial.enums.Environment;
+import com.premisave.wallet.commercial.enums.ErrorCode;
 import com.premisave.wallet.commercial.enums.MethodType;
 import com.premisave.wallet.commercial.exception.CommercialException;
-import com.premisave.wallet.commercial.enums.ErrorCode;
 import com.premisave.wallet.commercial.rail.http.ProviderHttp;
 import com.premisave.wallet.commercial.security.CommercialContext;
+import com.premisave.wallet.commercial.service.billing.CredentialSetup;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 

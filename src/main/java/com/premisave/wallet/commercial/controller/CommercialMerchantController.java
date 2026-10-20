@@ -1,8 +1,8 @@
 package com.premisave.wallet.commercial.controller;
 
-import com.premisave.wallet.commercial.dto.ChangeStatusRequest;
-import com.premisave.wallet.commercial.dto.CreateMerchantRequest;
-import com.premisave.wallet.commercial.dto.UpdateConfigRequest;
+import com.premisave.wallet.commercial.dto.merchant.ChangeStatusRequest;
+import com.premisave.wallet.commercial.dto.merchant.CreateMerchantRequest;
+import com.premisave.wallet.commercial.dto.merchant.UpdateConfigRequest;
 import com.premisave.wallet.commercial.service.MerchantService;
 import com.premisave.wallet.dto.ApiResponse;
 import jakarta.validation.Valid;

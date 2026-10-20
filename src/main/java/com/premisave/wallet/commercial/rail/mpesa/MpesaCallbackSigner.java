@@ -1,6 +1,6 @@
 package com.premisave.wallet.commercial.rail.mpesa;
 
-import com.premisave.wallet.commercial.config.CommercialMpesaProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialMpesaProperties;
 import com.premisave.wallet.commercial.util.Hashing;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;

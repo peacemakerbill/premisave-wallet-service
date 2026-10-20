@@ -1,8 +1,9 @@
 package com.premisave.wallet.commercial.rail.mpesa.c2b;
 
-import com.premisave.wallet.commercial.config.CommercialC2bProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialC2bProperties;
 import com.premisave.wallet.commercial.entity.CallbackRegistration;
 import com.premisave.wallet.commercial.entity.CommercialTransaction;
+import com.premisave.wallet.commercial.entity.link.AccountReference;
 import com.premisave.wallet.commercial.enums.Direction;
 import com.premisave.wallet.commercial.enums.MethodType;
 import com.premisave.wallet.commercial.enums.RailId;
@@ -11,13 +12,12 @@ import com.premisave.wallet.commercial.enums.RegistrationType;
 import com.premisave.wallet.commercial.enums.ResultCode;
 import com.premisave.wallet.commercial.enums.TxStatus;
 import com.premisave.wallet.commercial.enums.TxType;
-import com.premisave.wallet.commercial.link.AccountReference;
-import com.premisave.wallet.commercial.link.AccountReferenceRepository;
 import com.premisave.wallet.commercial.rail.RailOutcome;
 import com.premisave.wallet.commercial.rail.RailResultSink;
 import com.premisave.wallet.commercial.repository.CallbackRegistrationRepository;
-import com.premisave.wallet.commercial.service.CommercialTransactionStore;
+import com.premisave.wallet.commercial.repository.link.AccountReferenceRepository;
 import com.premisave.wallet.commercial.service.CommercialPaymentService;
+import com.premisave.wallet.commercial.service.CommercialTransactionStore;
 import com.premisave.wallet.commercial.service.DeveloperServiceClient;
 import com.premisave.wallet.commercial.service.Priced;
 import com.premisave.wallet.commercial.service.PricingService;

@@ -1,7 +1,7 @@
 package com.premisave.wallet.commercial.service;
 
-import com.premisave.wallet.commercial.config.CommercialProperties;
-import com.premisave.wallet.commercial.config.CommercialProperties.FeeRule;
+import com.premisave.wallet.commercial.config.properties.CommercialProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialProperties.FeeRule;
 import com.premisave.wallet.commercial.enums.Direction;
 import com.premisave.wallet.commercial.enums.MethodType;
 import org.springframework.stereotype.Service;

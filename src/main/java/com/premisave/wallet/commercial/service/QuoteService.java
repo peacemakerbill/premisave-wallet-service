@@ -1,9 +1,9 @@
 package com.premisave.wallet.commercial.service;
 
-import com.premisave.wallet.commercial.config.CommercialProperties;
-import com.premisave.wallet.commercial.dto.MethodSpec;
-import com.premisave.wallet.commercial.dto.QuoteRequest;
+import com.premisave.wallet.commercial.config.properties.CommercialProperties;
 import com.premisave.wallet.commercial.dto.Views;
+import com.premisave.wallet.commercial.dto.payment.MethodSpec;
+import com.premisave.wallet.commercial.dto.payment.QuoteRequest;
 import com.premisave.wallet.commercial.entity.Quote;
 import com.premisave.wallet.commercial.enums.DestinationType;
 import com.premisave.wallet.commercial.enums.Direction;

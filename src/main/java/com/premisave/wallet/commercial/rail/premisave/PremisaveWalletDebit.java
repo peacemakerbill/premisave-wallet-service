@@ -1,7 +1,7 @@
 package com.premisave.wallet.commercial.rail.premisave;
 
 import com.premisave.wallet.commercial.enums.ResultCode;
-import com.premisave.wallet.commercial.transfer.PremisaveWalletCredit;
+import com.premisave.wallet.commercial.service.transfer.PremisaveWalletCredit;
 import com.premisave.wallet.commercial.util.Money;
 import com.premisave.wallet.entity.Transaction;
 import com.premisave.wallet.entity.Wallet;

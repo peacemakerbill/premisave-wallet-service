@@ -1,11 +1,11 @@
 package com.premisave.wallet.commercial.controller;
 
 import com.premisave.wallet.commercial.dto.PageViews;
-import com.premisave.wallet.commercial.dto.RegistrationRequest;
-import com.premisave.wallet.commercial.dto.RegistrationStatusRequest;
-import com.premisave.wallet.commercial.dto.ResendRequest;
-import com.premisave.wallet.commercial.dto.TestEventRequest;
 import com.premisave.wallet.commercial.dto.Views;
+import com.premisave.wallet.commercial.dto.event.RegistrationRequest;
+import com.premisave.wallet.commercial.dto.event.RegistrationStatusRequest;
+import com.premisave.wallet.commercial.dto.event.ResendRequest;
+import com.premisave.wallet.commercial.dto.event.TestEventRequest;
 import com.premisave.wallet.commercial.security.CommercialContext;
 import com.premisave.wallet.commercial.security.CommercialContextHolder;
 import com.premisave.wallet.commercial.service.CallbackRegistrationService;

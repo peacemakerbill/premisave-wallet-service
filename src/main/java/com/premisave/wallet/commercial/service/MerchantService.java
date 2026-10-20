@@ -1,31 +1,31 @@
 package com.premisave.wallet.commercial.service;
 
-import com.premisave.wallet.commercial.config.CommercialOnboardingProperties;
-import com.premisave.wallet.commercial.config.CommercialProperties;
-import com.premisave.wallet.commercial.dto.ChangeStatusRequest;
-import com.premisave.wallet.commercial.dto.CreateMerchantRequest;
-import com.premisave.wallet.commercial.dto.LimitsDto;
-import com.premisave.wallet.commercial.dto.SettlementDestinationDto;
-import com.premisave.wallet.commercial.dto.UpdateConfigRequest;
+import com.premisave.wallet.commercial.config.properties.CommercialOnboardingProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialProperties;
 import com.premisave.wallet.commercial.dto.Views;
+import com.premisave.wallet.commercial.dto.merchant.ChangeStatusRequest;
+import com.premisave.wallet.commercial.dto.merchant.CreateMerchantRequest;
+import com.premisave.wallet.commercial.dto.merchant.LimitsDto;
+import com.premisave.wallet.commercial.dto.merchant.UpdateConfigRequest;
+import com.premisave.wallet.commercial.dto.settlement.SettlementDestinationDto;
 import com.premisave.wallet.commercial.entity.CommercialTransaction;
 import com.premisave.wallet.commercial.entity.Limits;
 import com.premisave.wallet.commercial.entity.MerchantProfile;
 import com.premisave.wallet.commercial.entity.MerchantWallet;
 import com.premisave.wallet.commercial.entity.SettlementDestination;
+import com.premisave.wallet.commercial.entity.onboarding.OnboardingApplication;
 import com.premisave.wallet.commercial.enums.Environment;
 import com.premisave.wallet.commercial.enums.ErrorCode;
 import com.premisave.wallet.commercial.enums.MerchantStatus;
 import com.premisave.wallet.commercial.enums.MethodType;
 import com.premisave.wallet.commercial.enums.TxStatus;
+import com.premisave.wallet.commercial.enums.onboarding.OnboardingStatus;
 import com.premisave.wallet.commercial.exception.CommercialException;
-import com.premisave.wallet.commercial.onboarding.MerchantNumberService;
-import com.premisave.wallet.commercial.onboarding.MerchantNumbers;
-import com.premisave.wallet.commercial.onboarding.OnboardingApplication;
-import com.premisave.wallet.commercial.onboarding.OnboardingService;
-import com.premisave.wallet.commercial.onboarding.OnboardingStatus;
 import com.premisave.wallet.commercial.repository.MerchantProfileRepository;
-import com.premisave.wallet.commercial.repository.OnboardingApplicationRepository;
+import com.premisave.wallet.commercial.repository.onboarding.OnboardingApplicationRepository;
+import com.premisave.wallet.commercial.service.onboarding.MerchantNumberService;
+import com.premisave.wallet.commercial.service.onboarding.MerchantNumbers;
+import com.premisave.wallet.commercial.service.onboarding.OnboardingService;
 import com.premisave.wallet.commercial.util.Ids;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -185,15 +185,15 @@ public class MerchantService {
             }
             long disputes = mongo.count(Query.query(Criteria.where("merchantId").is(merchantId)
                     .and("livemode").is(env.livemode())
-                    .and("status").in(com.premisave.wallet.commercial.dispute.Dispute.ACTIVE.stream().map(Enum::name).toList())),
-                    com.premisave.wallet.commercial.dispute.Dispute.class);
+                    .and("status").in(com.premisave.wallet.commercial.entity.dispute.Dispute.ACTIVE.stream().map(Enum::name).toList())),
+                    com.premisave.wallet.commercial.entity.dispute.Dispute.class);
             if (disputes > 0) {
                 throw CommercialException.invalidState("There are " + disputes + " disputes still open");
             }
             long subscriptions = mongo.count(Query.query(Criteria.where("merchantId").is(merchantId)
                     .and("livemode").is(env.livemode())
-                    .and("state").in(com.premisave.wallet.commercial.billing.Subscription.LIVE.stream().map(Enum::name).toList())),
-                    com.premisave.wallet.commercial.billing.Subscription.class);
+                    .and("state").in(com.premisave.wallet.commercial.entity.billing.Subscription.LIVE.stream().map(Enum::name).toList())),
+                    com.premisave.wallet.commercial.entity.billing.Subscription.class);
             if (subscriptions > 0) {
                 throw CommercialException.invalidState("There are " + subscriptions + " subscriptions still running; cancel them first");
             }

@@ -1,6 +1,6 @@
 package com.premisave.wallet.commercial.security;
 
-import com.premisave.wallet.commercial.config.CommercialProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialProperties;
 import com.premisave.wallet.commercial.entity.MerchantProfile;
 import com.premisave.wallet.commercial.enums.Environment;
 import com.premisave.wallet.commercial.enums.ErrorCode;

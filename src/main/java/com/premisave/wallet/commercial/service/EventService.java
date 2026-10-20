@@ -1,17 +1,17 @@
 package com.premisave.wallet.commercial.service;
 
+import com.premisave.wallet.commercial.dto.Views;
+import com.premisave.wallet.commercial.dto.settlement.SettlementViews;
 import com.premisave.wallet.commercial.entity.CallbackRegistration;
 import com.premisave.wallet.commercial.entity.CommercialEvent;
-import com.premisave.wallet.commercial.exception.CommercialException;
 import com.premisave.wallet.commercial.entity.CommercialTransaction;
 import com.premisave.wallet.commercial.entity.EventTarget;
 import com.premisave.wallet.commercial.enums.ForwardStatus;
 import com.premisave.wallet.commercial.enums.RegistrationStatus;
 import com.premisave.wallet.commercial.enums.RegistrationType;
+import com.premisave.wallet.commercial.exception.CommercialException;
 import com.premisave.wallet.commercial.repository.CallbackRegistrationRepository;
 import com.premisave.wallet.commercial.repository.CommercialEventRepository;
-import com.premisave.wallet.commercial.dto.SettlementViews;
-import com.premisave.wallet.commercial.dto.Views;
 import com.premisave.wallet.commercial.util.EventTypeMatcher;
 import com.premisave.wallet.commercial.util.Hashing;
 import com.premisave.wallet.commercial.util.Ids;
@@ -117,7 +117,7 @@ public class EventService {
             case PAYMENT -> Views.payment(tx);
             case PAYOUT -> Views.payout(tx);
             case SETTLEMENT -> SettlementViews.settlement(tx);
-            case REFUND -> com.premisave.wallet.commercial.refund.RefundViews.refund(tx);
+            case REFUND -> com.premisave.wallet.commercial.dto.refund.RefundViews.refund(tx);
             default -> Views.transaction(tx);
         };
     }

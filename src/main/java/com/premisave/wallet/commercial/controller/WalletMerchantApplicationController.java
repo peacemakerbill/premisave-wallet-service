@@ -1,6 +1,6 @@
 package com.premisave.wallet.commercial.controller;
 
-import com.premisave.wallet.commercial.onboarding.OwnerApplicationService;
+import com.premisave.wallet.commercial.service.onboarding.OwnerApplicationService;
 import com.premisave.wallet.dto.ApiResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;

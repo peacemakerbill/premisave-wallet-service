@@ -1,6 +1,6 @@
 package com.premisave.wallet.commercial.rail.stripe;
 
-import com.premisave.wallet.commercial.config.CommercialRailsProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialRailsProperties;
 import com.premisave.wallet.commercial.rail.http.ProviderHttp;
 import com.premisave.wallet.config.StripeConfig;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

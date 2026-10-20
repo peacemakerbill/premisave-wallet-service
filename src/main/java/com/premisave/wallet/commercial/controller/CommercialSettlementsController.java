@@ -1,16 +1,16 @@
 package com.premisave.wallet.commercial.controller;
 
-import com.premisave.wallet.commercial.dto.CreateSettlementRequest;
 import com.premisave.wallet.commercial.dto.PageViews;
-import com.premisave.wallet.commercial.dto.SettlementScheduleRequest;
-import com.premisave.wallet.commercial.dto.SettlementViews;
+import com.premisave.wallet.commercial.dto.settlement.CreateSettlementRequest;
+import com.premisave.wallet.commercial.dto.settlement.SettlementScheduleRequest;
+import com.premisave.wallet.commercial.dto.settlement.SettlementViews;
 import com.premisave.wallet.commercial.enums.TxType;
 import com.premisave.wallet.commercial.security.CommercialContext;
 import com.premisave.wallet.commercial.security.CommercialContextHolder;
 import com.premisave.wallet.commercial.security.CommercialRequestFilter;
 import com.premisave.wallet.commercial.service.CommercialIdempotencyService;
 import com.premisave.wallet.commercial.service.TransactionQueryService;
-import com.premisave.wallet.commercial.settlement.SettlementService;
+import com.premisave.wallet.commercial.service.settlement.SettlementService;
 import com.premisave.wallet.dto.ApiResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;

@@ -1,13 +1,13 @@
 package com.premisave.wallet.commercial.controller;
 
-import com.premisave.wallet.commercial.dispute.DisputeService;
-import com.premisave.wallet.commercial.dispute.DisputeViews;
 import com.premisave.wallet.commercial.dto.PageViews;
-import com.premisave.wallet.commercial.dto.SubmitEvidenceRequest;
+import com.premisave.wallet.commercial.dto.dispute.DisputeViews;
+import com.premisave.wallet.commercial.dto.dispute.SubmitEvidenceRequest;
 import com.premisave.wallet.commercial.security.CommercialContext;
 import com.premisave.wallet.commercial.security.CommercialContextHolder;
 import com.premisave.wallet.commercial.security.CommercialRequestFilter;
 import com.premisave.wallet.commercial.service.CommercialIdempotencyService;
+import com.premisave.wallet.commercial.service.dispute.DisputeService;
 import com.premisave.wallet.dto.ApiResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;

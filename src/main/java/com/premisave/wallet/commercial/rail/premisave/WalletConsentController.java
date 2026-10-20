@@ -1,6 +1,6 @@
 package com.premisave.wallet.commercial.rail.premisave;
 
-import com.premisave.wallet.commercial.billing.PaymentMethodService;
+import com.premisave.wallet.commercial.service.billing.PaymentMethodService;
 import com.premisave.wallet.commercial.util.Money;
 import com.premisave.wallet.dto.ApiResponse;
 import org.slf4j.Logger;

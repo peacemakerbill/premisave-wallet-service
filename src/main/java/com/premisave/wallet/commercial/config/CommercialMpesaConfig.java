@@ -1,5 +1,6 @@
 package com.premisave.wallet.commercial.config;
 
+import com.premisave.wallet.commercial.config.properties.CommercialMpesaProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 

@@ -1,6 +1,6 @@
 package com.premisave.wallet.commercial.service;
 
-import com.premisave.wallet.commercial.config.CommercialProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialProperties;
 import com.premisave.wallet.commercial.entity.CommercialEvent;
 import com.premisave.wallet.commercial.entity.EventTarget;
 import com.premisave.wallet.commercial.enums.ForwardStatus;

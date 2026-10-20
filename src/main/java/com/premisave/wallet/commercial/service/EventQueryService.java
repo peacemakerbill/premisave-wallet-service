@@ -1,7 +1,7 @@
 package com.premisave.wallet.commercial.service;
 
-import com.premisave.wallet.commercial.dto.ResendRequest;
-import com.premisave.wallet.commercial.dto.TestEventRequest;
+import com.premisave.wallet.commercial.dto.event.ResendRequest;
+import com.premisave.wallet.commercial.dto.event.TestEventRequest;
 import com.premisave.wallet.commercial.entity.CallbackRegistration;
 import com.premisave.wallet.commercial.entity.CommercialEvent;
 import com.premisave.wallet.commercial.entity.EventTarget;

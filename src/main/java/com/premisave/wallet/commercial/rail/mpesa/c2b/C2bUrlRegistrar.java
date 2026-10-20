@@ -1,6 +1,6 @@
 package com.premisave.wallet.commercial.rail.mpesa.c2b;
 
-import com.premisave.wallet.commercial.config.CommercialC2bProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialC2bProperties;
 import com.premisave.wallet.commercial.rail.mpesa.MpesaCallbackSigner;
 import com.premisave.wallet.commercial.rail.mpesa.MpesaDarajaClient;
 import org.slf4j.Logger;

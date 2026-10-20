@@ -1,17 +1,17 @@
 package com.premisave.wallet.commercial.rail.stripe;
 
-import com.premisave.wallet.commercial.billing.CredentialSetup;
-import com.premisave.wallet.commercial.billing.PaymentMethodService;
-import com.premisave.wallet.commercial.config.CommercialRailsProperties;
-import com.premisave.wallet.commercial.dispute.Dispute;
-import com.premisave.wallet.commercial.dispute.DisputeRepository;
-import com.premisave.wallet.commercial.dispute.DisputeService;
+import com.premisave.wallet.commercial.config.properties.CommercialRailsProperties;
 import com.premisave.wallet.commercial.entity.CommercialTransaction;
+import com.premisave.wallet.commercial.entity.dispute.Dispute;
 import com.premisave.wallet.commercial.enums.RailId;
 import com.premisave.wallet.commercial.enums.TxStatus;
 import com.premisave.wallet.commercial.enums.TxType;
 import com.premisave.wallet.commercial.rail.RailOutcome;
 import com.premisave.wallet.commercial.rail.RailResultSink;
+import com.premisave.wallet.commercial.repository.dispute.DisputeRepository;
+import com.premisave.wallet.commercial.service.billing.CredentialSetup;
+import com.premisave.wallet.commercial.service.billing.PaymentMethodService;
+import com.premisave.wallet.commercial.service.dispute.DisputeService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

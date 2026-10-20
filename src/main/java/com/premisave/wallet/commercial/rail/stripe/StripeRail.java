@@ -1,6 +1,6 @@
 package com.premisave.wallet.commercial.rail.stripe;
 
-import com.premisave.wallet.commercial.config.CommercialRailsProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialRailsProperties;
 import com.premisave.wallet.commercial.entity.CommercialTransaction;
 import com.premisave.wallet.commercial.enums.Direction;
 import com.premisave.wallet.commercial.enums.Environment;
@@ -11,8 +11,8 @@ import com.premisave.wallet.commercial.enums.TxStatus;
 import com.premisave.wallet.commercial.enums.TxType;
 import com.premisave.wallet.commercial.rail.CollectCommand;
 import com.premisave.wallet.commercial.rail.DisputeEvidenceCommand;
-import com.premisave.wallet.commercial.rail.PayoutCommand;
 import com.premisave.wallet.commercial.rail.PaymentRail;
+import com.premisave.wallet.commercial.rail.PayoutCommand;
 import com.premisave.wallet.commercial.rail.RailCapability;
 import com.premisave.wallet.commercial.rail.RailException;
 import com.premisave.wallet.commercial.rail.RailOutcome;

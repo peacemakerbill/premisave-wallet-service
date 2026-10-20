@@ -1,10 +1,19 @@
 package com.premisave.wallet.commercial.config;
 
-import com.premisave.wallet.commercial.onboarding.DocumentStorage;
-import com.premisave.wallet.commercial.onboarding.LocalDiskStorage;
-import com.premisave.wallet.commercial.onboarding.MountCheckedStorage;
-import com.premisave.wallet.commercial.onboarding.NetworkMount;
-import com.premisave.wallet.commercial.onboarding.UnconfiguredDocumentStorage;
+import com.premisave.wallet.commercial.config.properties.CommercialBatchProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialBeneficiaryProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialBillingProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialC2bProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialDisputeProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialLinksProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialOnboardingProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialRailsProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialRefundProperties;
+import com.premisave.wallet.commercial.service.onboarding.storage.DocumentStorage;
+import com.premisave.wallet.commercial.service.onboarding.storage.LocalDiskStorage;
+import com.premisave.wallet.commercial.service.onboarding.storage.MountCheckedStorage;
+import com.premisave.wallet.commercial.service.onboarding.storage.NetworkMount;
+import com.premisave.wallet.commercial.service.onboarding.storage.UnconfiguredDocumentStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;

@@ -1,6 +1,6 @@
 package com.premisave.wallet.commercial.controller;
 
-import com.premisave.wallet.commercial.onboarding.OnboardingService;
+import com.premisave.wallet.commercial.service.onboarding.OnboardingService;
 import org.springframework.http.ResponseEntity;
 
 /** Sends a stored document back as a download. */

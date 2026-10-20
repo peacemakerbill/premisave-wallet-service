@@ -1,6 +1,6 @@
 package com.premisave.wallet.commercial.rail.premisave;
 
-import com.premisave.wallet.commercial.config.CommercialRailsProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialRailsProperties;
 import com.premisave.wallet.commercial.entity.CommercialTransaction;
 import com.premisave.wallet.commercial.entity.MerchantProfile;
 import com.premisave.wallet.commercial.enums.ResultCode;
@@ -9,7 +9,7 @@ import com.premisave.wallet.commercial.rail.RailOutcome;
 import com.premisave.wallet.commercial.rail.RailResultSink;
 import com.premisave.wallet.commercial.repository.MerchantProfileRepository;
 import com.premisave.wallet.commercial.service.CommercialTransactionStore;
-import com.premisave.wallet.commercial.transfer.PremisaveWalletCredit;
+import com.premisave.wallet.commercial.service.transfer.PremisaveWalletCredit;
 import com.premisave.wallet.commercial.util.Ids;
 import org.bson.Document;
 import org.slf4j.Logger;

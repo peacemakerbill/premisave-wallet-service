@@ -1,6 +1,6 @@
 package com.premisave.wallet.commercial.security;
 
-import com.premisave.wallet.commercial.config.CommercialProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialProperties;
 import com.premisave.wallet.commercial.enums.ErrorCode;
 import com.premisave.wallet.commercial.util.Hashing;
 import com.premisave.wallet.commercial.util.Ids;

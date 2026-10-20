@@ -1,9 +1,9 @@
 package com.premisave.wallet.commercial.rail.mpesa.c2b;
 
-import com.premisave.wallet.commercial.config.CommercialC2bProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialC2bProperties;
 import com.premisave.wallet.commercial.enums.Environment;
 import com.premisave.wallet.commercial.enums.MethodType;
-import com.premisave.wallet.commercial.link.PayToProvider;
+import com.premisave.wallet.commercial.service.link.PayToProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 

@@ -1,9 +1,9 @@
 package com.premisave.wallet.commercial.service;
 
-import com.premisave.wallet.commercial.config.CommercialProperties;
-import com.premisave.wallet.commercial.dto.RegistrationRequest;
-import com.premisave.wallet.commercial.dto.RegistrationStatusRequest;
-import com.premisave.wallet.commercial.dto.TestEventRequest;
+import com.premisave.wallet.commercial.config.properties.CommercialProperties;
+import com.premisave.wallet.commercial.dto.event.RegistrationRequest;
+import com.premisave.wallet.commercial.dto.event.RegistrationStatusRequest;
+import com.premisave.wallet.commercial.dto.event.TestEventRequest;
 import com.premisave.wallet.commercial.entity.CallbackRegistration;
 import com.premisave.wallet.commercial.entity.CommercialEvent;
 import com.premisave.wallet.commercial.entity.EventTarget;

@@ -1,12 +1,12 @@
 package com.premisave.wallet.commercial.controller;
 
-import com.premisave.wallet.commercial.config.CommercialOnboardingProperties;
+import com.premisave.wallet.commercial.config.properties.CommercialOnboardingProperties;
+import com.premisave.wallet.commercial.dto.onboarding.OnboardingFormRequest;
+import com.premisave.wallet.commercial.dto.onboarding.SubmitApplicationRequest;
+import com.premisave.wallet.commercial.dto.onboarding.UploadDocumentRequest;
+import com.premisave.wallet.commercial.entity.onboarding.Actor;
 import com.premisave.wallet.commercial.exception.CommercialException;
-import com.premisave.wallet.commercial.onboarding.Actor;
-import com.premisave.wallet.commercial.onboarding.OnboardingFormRequest;
-import com.premisave.wallet.commercial.onboarding.OnboardingService;
-import com.premisave.wallet.commercial.onboarding.SubmitApplicationRequest;
-import com.premisave.wallet.commercial.onboarding.UploadDocumentRequest;
+import com.premisave.wallet.commercial.service.onboarding.OnboardingService;
 import com.premisave.wallet.dto.ApiResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
