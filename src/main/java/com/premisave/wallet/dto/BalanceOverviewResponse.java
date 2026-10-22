@@ -16,6 +16,12 @@ public class BalanceOverviewResponse {
     private long totalWalletCount;
     private BigDecimal totalPlatformBalance;
 
+    /** Money held in escrow (open holds), which belongs to no wallet. See EscrowService. */
+    private BigDecimal totalEscrowHeld;
+
+    /** totalPlatformBalance plus totalEscrowHeld: everything the platform owes its users. */
+    private BigDecimal totalPlatformLiability;
+
     private long activeWalletCount;
     private BigDecimal activeBalance;
 

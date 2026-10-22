@@ -25,6 +25,12 @@ public class SystemSummaryResponse {
     private long frozenWalletCount;
     private BigDecimal totalPlatformBalance;
 
+    /** Money held in escrow (open holds), which belongs to no wallet. See EscrowService. */
+    private BigDecimal totalEscrowHeld;
+
+    /** totalPlatformBalance plus totalEscrowHeld: everything the platform owes its users. */
+    private BigDecimal totalPlatformLiability;
+
     // ─── Deposits (all-time) ────────────────────────────────────────
     private long totalDepositCount;
     private BigDecimal totalDepositVolume;
@@ -53,7 +59,7 @@ public class SystemSummaryResponse {
     // ─── Company revenue (all-time) ──────────────────────────────────
     private BigDecimal totalCommissionFromTransfers;
     private BigDecimal totalCommissionFromDisbursements;
-    /** Sum of CompanyLedgerEntry rows with sourceType="PAYMENT" (ad subscriptions, booking fees, etc.) — the FULL amount, not a rate cut, since a Payment IS company revenue directly */
+    /** Sum of CompanyLedgerEntry rows with sourceType="PAYMENT" (ad subscriptions, booking fees, etc.) — the FULL amount, not a rate cut, since a Payment IS company revenue directly (see PaymentService/CompanyLedgerEntry javadocs). */
     private BigDecimal totalRevenueFromPayments;
     private BigDecimal totalCommissionRevenue;
 }

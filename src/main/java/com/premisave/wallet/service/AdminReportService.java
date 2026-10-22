@@ -83,6 +83,11 @@ public class AdminReportService {
     private final MongoTemplate mongoTemplate;
     private final WalletRepository walletRepository;
     private final ExchangeRateService exchangeRateService;
+    /**
+     * Money held in escrow (see EscrowService) belongs to no wallet, so it is added to the platform totals
+     * below as its own figure: wallet balances plus escrow is what the platform owes its users.
+     */
+    private final EscrowService escrowService;
 
     public DailyFinanceReportResponse getDailyReport(LocalDate date) {
         Criteria dayRange = DateRangeCriteriaUtil.applyDateRange(new Criteria(), "createdAt", date, date);
@@ -175,6 +180,9 @@ public class AdminReportService {
         BalanceOverviewResponse r = new BalanceOverviewResponse();
         r.setTotalWalletCount(wallets.size());
         r.setTotalPlatformBalance(sumBalances(wallets));
+        BigDecimal escrowHeld = escrowService.openHeldTotal();
+        r.setTotalEscrowHeld(escrowHeld);
+        r.setTotalPlatformLiability(r.getTotalPlatformBalance().add(escrowHeld));
 
         List<Wallet> active = wallets.stream().filter(w -> !w.isFrozen()).toList();
         List<Wallet> frozen = wallets.stream().filter(Wallet::isFrozen).toList();
@@ -248,6 +256,9 @@ public class AdminReportService {
         s.setActiveWalletCount(active.size());
         s.setFrozenWalletCount(frozen.size());
         s.setTotalPlatformBalance(sumBalances(wallets));
+        BigDecimal escrowHeld = escrowService.openHeldTotal();
+        s.setTotalEscrowHeld(escrowHeld);
+        s.setTotalPlatformLiability(s.getTotalPlatformBalance().add(escrowHeld));
 
         // Deposits
         s.setTotalDepositCount(deposits.size());

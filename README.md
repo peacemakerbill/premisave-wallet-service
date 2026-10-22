@@ -115,6 +115,7 @@ It was built for the Premisave platform's own microservice ecosystem (alongside 
 | **Five payment providers, one API** | M-Pesa (STK Push, C2B, B2C, B2B, B2Pochi, Reversal, Account Balance, Transaction Status, Pull Transactions), Stripe (PaymentIntents, saved cards, Stripe Connect), PayPal (Orders, vaulting, Payouts), Flutterwave v4, NOWPayments crypto. |
 | **Live currency conversion** | Scheduled background refresh from the Frankfurter API, cached in Redis and MongoDB, covering 160+ currency pairs. |
 | **Wallet-to-wallet transfers** | Instant internal transfers between Premisave users, fully commission-tracked. |
+| **Escrow for other services** | Another service (the listing service) can hold a payment, charging the commission once, and pay it out or refund it later with no second commission. See `POST /internal/escrow/hold` below. |
 | **Direct payment processing** | Subscription- and booking-fee-style payments where the full amount is recorded as company revenue, not a percentage cut. |
 | **Webhook-driven reconciliation** | Signature-verified callback handling for every provider, with idempotent processing and raw-payload audit logging. |
 | **Admin financial reporting** | Daily reports, all-time system summary, balance overview, and gateway reconciliation, all normalized to USD. |
@@ -372,6 +373,9 @@ Every setting lives in `src/main/resources/application.yml` and can be overridde
 | `NOWPAYMENTS_IPN_SECRET` | none | **yes** | IPN callback signature secret. |
 | `COMMISSION_INTERNAL_TRANSFER_RATE` | `0.01` | no | Commission rate on wallet-to-wallet transfers. |
 | `COMMISSION_GATEWAY_RATE` | `0.03` | no | Commission rate on gateway-bound disbursements. |
+| `ESCROW_ALLOWED_INITIATORS` | `LISTING_SERVICE` | no | Comma-separated `initiatedBy` values allowed to use `/internal/escrow/**`. Set it to an empty value to switch the check off. |
+| `ESCROW_STALE_PENDING_MINUTES` | `5` | no | A hold or payout still `PENDING` after this long is settled by the recovery sweep. |
+| `ESCROW_RECOVERY_INTERVAL_MS` | `60000` | no | How often the recovery sweep runs. |
 | `EXCHANGE_RATE_REFRESH_INTERVAL_MS` | `1200000` (20 min) | no | How often previously-used currency pairs are refreshed. |
 | `B2B_NOTIFICATION_RECIPIENTS` | none | no | Comma-separated admin/finance emails notified on every M-Pesa B2B outcome. |
 | `FRONTEND_URL` | `http://localhost:3000` | no | Allowed CORS origin. |
@@ -578,6 +582,183 @@ Rates are decimal fractions (`0.01` is 1%). Commission is charged on top: the se
 
 **Holding money for others.** A service that holds money and pays it out later (for example the escrow wallet of the listing service) pays commission on every payout from the holding wallet. So the holding wallet must receive the amount it will pay out plus the commission those payouts will cost. For a booking of `P`: the payouts total `P` and cost about `P * rate`, so the holding wallet needs to receive `P + P * rate`. The payer of that transfer pays commission on it too, so they are debited `(P + P * rate) * (1 + rate)`. When the payout is split in two (a refund and the owner's share), each transfer is rounded separately, so allow one or two cents more than `P * rate`.
 
+That arrangement charges commission twice on the same booking. A service that holds money for a later payout should use escrow (`POST /internal/escrow/hold`, described below) instead, which charges it once.
+
+### `POST /internal/escrow/hold`: hold a payment for a later payout
+
+Escrow is for a service that sells something now and pays out later. The listing service uses it for short stay bookings: the tenant pays when booking, the owner is paid some hours after check-in, and a cancellation sends part or all of the money back.
+
+Paying that with two ordinary transfers (payer to a holding user, then holding user to payee) charges commission twice. Escrow charges it once, when the money goes in. The money then sits in an escrow record owned by wallet-service, in no user's wallet, and is paid out later with no further commission.
+
+For a booking price `P` and `fee(x) = round_half_up(x * rate, 2)`, with the same rate source, rounding and "charged on top" rule as `/internal/transfer`:
+
+| Step | Sender | Recipient | Company ledger |
+|---|---|---|---|
+| Hold `P = 100.00` at 1% | debited `101.00` | nothing yet, `100.00` held | `+1.00` |
+| Release after check-in | none | owner credited exactly `100.00` | none |
+| Cancel with a 50% refund | none | tenant credited `50.00`, owner credited `50.00` | none |
+| Cancel with a 100% refund | none | tenant credited `100.00` (has lost only the `1.00` commission) | none |
+
+The commission is never reversed. The payouts of one hold add up to at most the amount held, so nothing is left over and no holding wallet is needed.
+
+| | |
+|---|---|
+| **Header** | `X-API-Key: <INTERNAL_API_KEY>` |
+| **Caller check** | `initiatedBy` must be in `ESCROW_ALLOWED_INITIATORS` (default `LISTING_SERVICE`, compared ignoring case), otherwise `403`. The API key is shared by every internal service, so this is what makes the endpoints "just for the listing service". |
+
+Request:
+
+```json
+{
+  "senderUserId": "69fb94e91b08bb5028283c2b",
+  "beneficiaryEmail": "owner@example.com",
+  "amount": 100.00,
+  "description": "Booking 7f3a",
+  "reference": "booking-7f3a",
+  "initiatedBy": "LISTING_SERVICE"
+}
+```
+
+* Required: `senderUserId`, `beneficiaryEmail`, `amount`, `reference`, `initiatedBy`. `description` is optional.
+* `amount` is the booking price `P`, not `P` plus the commission. It must be positive with at most 2 decimals.
+* `beneficiaryEmail` is the owner. That wallet must exist and not be frozen, checked now, so a booking cannot be paid for when the owner could not be paid later.
+* `reference` is the idempotency key (see below).
+
+Response (`200`):
+
+```json
+{
+  "success": true,
+  "message": "Escrow hold created",
+  "data": {
+    "reference": "booking-7f3a",
+    "status": "HELD",
+    "senderEmail": "tenant@example.com",
+    "beneficiaryEmail": "owner@example.com",
+    "amount": 100.00,
+    "commission": 1.00,
+    "totalDebited": 101.00,
+    "remainingAmount": 100.00,
+    "currency": "USD",
+    "createdAt": "2026-10-23T00:14:01.120"
+  },
+  "timestamp": "2026-10-23T00:14:01.123456"
+}
+```
+
+The sender's statement shows one row, "Escrow hold for booking-7f3a (incl. commission)", for `-101.00`. Currency is always USD.
+
+### `POST /internal/escrow/{holdReference}/payouts`: pay out of a hold
+
+Pays part or all of what is left in a hold to one recipient, with no commission. Call it once for a normal release, and twice for a split cancellation (the refund and the owner's share), each call with its own `reference`.
+
+Request:
+
+```json
+{
+  "recipientAccountNumber": "owner@example.com",
+  "amount": 100.00,
+  "description": "Payout for booking 7f3a",
+  "reference": "booking-release-7f3a",
+  "initiatedBy": "LISTING_SERVICE"
+}
+```
+
+* The recipient must be the hold's sender (a refund) or its `beneficiaryEmail` (the owner), compared ignoring case. Anything else is `400`, so a leaked key cannot redirect held money to a third party.
+* The hold must be `HELD` or `PARTIALLY_PAID` (`409` otherwise) and `amount` must not be more than what is left (`422`).
+* The recipient wallet must exist and not be frozen (`404`, `403`).
+
+Response (`200`):
+
+```json
+{
+  "success": true,
+  "message": "Escrow payout successful",
+  "data": {
+    "holdReference": "booking-7f3a",
+    "reference": "booking-release-7f3a",
+    "status": "SUCCESS",
+    "recipientEmail": "owner@example.com",
+    "amount": 100.00,
+    "holdRemainingAmount": 0.00,
+    "holdStatus": "PAID_OUT",
+    "currency": "USD"
+  },
+  "timestamp": "2026-10-23T02:14:01.123456"
+}
+```
+
+### `GET /internal/escrow/{holdReference}`: look up a hold and its payouts
+
+Lets the calling service find out what happened after a timeout or a `409`, the same way it uses `GET /internal/transfer/{reference}`. `404` with `Escrow not found for reference: <reference>` when there is none.
+
+```json
+{
+  "success": true,
+  "message": "Escrow retrieved",
+  "data": {
+    "reference": "booking-7f3a",
+    "status": "PARTIALLY_PAID",
+    "senderEmail": "tenant@example.com",
+    "beneficiaryEmail": "owner@example.com",
+    "amount": 100.00,
+    "commission": 1.00,
+    "totalDebited": 101.00,
+    "remainingAmount": 50.00,
+    "currency": "USD",
+    "failureReason": null,
+    "createdAt": "2026-10-23T00:14:01.120",
+    "payouts": [
+      {
+        "reference": "booking-refund-7f3a",
+        "recipientEmail": "tenant@example.com",
+        "amount": 50.00,
+        "status": "SUCCESS",
+        "failureReason": null,
+        "createdAt": "2026-10-24T09:00:00.000"
+      }
+    ]
+  },
+  "timestamp": "2026-10-24T09:00:05.456789"
+}
+```
+
+Hold statuses: `PENDING` (being created, outcome not known yet), `HELD`, `PARTIALLY_PAID`, `PAID_OUT`, and `FAILED` (nothing moved). Payout statuses: `PENDING`, `SUCCESS`, `FAILED` (nothing moved). `remainingAmount` already excludes payouts that are in progress.
+
+A caller should treat only `HELD` and `SUCCESS` as done and `FAILED` as a clear refusal. `PENDING` means "do not know yet": leave the booking alone and ask again later. Nothing stays `PENDING` for long (see below).
+
+#### Errors
+
+| Status | When |
+|---|---|
+| `400` | Validation, an amount with more than 2 decimals, sender and beneficiary the same user, or a payout recipient that is neither the sender nor the beneficiary. |
+| `403` | A wallet is frozen (sender, beneficiary or recipient), or the caller is not in `ESCROW_ALLOWED_INITIATORS`. |
+| `404` | Sender, beneficiary or recipient wallet not found, or the hold not found. |
+| `409` | The reference is already used (hold or payout), or the hold is not in a payable state. |
+| `422` | Insufficient funds (the sender needs `amount + commission`), or a payout larger than what is left in the hold. |
+
+#### References are idempotency keys
+
+Each hold and each payout has a `reference`, backed by a unique index, so two simultaneous identical requests produce exactly one winner and the other gets `409`. This is stricter than `/internal/transfer`, which has no unique index.
+
+* A reference that is `PENDING`, `HELD`, `PARTIALLY_PAID`, `PAID_OUT` or `SUCCESS` answers `409` and moves nothing a second time. The original stays readable with the `GET` call.
+* A reference whose earlier attempt ended `FAILED` (nothing moved) may be used again. The retry reuses the same record, with `attempts` counted up, and the request can differ from the failed one.
+* A payout reference belongs to one hold. Using it against another hold is `409`.
+
+#### How it stays safe
+
+The wallet has no Mongo transaction manager, so every step is a single conditional write and the order is chosen so that a request which dies half way can be repaired:
+
+* A hold is: claim the reference as `PENDING`, debit the sender, write the commission, mark `HELD`.
+* A payout is: claim the reference as `PENDING`, take the amount out of the hold, credit the recipient, mark `SUCCESS`.
+* Taking an amount out of a hold is one conditional update on the hold (still enough left, still the same remaining amount as was read), so two payouts racing for the same money can never overspend it. If the credit fails afterwards the amount goes back to the hold and the payout is marked `FAILED`.
+* A wallet balance is changed only if it is still what was read, and the movement is recorded on the wallet in the same update, so a movement is applied at most once. This is the technique the commercial module already uses for wallet credits and debits.
+* A recovery sweep runs every `ESCROW_RECOVERY_INTERVAL_MS` and settles any hold or payout still `PENDING` after `ESCROW_STALE_PENDING_MINUTES`. For each it first rules the wallet movement out for good; if that succeeds the movement never happened and never will, so the hold or payout becomes `FAILED` and the amount goes back. If the movement had already happened, the record is completed instead (`HELD` with its commission entry, or `SUCCESS`). A slow request can therefore never apply a movement after the sweep has decided. The sweep is safe to run on several instances at once.
+
+#### Reports
+
+The commission goes into the company ledger as `COMMISSION_TRANSFER` (with `sourceType` `ESCROW_HOLD`), so the existing finance reports count it as transfer commission. Held money belongs to no wallet, so the balance overview and the system summary now also return `totalEscrowHeld` (the amount still held across open holds) and `totalPlatformLiability` (wallet balances plus escrow, which is what the platform owes its users). The per transfer commission figure in those reports is still worked out from transfer records, which escrow does not create.
+
 ### `GET /internal/accounts`: wallet-owner directory
 
 | | |
@@ -621,7 +802,7 @@ Beyond the core wallet API, the service exposes a dedicated admin surface (role-
 |---|---|
 | **Daily finance report** | Deposits, disbursements, transfers, and payment volume for a given day, plus that day's commission and direct-revenue breakdown, all in USD. |
 | **System summary** | All-time platform totals: cumulative volume per transaction type, total commission revenue, total direct payment revenue since launch. |
-| **Balance overview** | Total wallet liability across every user, plus which wallets have which payment methods linked. |
+| **Balance overview** | Total wallet liability across every user, the money held in escrow and the two added together, plus which wallets have which payment methods linked. |
 | **Gateway reconciliation** | A paginated, filterable audit trail of every M-Pesa API operation, including which never received a ResultURL callback and need manual follow-up. |
 | **Manual wallet adjustments** | Admin-initiated balance corrections, fully audit-logged as their own ledger entry type, never a silent database edit. |
 
@@ -640,6 +821,8 @@ The `Wallet` document (one per user) carries the fields most integration partner
 | `paypalEmail` / `paypalConnectedEmail` | Manually-entered payout email versus PayPal-vault-confirmed email — deliberately distinct. |
 | `stripeConnectedAccountId` / `stripePayoutsEnabled` | Stripe Connect linkage and payout eligibility. |
 | `flutterwavePaymentMethodNetwork` / `flutterwavePaymentMethodPhone` | Saved Flutterwave mobile-money payment method. |
+
+Escrow keeps three collections: `escrow_holds` (one per hold, unique `reference`), `escrow_payouts` (one per payout, unique `reference`) and `escrow_wallet_markers` (proof that a wallet movement was applied or ruled out). Wallet documents also carry `escrowOps` and `escrowCancelled` fields, written by escrow in the same update as the balance. The unique indexes are created at startup by `EscrowIndexInitializer`.
 
 The commercial API adds its own collections (merchants, commercial transactions, merchant wallets and ledger, holds, links, batches, billing, disputes, onboarding and more). They are listed under [Commercial operations](#commercial-operations).
 
@@ -1334,6 +1517,7 @@ List the unmatched receipts with `GET /internal/commercial/v1/c2b/unmatched`. Ea
 * **Billing.** No proration, coupons, taxes or usage based billing. Cancelling while an invoice is mid collection can still let that one payment succeed (it is recorded `PAID`). Live recurring billing on cards, PayPal and wallets needs the matching rail enabled.
 * **Refunds.** No fee on a refund and the original fee is not returned. The approval flag is informational.
 * **Wallet balances.** The core wallet code still updates balances by read and save, so a save based on an older read can overwrite a commercial credit or debit made in between. That predates the commercial API.
+* **Escrow.** Escrow protects its own steps, but the older transfer, deposit and payment code still changes a balance by read and save, so a save based on an older read can overwrite an escrow debit or credit made in between (the same limit as the commercial credits above). A hold that is still `PENDING` is not counted in `totalEscrowHeld`. Holds have no expiry: money is held until the calling service pays it out. The commission on a hold is never refunded. The caller check is a list of names sent in the request body, on top of the shared API key; it keeps honest services in their lane but is not a second key.
 * **Wallet consent.** No second factor beyond the owner's login token. An undo credit can be refused if the wallet was frozen meanwhile; it is logged.
 * **Onboarding.** Documents are checked by type and first bytes only (no virus scan, no reading of content). Step changes have no version check, so two staff acting in the same instant could overwrite each other. Emails are sent once and not retried. The wallet link proves the wallet exists and is free, not that the caller owns it. A wallet stays linked while the production app exists; there is no call to unlink or delete a production app. Approval trusts the verdicts recorded by staff and does not check the tax PIN or registration number against a registry. Downloads are read into memory (at most 8 MB).
 * **Compliance.** Accepting and paying out money for third parties is regulated activity. Confirm the authorisations needed in each country (start with the Central Bank of Kenya under the National Payment System framework), each provider's platform terms, KYC and AML duties, virtual asset rules for crypto, and data protection duties (Kenya's Data Protection Act 2019 and equivalents) before going live.

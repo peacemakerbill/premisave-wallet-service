@@ -211,6 +211,17 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.error(message));
     }
 
+    /**
+     * The calling service's initiatedBy is not in escrow.allowed-initiators (see EscrowService). 403, with the real
+     * message so the caller can tell why, unlike the generic "Access denied" of the handler below.
+     */
+    @ExceptionHandler(EscrowCallerNotAllowedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleEscrowCallerNotAllowed(EscrowCallerNotAllowedException ex) {
+        log.warn("Escrow call refused: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
