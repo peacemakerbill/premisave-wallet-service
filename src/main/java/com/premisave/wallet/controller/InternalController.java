@@ -2,9 +2,12 @@ package com.premisave.wallet.controller;
 
 import com.premisave.wallet.dto.AccountDetailsResponse;
 import com.premisave.wallet.dto.ApiResponse;
+import com.premisave.wallet.dto.CommissionRatesResponse;
 import com.premisave.wallet.dto.InternalPaymentRequest;
 import com.premisave.wallet.dto.InternalTransferRequest;
 import com.premisave.wallet.dto.PaymentResponse;
+import com.premisave.wallet.dto.TransferRecordResponse;
+import com.premisave.wallet.service.CommissionService;
 import com.premisave.wallet.service.PaymentService;
 import com.premisave.wallet.service.TransferService;
 import com.premisave.wallet.service.WalletService;
@@ -14,6 +17,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PagedModel;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -42,6 +46,7 @@ public class InternalController {
     private final TransferService transferService;
     private final PaymentService paymentService;
     private final WalletService walletService;
+    private final CommissionService commissionService;
 
     /**
      * The wallet-owner directory another Premisave service (e.g.
@@ -91,6 +96,25 @@ public class InternalController {
             @Valid @RequestBody InternalTransferRequest request) {
         PaymentResponse response = transferService.transferInternal(request);
         return ResponseEntity.ok(ApiResponse.success("Transfer successful", response));
+    }
+
+    /**
+     * Looks up a transfer by the reference it was made with. 404 when no transfer used that reference. A transfer
+     * record only exists once the money has really moved, so a calling service can use this to find out what
+     * happened after a timeout, or after a 409 on a repeated reference.
+     */
+    @GetMapping("/transfer/{reference}")
+    public ResponseEntity<ApiResponse<TransferRecordResponse>> transferByReference(@PathVariable String reference) {
+        return ResponseEntity.ok(ApiResponse.success("Transfer retrieved", transferService.getByReference(reference)));
+    }
+
+    /**
+     * The commission rates configured in this service (decimal fractions, 0.01 means 1%). Commission is charged on
+     * top of the amount: the sender pays amount plus commission, the recipient gets exactly the amount.
+     */
+    @GetMapping("/commission/rates")
+    public ResponseEntity<ApiResponse<CommissionRatesResponse>> commissionRates() {
+        return ResponseEntity.ok(ApiResponse.success("Commission rates retrieved", commissionService.getRates()));
     }
 
     /**

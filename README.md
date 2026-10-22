@@ -544,6 +544,40 @@ Response shape is identical to `/wallet/transfer`.
 
 **`transactionId` is not the same kind of value across the two pairs.** For `/payments/deduct` and `/internal/payment` it is the `Payment` document's own MongoDB id, which can be looked up in the `Payment` collection. For `/wallet/transfer` and `/internal/transfer` it is the `reference` that was sent (or the generated UUID), which is an idempotency key rather than a database id. A caller that stores this value has to know which convention applies to the endpoint it called. Optional fields: `description` (also accepted as `reason` or `purpose` on transfers) and `reference`, the idempotency key, which is recommended.
 
+### `GET /internal/transfer/{reference}`: look up a transfer by its reference
+
+| | |
+|---|---|
+| **Header** | `X-API-Key: <INTERNAL_API_KEY>` |
+| **Path** | `reference`, the idempotency key the transfer was made with |
+
+Returns the transfer (`id`, `senderId`, `senderEmail`, `recipientId`, `recipientEmail`, `amount`, `totalDebited`, `currency`, `description`, `status`, `reference`, `initiatedBy`, `createdAt`), or `404` when no transfer used that reference. A transfer record is written only after the balances have moved, so finding one means the money moved. A calling service uses this to find out what happened after a timeout, or after a `409` on a repeated reference (a repeated reference is rejected and moves no money).
+
+### `GET /internal/commission/rates`: commission rates
+
+| | |
+|---|---|
+| **Header** | `X-API-Key: <INTERNAL_API_KEY>` |
+
+```json
+{
+  "success": true,
+  "message": "Commission rates retrieved",
+  "data": {
+    "internalTransferRate": 0.01,
+    "gatewayRate": 0.03,
+    "currency": "USD",
+    "chargedOn": "ON_TOP",
+    "commissionScale": 2,
+    "commissionRounding": "HALF_UP"
+  }
+}
+```
+
+Rates are decimal fractions (`0.01` is 1%). Commission is charged on top: the sender pays `amount + commission` and the recipient receives exactly `amount`, where `commission = amount * rate` rounded to 2 decimals, half up, once per transfer. There is no exemption: every transfer, including service to service ones, carries the commission.
+
+**Holding money for others.** A service that holds money and pays it out later (for example the escrow wallet of the listing service) pays commission on every payout from the holding wallet. So the holding wallet must receive the amount it will pay out plus the commission those payouts will cost. For a booking of `P`: the payouts total `P` and cost about `P * rate`, so the holding wallet needs to receive `P + P * rate`. The payer of that transfer pays commission on it too, so they are debited `(P + P * rate) * (1 + rate)`. When the payout is split in two (a refund and the owner's share), each transfer is rounded separately, so allow one or two cents more than `P * rate`.
+
 ### `GET /internal/accounts`: wallet-owner directory
 
 | | |
@@ -1188,7 +1222,7 @@ premisave-wallet-service/
 │   ├── dto/              # Request/response DTOs
 │   ├── security/         # JWT & internal API key filters
 │   ├── filter/           # Servlet filters (callback request logging, etc.)
-│   ├── commercial/       # Commercial API: merchants, rails, billing, onboarding, disputes, settlements
+│   ├── commercial/       # Commercial API (layout below)
 │   ├── util/             # Shared helpers, including EmailLayout (the look of every email)
 │   └── PremisaveWalletApplication.java
 ├── src/main/resources/
@@ -1199,6 +1233,31 @@ premisave-wallet-service/
 ├── postman/              # Commercial API collections and environments
 └── pom.xml
 ```
+
+### Commercial API code layout
+
+`com.premisave.wallet.commercial` is grouped by what a class is first, and by feature second. The root of each layer holds the shared core (merchants, payments, transactions, the ledger, events). A sub folder holds one feature and has the same name in every layer, so everything about billing is in `billing`, whichever layer you are in.
+
+```
+commercial/
+├── config/              # Spring configuration classes and the startup index initializer
+│   └── properties/      # Every @ConfigurationProperties record (commercial.* in application.yml)
+├── controller/          # All REST controllers of the commercial API
+├── dto/                 # Request bodies and response views, one folder per feature
+│   ├── billing/  batch/  beneficiary/  dispute/  event/  link/  merchant/
+│   └── onboarding/  payment/  refund/  report/  sandbox/  settlement/
+├── entity/              # Mongo documents and embedded values (core), plus billing/ link/ onboarding/ ...
+├── enums/               # Shared enums, plus onboarding/ for the onboarding enums
+├── exception/           # CommercialException and the error handler
+├── repository/          # Spring Data repositories (core), plus billing/ link/ onboarding/ ...
+├── security/            # Request filter, app context, signature check
+├── service/             # Core services, plus billing/ link/ onboarding/ refund/ report/ settlement/ ...
+│   └── onboarding/storage/   # Where documents are kept: local folder, mounted share, mount check
+├── util/                # Small helpers with no business rules (Money, Json, Hashing, Masking ...)
+└── rail/                # One folder per payment provider (mpesa, stripe, paypal, flutterwave, nowpayments, premisave)
+```
+
+Where a new class goes: a request or response shape goes in `dto/<feature>`; a Mongo document goes in `entity/<feature>` and its repository in `repository/<feature>`; business logic, schedulers, listeners and the pure rule classes go in `service/<feature>`; an enum used by one feature goes in `enums/<feature>`; a new payment provider gets its own folder under `rail`. A feature that is not listed gets a new sub folder with the same name in each layer it needs.
 
 ## Troubleshooting
 

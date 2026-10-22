@@ -261,6 +261,7 @@ commission:
   internal-transfer-rate: ${COMMISSION_INTERNAL_TRANSFER_RATE:0.01}
   # Gateway-bound disbursements (M-Pesa B2C/B2Pochi, PayPal, Stripe, Flutterwave, NOWPayments).
   gateway-rate: ${COMMISSION_GATEWAY_RATE:0.03}
+  # The configured rates can be read by other services at GET /internal/commission/rates.
 
 # Frontend URL for CORS
 frontend:

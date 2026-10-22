@@ -8,6 +8,7 @@ import com.premisave.wallet.entity.Transfer;
 import com.premisave.wallet.entity.Wallet;
 import com.premisave.wallet.enums.Currency;
 import com.premisave.wallet.enums.TransferStatus;
+import com.premisave.wallet.exception.ResourceNotFoundException;
 import com.premisave.wallet.exception.WalletFrozenException;
 import com.premisave.wallet.exception.WalletNotFoundException;
 import com.premisave.wallet.repository.TransferRepository;
@@ -162,6 +163,18 @@ public class TransferService {
                 sender.getAccountNumber(), recipient.getAccountNumber(), amount, commission, totalDebit, reference, initiatedBy);
 
         return new PaymentResponse(true, reference, "Transfer successful");
+    }
+
+    /**
+     * GET /internal/transfer/{reference} — the transfer that was made with this idempotency reference, or a 404.
+     * A transfer record is only written once the balances have really moved, so finding one means the money moved.
+     * Lets a calling service confirm the outcome after a timeout or after a 409 on a repeated reference.
+     * direction is left null: there is no viewing user on an internal call.
+     */
+    public TransferRecordResponse getByReference(String reference) {
+        Transfer transfer = transferRepository.findByReference(reference)
+                .orElseThrow(() -> new ResourceNotFoundException("Transfer not found for reference: " + reference));
+        return toRecordResponse(transfer, null);
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.premisave.wallet.service;
 
 import com.premisave.wallet.config.CommissionConfig;
+import com.premisave.wallet.dto.CommissionRatesResponse;
 import com.premisave.wallet.entity.CompanyLedgerEntry;
 import com.premisave.wallet.entity.Disbursement;
 import com.premisave.wallet.enums.Currency;
@@ -58,6 +59,21 @@ public class CommissionService {
 
     public BigDecimal getGatewayRate() {
         return commissionConfig.getGatewayRate();
+    }
+
+    /**
+     * The commission rates as configured, for GET /internal/commission/rates. A calling service that holds money for
+     * others (for example the escrow wallet of the listing service) uses it to work out how much a payout will cost.
+     * Commission is rounded to 2 decimals, half up, per transfer (see calculate below).
+     */
+    public CommissionRatesResponse getRates() {
+        return new CommissionRatesResponse(
+                commissionConfig.getInternalTransferRate(),
+                commissionConfig.getGatewayRate(),
+                "USD",
+                "ON_TOP",
+                2,
+                "HALF_UP");
     }
 
     public BigDecimal calculateInternalTransferCommission(BigDecimal amount) {
@@ -196,9 +212,8 @@ public class CommissionService {
     /**
      * Mutates each entry's amount/currency to USD in place, in memory
      * only — never re-saved, so the actual stored DB record is
-     * untouched. Explicit request: "the reports should also be showing
-     * data in USD... if there were any records saved in different
-     * currencies before, conversion should take place."
+     * untouched. Ensures the ledger reads consistently in USD even for
+     * older entries saved before the wallet standardized on USD.
      *
      * "Intelligence" here means NOT blindly trusting each entry's own
      * stored currency field, which was hardcoded to Currency.KES
