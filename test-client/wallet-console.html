@@ -1,0 +1,1886 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Premisave Wallet Console</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #f8f9fb;
+  --sunken: #eef0f4;
+  --ink: #0f172a;
+  --ink-2: #475467;
+  --ink-3: #8792a2;
+  --line: #e4e7ec;
+  --line-2: #d0d5dd;
+  --accent: #2d5bff;
+  --accent-ink: #ffffff;
+  --side: #0e1a33;
+  --side-2: #16264a;
+  --side-ink: #d5dcec;
+  --side-ink-2: #7f8cab;
+  --good: #11805a;
+  --bad: #c0261d;
+  --warn: #9a5b00;
+  --info: #1d5fd1;
+  --code-bg: #0b1220;
+  --code-ink: #d6deee;
+  --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  --shadow: 0 1px 2px rgba(15, 23, 42, .05);
+  --pop: 0 12px 32px rgba(15, 23, 42, .18);
+  --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0a0e15;
+  --surface: #111722;
+  --surface-2: #151c29;
+  --sunken: #0d121b;
+  --ink: #e6eaf2;
+  --ink-2: #9aa5b8;
+  --ink-3: #667085;
+  --line: #1e2736;
+  --line-2: #2a3548;
+  --accent: #7c9bff;
+  --accent-ink: #0a1020;
+  --side: #0c111b;
+  --side-2: #151d2c;
+  --side-ink: #cfd7e6;
+  --side-ink-2: #6f7c95;
+  --good: #3ddc9b;
+  --bad: #ff8a80;
+  --warn: #f2b84b;
+  --info: #7fb2ff;
+  --code-bg: #080c13;
+  --code-ink: #d2dbec;
+  --shadow: none;
+  --pop: 0 12px 32px rgba(0, 0, 0, .55);
+}
+/* accent palettes, light then dark */
+:root[data-accent="emerald"] { --accent: #0b8f66; }
+:root[data-accent="violet"] { --accent: #6a4dff; }
+:root[data-accent="graphite"] { --accent: #1f2937; }
+:root[data-theme="dark"][data-accent="blue"] { --accent: #7c9bff; }
+:root[data-theme="dark"][data-accent="emerald"] { --accent: #3ddc9b; }
+:root[data-theme="dark"][data-accent="violet"] { --accent: #a99aff; }
+:root[data-theme="dark"][data-accent="graphite"] { --accent: #cdd5e2; }
+:root[data-theme="dark"][data-accent="emerald"], :root[data-theme="dark"][data-accent="graphite"] { --accent-ink: #07130e; }
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+#app { height: 100%; }
+body { font: 13.5px/1.5 var(--sans); background: var(--bg); color: var(--ink); -webkit-font-smoothing: antialiased; font-feature-settings: "tnum" 1, "cv11" 1; letter-spacing: -.003em; }
+button, input, select, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
+button { cursor: pointer; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -.012em; }
+h3 { font-size: 14px; }
+.mono { font-family: var(--mono); font-size: 12px; letter-spacing: 0; }
+.muted { color: var(--ink-2); }
+.small { font-size: 12px; }
+.hide { display: none !important; }
+.ico { display: inline-flex; width: 16px; height: 16px; flex: none; }
+.ico svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.mark { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.mark .logo { width: 28px; height: 28px; border-radius: 7px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-weight: 700; font-size: 14px; letter-spacing: -.02em; flex: none; }
+.mark small { display: block; font-weight: 500; font-size: 11px; opacity: .65; line-height: 1.1; margin-top: 1px; }
+
+/* buttons and fields */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--surface); font-weight: 550; line-height: 1; box-shadow: var(--shadow); transition: background .12s, border-color .12s; white-space: nowrap; }
+.btn:hover { background: var(--surface-2); border-color: color-mix(in srgb, var(--ink) 28%, var(--line-2)); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, #000); }
+.btn.danger { color: var(--bad); }
+.btn.ghost { border-color: transparent; background: transparent; box-shadow: none; color: var(--ink-2); }
+.btn.ghost:hover { background: var(--sunken); color: var(--ink); }
+.btn.sm { height: 26px; padding: 0 9px; font-size: 12px; border-radius: 5px; }
+.btn[disabled] { opacity: .5; cursor: not-allowed; }
+.icon-btn { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--ink-2); }
+.icon-btn:hover { background: var(--sunken); color: var(--ink); }
+label.fl { display: block; font-size: 12px; font-weight: 550; color: var(--ink-2); margin: 0 0 5px; }
+label.fl .req { color: var(--bad); margin-left: 2px; }
+.inp, select.inp, textarea.inp { width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface); transition: border-color .12s, box-shadow .12s; }
+.inp::placeholder { color: var(--ink-3); }
+.inp:focus { border-color: var(--accent); box-shadow: var(--ring); outline: none; }
+textarea.inp { height: auto; padding: 8px 10px; font-family: var(--mono); font-size: 12px; resize: vertical; min-height: 76px; line-height: 1.5; }
+input[type=range] { accent-color: var(--accent); }
+input[type=checkbox] { accent-color: var(--accent); }
+.hint { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.spacer { flex: 1; }
+
+/* tags, methods, status */
+.pill { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border-radius: 4px; font-size: 11px; font-weight: 600; letter-spacing: .01em; background: var(--sunken); color: var(--ink-2); white-space: nowrap; }
+.pill.good { background: color-mix(in srgb, var(--good) 13%, transparent); color: var(--good); }
+.pill.bad { background: color-mix(in srgb, var(--bad) 13%, transparent); color: var(--bad); }
+.pill.warn { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); }
+.pill.info { background: color-mix(in srgb, var(--info) 13%, transparent); color: var(--info); }
+.verb { display: inline-block; min-width: 44px; text-align: center; font-family: var(--mono); font-size: 10.5px; font-weight: 700; padding: 2px 0; border-radius: 4px; letter-spacing: .04em; border: 1px solid currentColor; background: transparent; }
+.verb.GET { color: var(--info); }
+.verb.POST { color: var(--good); }
+.verb.PUT, .verb.PATCH { color: var(--warn); }
+.verb.DELETE { color: var(--bad); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); flex: none; }
+.dot.good { background: var(--good); } .dot.bad { background: var(--bad); } .dot.warn { background: var(--warn); }
+
+/* sign in */
+.login { min-height: 100%; display: grid; grid-template-columns: minmax(340px, 5fr) 6fr; }
+.login .brand { background: var(--side); color: var(--side-ink); padding: 40px clamp(28px, 5vw, 64px); display: flex; flex-direction: column; justify-content: space-between; position: relative; overflow: hidden;
+  background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px); background-size: 32px 32px; background-position: -1px -1px; }
+.login .brand::after { content: ""; position: absolute; inset: auto 0 0 0; height: 55%; background: linear-gradient(to top, var(--side), transparent); pointer-events: none; }
+.login .brand > * { position: relative; z-index: 1; }
+.login h1 { font-size: 30px; line-height: 1.15; color: #fff; }
+.login .lede { color: var(--side-ink-2); margin: 10px 0 0; max-width: 40ch; font-size: 14px; }
+.login .conn { margin-top: 30px; display: grid; gap: 1px; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; overflow: hidden; background: rgba(255,255,255,.08); max-width: 420px; }
+.login .conn .c { display: grid; grid-template-columns: 14px 1fr auto; gap: 10px; align-items: center; padding: 10px 12px; background: rgba(12, 22, 44, .92); font-size: 12.5px; }
+.login .conn .c b { font-weight: 550; color: #fff; }
+.login .conn .c span.v { color: var(--side-ink-2); font-family: var(--mono); font-size: 11.5px; }
+.login .panel { display: grid; place-items: center; padding: 32px 20px; position: relative; }
+.login .panel .corner { position: absolute; right: 16px; top: 16px; }
+.login form { width: min(380px, 100%); }
+.login form h2 { font-size: 22px; margin-bottom: 4px; }
+.login .field { margin-top: 14px; }
+.login .err { margin-top: 14px; padding: 10px 12px; border-radius: 6px; background: color-mix(in srgb, var(--bad) 11%, transparent); color: var(--bad); font-size: 12.5px; white-space: pre-wrap; border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent); }
+.login details { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
+.login details summary { cursor: pointer; font-weight: 550; color: var(--ink-2); }
+.pwbox { position: relative; }
+.pwbox .icon-btn { position: absolute; right: 1px; top: 1px; width: 32px; height: 32px; }
+.recent { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.recent button { font-size: 12px; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-2); }
+.recent button:hover { color: var(--ink); border-color: var(--ink-3); }
+
+/* shell */
+.shell { height: 100%; display: grid; grid-template-columns: 232px minmax(0, 1fr); grid-template-rows: 100%; }
+.side { background: var(--side); color: var(--side-ink); display: flex; flex-direction: column; min-height: 0; }
+.side .mark { padding: 16px 16px 14px; color: #fff; }
+.side nav { overflow-y: auto; padding: 2px 8px 12px; flex: 1; }
+.side .grp { font-size: 10.5px; text-transform: uppercase; letter-spacing: .1em; color: var(--side-ink-2); padding: 16px 10px 6px; font-weight: 600; }
+.side a.nav { position: relative; display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: 6px; color: var(--side-ink); text-decoration: none; cursor: pointer; font-weight: 500; }
+.side a.nav .ico { opacity: .75; }
+.side a.nav:hover { background: var(--side-2); }
+.side a.nav.on { background: color-mix(in srgb, var(--accent) 26%, transparent); color: #fff; }
+.side a.nav.on .ico { opacity: 1; }
+.side a.nav.on::before { content: ""; position: absolute; left: -8px; top: 6px; bottom: 6px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+:root[data-theme="dark"][data-accent="graphite"] .side a.nav.on { background: rgba(255,255,255,.1); }
+.side .foot { padding: 10px 12px 12px; border-top: 1px solid rgba(255,255,255,.07); display: flex; gap: 6px; flex-wrap: wrap; }
+.side .foot .btn { background: transparent; color: var(--side-ink); border-color: rgba(255,255,255,.14); box-shadow: none; }
+.side .foot .btn:hover { background: var(--side-2); }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.top { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 20px; border-bottom: 1px solid var(--line); background: var(--surface); flex: none; }
+.top h1 { font-size: 15px; }
+.env { display: inline-flex; align-items: center; gap: 7px; height: 24px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; color: var(--ink-2); font-family: var(--mono); font-size: 11.5px; background: var(--surface-2); }
+.chip { display: inline-flex; align-items: baseline; gap: 8px; padding: 0 4px; color: var(--ink-2); font-size: 12px; }
+.chip .amt { font-size: 15px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.who { position: relative; }
+.who > button { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 8px 0 4px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--surface); }
+.who > button:hover { background: var(--surface-2); }
+.avatar { width: 24px; height: 24px; border-radius: 6px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-weight: 700; font-size: 11.5px; flex: none; }
+.menu { position: absolute; right: 0; top: calc(100% + 6px); width: 320px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: var(--pop); padding: 4px; z-index: 40; }
+.menu .it { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 6px; cursor: pointer; }
+.menu .it:hover { background: var(--sunken); }
+.menu .it.on { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.content { flex: 1; overflow-y: auto; padding: 24px; }
+.content > .page { max-width: 1120px; margin: 0 auto; }
+.page > .lead { color: var(--ink-2); margin: 0 0 18px; max-width: 74ch; }
+.page h2.sec { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); margin: 28px 0 10px; font-weight: 600; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; align-items: start; }
+.stack { display: grid; gap: 12px; }
+.tabs { display: flex; gap: 20px; flex-wrap: wrap; margin: 0 0 16px; border-bottom: 1px solid var(--line); max-width: 100%; }
+.tabs button { padding: 8px 0 9px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: transparent; font-weight: 550; color: var(--ink-2); }
+.tabs button:hover { color: var(--ink); }
+.tabs button.on { color: var(--ink); border-bottom-color: var(--accent); }
+.notice { padding: 9px 12px; border-radius: 6px; background: color-mix(in srgb, var(--info) 10%, transparent); color: var(--info); font-size: 12.5px; margin-bottom: 14px; border: 1px solid color-mix(in srgb, var(--info) 22%, transparent); }
+.notice.warn { background: color-mix(in srgb, var(--warn) 11%, transparent); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 26%, transparent); }
+.notice.bad { background: color-mix(in srgb, var(--bad) 10%, transparent); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 26%, transparent); }
+
+/* panels */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); }
+.card.pad { padding: 16px; }
+details.act > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; border-radius: 8px; min-height: 44px; }
+details.act > summary:hover { background: var(--surface-2); }
+details.act > summary::-webkit-details-marker { display: none; }
+details.act[open] > summary { border-bottom: 1px solid var(--line); border-bottom-left-radius: 0; border-bottom-right-radius: 0; background: var(--surface-2); }
+details.act > summary .t { font-weight: 600; }
+details.act > summary .p { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+details.act > summary .pill { margin-left: auto; }
+details.act > summary .chev { color: var(--ink-3); transition: transform .12s; }
+details.act[open] > summary .chev { transform: rotate(90deg); }
+.act .body { padding: 14px; display: grid; gap: 12px; }
+.act .note { color: var(--ink-2); font-size: 12.5px; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.fields .wide { grid-column: 1 / -1; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.result { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--surface); }
+.result .rh { display: flex; gap: 10px; align-items: center; padding: 6px 10px; background: var(--surface-2); border-bottom: 1px solid var(--line); flex-wrap: wrap; min-height: 34px; }
+.result .rh .msg { font-weight: 550; min-width: 0; overflow-wrap: anywhere; }
+.result .rb { padding: 12px; max-height: 420px; overflow: auto; }
+.result .rtabs { margin-left: auto; display: flex; gap: 2px; }
+.result .rtabs button { height: 22px; padding: 0 8px; border: 0; border-radius: 4px; background: transparent; font-size: 12px; color: var(--ink-2); }
+.result .rtabs button.on { background: var(--sunken); color: var(--ink); }
+pre.json { margin: 0; padding: 10px 12px; border-radius: 6px; background: var(--code-bg); color: var(--code-ink); font: 12px/1.55 var(--mono); overflow: auto; white-space: pre-wrap; word-break: break-word; }
+pre.json .k { color: #8fb6ff; } pre.json .s { color: #a8dd9a; } pre.json .n { color: #f1c27d; } pre.json .b { color: #d9a6e8; } pre.json .z { color: #7d8aa3; }
+.kv { display: grid; grid-template-columns: minmax(130px, max-content) 1fr; gap: 7px 20px; }
+.kv .k { color: var(--ink-2); font-size: 12.5px; }
+.kv .v { overflow-wrap: anywhere; font-weight: 500; font-variant-numeric: tabular-nums; }
+table.t { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.t th { text-align: left; font-size: 11.5px; font-weight: 600; color: var(--ink-2); padding: 8px 10px; border-bottom: 1px solid var(--line-2); position: sticky; top: 0; background: var(--surface-2); white-space: nowrap; }
+table.t td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; max-width: 260px; overflow-wrap: anywhere; }
+table.t tr.clk { cursor: pointer; }
+table.t tr.clk:hover td { background: var(--surface-2); }
+table.t td.num, table.t th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.tw { overflow: auto; border: 1px solid var(--line); border-radius: 6px; max-height: 460px; }
+.tw table.t tr:last-child td { border-bottom: 0; }
+
+/* wallet overview */
+.balance { display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); overflow: hidden; }
+.balance .cell { padding: 16px 18px; border-left: 1px solid var(--line); min-width: 0; }
+.balance .cell:first-child { border-left: 0; background: var(--side); color: var(--side-ink); }
+.balance .lab { font-size: 11.5px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: .06em; }
+.balance .cell:first-child .lab { color: var(--side-ink-2); }
+.balance .num { font-size: 30px; font-weight: 600; letter-spacing: -.025em; margin: 6px 0 8px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.balance .val { font-size: 15px; font-weight: 600; margin-top: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.balance .sub { color: var(--side-ink-2); font-size: 12px; }
+.balance .btn { background: rgba(255,255,255,.1); color: var(--side-ink); border-color: rgba(255,255,255,.2); box-shadow: none; }
+.balance .btn:hover { background: rgba(255,255,255,.18); }
+
+/* escrow */
+.esc { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.esc > * { min-width: 0; }
+.steps { display: grid; gap: 0; }
+.stepbtn { position: relative; display: grid; grid-template-columns: 24px 1fr auto; gap: 12px; align-items: center; padding: 10px 10px; border: 1px solid transparent; border-radius: 6px; background: transparent; text-align: left; width: 100%; }
+.stepbtn:hover { background: var(--surface-2); border-color: var(--line); }
+.stepbtn:not(:last-child)::after { content: ""; position: absolute; left: 21px; top: 38px; bottom: -10px; width: 1px; background: var(--line-2); }
+.stepbtn .n { width: 24px; height: 24px; border-radius: 50%; background: var(--surface); color: var(--accent); border: 1.5px solid var(--accent); display: grid; place-items: center; font-weight: 700; font-size: 11.5px; position: relative; z-index: 1; }
+.stepbtn b { display: block; font-weight: 600; }
+.stepbtn span.d { color: var(--ink-2); font-size: 12.5px; }
+.stepbtn .ico { color: var(--ink-3); }
+.bar { height: 6px; border-radius: 999px; background: var(--sunken); overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+.mathtbl { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; margin-top: 4px; }
+.mathtbl td { padding: 6px 0; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.mathtbl td:last-child { text-align: right; font-weight: 600; color: var(--ink); font-family: var(--mono); font-size: 12.5px; }
+.mathtbl tr.sum td { border-bottom: 0; border-top: 1px solid var(--ink-3); color: var(--ink); font-weight: 650; padding-top: 8px; }
+.tl { display: grid; gap: 0; max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+.tl .ev { display: grid; grid-template-columns: 38px 1fr; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 12.5px; align-items: start; }
+.tl .ev:last-child { border-bottom: 0; }
+.tl .ev .m { color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
+.tl .ev .pill { justify-content: center; }
+.tl .empty { border: 0; }
+.delta.up { color: var(--good); } .delta.down { color: var(--bad); }
+.bal { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.bal:last-child { border-bottom: 0; }
+.bal .fig { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* log drawer */
+.drawer { position: fixed; left: 232px; right: 0; bottom: 0; height: 44vh; background: var(--surface); border-top: 1px solid var(--line-2); box-shadow: 0 -8px 24px rgba(15,23,42,.12); z-index: 30; display: flex; flex-direction: column; transform: translateY(102%); transition: transform .16s ease; }
+.drawer.open { transform: none; }
+.drawer .dh { display: flex; gap: 10px; align-items: center; padding: 6px 14px; border-bottom: 1px solid var(--line); background: var(--surface-2); min-height: 40px; }
+.drawer .dl { overflow: auto; flex: 1; }
+.lg { border-bottom: 1px solid var(--line); }
+.lg > .l1 { display: grid; grid-template-columns: 60px 52px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 5px 14px; cursor: pointer; }
+.lg > .l1:hover { background: var(--surface-2); }
+.lg .u { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11.5px; }
+.lg .det { padding: 6px 14px 12px; display: grid; gap: 8px; }
+
+/* modal and toast */
+.modal-bg { position: fixed; inset: 0; background: rgba(9, 14, 26, .5); backdrop-filter: blur(2px); display: grid; place-items: center; z-index: 60; padding: 20px; }
+.modal { width: min(600px, 100%); max-height: 90vh; overflow: auto; background: var(--surface); border-radius: 10px; border: 1px solid var(--line-2); box-shadow: var(--pop); }
+.modal .mh { display: flex; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); gap: 10px; }
+.modal .mh h2 { font-size: 15px; }
+.modal .mb { padding: 16px; display: grid; gap: 14px; }
+.seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; }
+.seg button { height: 30px; padding: 0 14px; border: 0; background: var(--surface); color: var(--ink-2); font-weight: 550; border-left: 1px solid var(--line-2); }
+.seg button:first-child { border-left: 0; }
+.seg button.on { background: var(--sunken); color: var(--ink); }
+.swatches { display: flex; gap: 10px; }
+.sw { width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; box-shadow: 0 0 0 1px var(--line-2); cursor: pointer; padding: 0; }
+.sw.on { border-color: var(--surface); box-shadow: 0 0 0 2px var(--ink); }
+#toasts { position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; display: grid; gap: 8px; z-index: 80; justify-items: center; }
+.toast { padding: 8px 14px; border-radius: 6px; background: #0f172a; color: #f1f5f9; box-shadow: var(--pop); max-width: 420px; font-size: 12.5px; border: 1px solid rgba(255,255,255,.1); }
+.toast.bad { background: #7f1d1d; color: #fff; }
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: sp .7s linear infinite; display: inline-block; }
+@keyframes sp { to { transform: rotate(360deg); } }
+.empty { padding: 22px; text-align: center; color: var(--ink-3); border: 1px dashed var(--line-2); border-radius: 8px; font-size: 12.5px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation-duration: .01s !important; } }
+
+@media (max-width: 900px) {
+  .login { grid-template-columns: 1fr; }
+  .login .brand { padding: 24px; gap: 20px; }
+  .login .conn { margin-top: 18px; }
+  .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .side { flex-direction: row; align-items: center; overflow-x: auto; }
+  .side .mark, .side .foot, .side .grp { display: none; }
+  .side nav { display: flex; gap: 4px; padding: 6px; overflow-x: auto; }
+  .side a.nav { white-space: nowrap; }
+  .side a.nav.on::before { display: none; }
+  .balance { grid-template-columns: 1fr 1fr; }
+  .balance .cell:first-child { grid-column: 1 / -1; }
+  .balance .cell:nth-child(3) { border-left: 0; }
+  .balance .cell:nth-child(n+3) { border-top: 1px solid var(--line); }
+  .esc { grid-template-columns: 1fr; }
+  .drawer { left: 0; }
+  .content { padding: 14px; }
+  .top { flex-wrap: wrap; height: auto; min-height: 48px; padding: 6px 12px; gap: 6px; }
+  .env { display: none; }
+}
+@media (max-width: 640px) {
+  .who > button .small, .who > button .pill { display: none; }
+  .esc, .grid2, .fields { grid-template-columns: minmax(0, 1fr); }
+  .chip span:first-child { display: none; }
+}
+
+</style>
+</head>
+<body>
+<div id="app"></div>
+<noscript>This test console needs JavaScript.</noscript>
+<script>
+'use strict';
+/* ============================================================
+   Premisave Wallet Console: a stand-in frontend for testing the
+   wallet service (and sign-in through the auth service).
+   ============================================================ */
+
+// ---------- storage ----------
+function mkStore(kind) {
+  return {
+    get(k) { try { return window[kind].getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { window[kind].setItem(k, v); } catch (e) { /* storage blocked */ } },
+    del(k) { try { window[kind].removeItem(k); } catch (e) { /* storage blocked */ } }
+  };
+}
+const LS = mkStore('localStorage');
+const SS = mkStore('sessionStorage');
+function jget(store, k, dflt) { try { const v = store.get(k); return v ? JSON.parse(v) : dflt; } catch (e) { return dflt; } }
+
+// ---------- state ----------
+const DEFAULT_VARS = {
+  recipient_email: 'recipient@example.com',
+  email: '',
+  user_id: '',
+  transfer_reference: '',
+  escrow_hold_reference: '',
+  escrow_payout_reference: '',
+  payment_intent_id: '',
+  paypal_order_id: '',
+  tx_ref_flutterwave: '',
+  disbursement_id: '',
+  deposit_id: '',
+  transaction_id: '',
+  setup_intent_id: '',
+  payment_method_id: '',
+  originator_conversation_id: 'AG_20260101_000000000000',
+  conversation_id: 'AG_20260101_000000000001',
+  mpesa_transaction_id: 'TEST000001',
+  verification_code: '',
+  operation_id: '',
+  flutterwave_charge_id: '',
+  flutterwave_tx_ref: '',
+  orderId: '',
+  request_id: ''
+};
+const S = {
+  cfg: Object.assign({ auth: 'http://localhost:8080', wallet: 'http://localhost:8084', apiKey: '', initiatedBy: 'LISTING_SERVICE' }, jget(LS, 'wc-cfg', {})),
+  vars: Object.assign({}, DEFAULT_VARS, jget(LS, 'wc-vars', {})),
+  sessions: jget(SS, 'wc-sessions', {}),
+  active: SS.get('wc-active') || '',
+  recent: jget(LS, 'wc-recent', []),
+  log: [],
+  page: SS.get('wc-page') || 'overview',
+  theme: LS.get('wc-theme') || 'system',
+  accent: LS.get('wc-accent') || 'blue',
+  balance: null,       // { value, currency }
+  logOpen: false,
+  builderPreset: null
+};
+function saveCfg() { LS.set('wc-cfg', JSON.stringify(S.cfg)); }
+function saveVars() { LS.set('wc-vars', JSON.stringify(S.vars)); }
+function saveSessions() { SS.set('wc-sessions', JSON.stringify(S.sessions)); SS.set('wc-active', S.active); }
+function session() { return S.sessions[S.active] || null; }
+
+// ---------- dom helpers ----------
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'html') el.innerHTML = v;
+    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, '');
+    else el.setAttribute(k, v);
+  }
+  add(el, kids);
+  return el;
+}
+function fill(el, ...kids) { el.replaceChildren(); add(el, kids); return el; }
+function add(el, kids) {
+  for (const c of kids) {
+    if (c === null || c === undefined || c === false) continue;
+    if (Array.isArray(c)) add(el, c);
+    else el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+}
+const ICONS = {
+  wallet: '<path d="M3 7a2 2 0 0 1 2-2h13v3"/><path d="M3 7v10a2 2 0 0 0 2 2h14a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-1z"/><circle cx="16.5" cy="13.5" r="1.1"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  send: '<path d="M4 12l16-8-6 17-3-7z"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6"/>',
+  tool: '<path d="M14.7 6.3a4 4 0 0 0 5 5L10 21a2.1 2.1 0 0 1-3-3z"/><path d="M14.7 6.3L17 4l3 3-2.3 2.3"/>',
+  heart: '<path d="M3 12h4l2-6 4 12 2-6h6"/>',
+  bolt: '<path d="M13 3L5 14h6l-1 7 8-11h-6z"/>',
+  list: '<path d="M8 6h12M8 12h12M8 18h12M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/>',
+  chev: '<path d="M9 6l6 6-6 6"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  out: '<path d="M9 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h4M16 8l4 4-4 4M20 12H9"/>',
+  refresh: '<path d="M20 11a8 8 0 0 0-14.5-4M4 5v4h4M4 13a8 8 0 0 0 14.5 4M20 19v-4h-4"/>',
+  card: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h3"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>'
+};
+function ico(name) { return h('span', { class: 'ico', html: '<svg viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || '') + '</svg>' }); }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+function toast(msg, bad) {
+  let box = document.getElementById('toasts');
+  if (!box) { box = h('div', { id: 'toasts' }); document.body.append(box); }
+  const t = h('div', { class: 'toast' + (bad ? ' bad' : '') }, msg);
+  box.append(t);
+  setTimeout(() => t.remove(), bad ? 6000 : 3200);
+}
+function copyText(text, what) {
+  const done = () => toast((what || 'Text') + ' copied');
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+  else fallbackCopy(text, done);
+}
+function fallbackCopy(text, done) {
+  const ta = h('textarea', { style: { position: 'fixed', opacity: 0 } }); ta.value = text; document.body.append(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) { toast('Copy failed', true); }
+  ta.remove();
+}
+function modal(title, body, opts) {
+  const bg = h('div', { class: 'modal-bg', onmousedown: e => { if (e.target === bg) close(); } });
+  const close = () => bg.remove();
+  const box = h('div', { class: 'modal', role: 'dialog', 'aria-label': title },
+    h('div', { class: 'mh' }, h('h2', null, title), h('span', { class: 'spacer' }), h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: close }, ico('x'))),
+    h('div', { class: 'mb' }, body));
+  bg.append(box); document.body.append(bg);
+  if (opts && opts.onclose) bg.addEventListener('remove', opts.onclose);
+  return { close };
+}
+
+// ---------- formatting ----------
+function fmtMoney(v, cur) {
+  if (v === null || v === undefined || v === '' || isNaN(Number(v))) return '-';
+  const n = Number(v);
+  return (cur ? cur + ' ' : '') + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtVal(v) {
+  if (v === null || v === undefined) return '-';
+  if (typeof v === 'object') return JSON.stringify(v);
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) return v.replace('T', ' ').replace(/\.\d+$/, '').replace(/Z$/, ' UTC');
+  return String(v);
+}
+function jsonHtml(obj) {
+  const s = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+  return esc(s).replace(/("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false)\b|\bnull\b|-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/g, (m, str, colon, bool) => {
+    if (str) return colon ? '<span class="k">' + str + '</span>' + colon : '<span class="s">' + str + '</span>';
+    if (bool) return '<span class="b">' + m + '</span>';
+    if (m === 'null') return '<span class="z">null</span>';
+    return '<span class="n">' + m + '</span>';
+  });
+}
+function jsonView(obj) { return h('pre', { class: 'json', html: jsonHtml(obj) }); }
+function decodeJwt(t) {
+  try { let p = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'); while (p.length % 4) p += '='; return JSON.parse(decodeURIComponent(escape(atob(p)))); } catch (e) { return {}; }
+}
+
+// ---------- variables ({{name}} placeholders, like the Postman environment) ----------
+function interp(s) {
+  if (typeof s !== 'string') return s;
+  return s.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (m, name) => {
+    if (name === '$timestamp') return String(Math.floor(Date.now() / 1000));
+    if (name === '$guid') return (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
+    if (name === '$randomInt') return String(Math.floor(Math.random() * 1000));
+    if (name === 'token') return (session() || {}).token || '';
+    if (name === 'my_user_id') return (session() || {}).userId || '';
+    if (name === 'my_email') return S.active || '';
+    if (Object.prototype.hasOwnProperty.call(S.vars, name)) return S.vars[name] == null ? '' : String(S.vars[name]);
+    return '';
+  });
+}
+function interpDeep(v) {
+  if (typeof v === 'string') return interp(v);
+  if (Array.isArray(v)) return v.map(interpDeep);
+  if (v && typeof v === 'object') { const o = {}; for (const [k, x] of Object.entries(v)) o[k] = interpDeep(x); return o; }
+  return v;
+}
+function setVars(obj) {
+  const saved = [];
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (v === undefined || v === null || v === '') continue;
+    S.vars[k] = String(v); saved.push(k);
+  }
+  if (saved.length) { saveVars(); toast('Saved ' + saved.join(', ') + ' to variables'); }
+}
+
+// ---------- requests ----------
+let seq = 0;
+function maskKey(k) { return k ? (k.length > 6 ? k.slice(0, 3) + '...' + k.slice(-2) : '***') : ''; }
+async function call(o) {
+  const sess = o.session || session();
+  const base = o.svc === 'auth' ? S.cfg.auth : o.svc === 'wallet' ? S.cfg.wallet : '';
+  let url = (base || '').replace(/\/+$/, '') + interp(o.path || '');
+  if (o.query) {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(o.query)) { const iv = interp(v); if (iv !== '' && iv !== null && iv !== undefined) q.append(k, iv); }
+    const qs = q.toString(); if (qs) url += (url.includes('?') ? '&' : '?') + qs;
+  }
+  const headers = { Accept: 'application/json' };
+  let sentAuth = 'none';
+  if (o.auth === 'jwt') { if (sess && sess.token) { headers.Authorization = 'Bearer ' + sess.token; sentAuth = 'jwt'; } }
+  else if (o.auth === 'key') { if (S.cfg.apiKey) { headers['X-API-Key'] = S.cfg.apiKey; sentAuth = 'key'; } }
+  if (o.headers) for (const [k, v] of Object.entries(o.headers)) headers[k] = interp(String(v));
+  let body;
+  if (o.body !== undefined && o.body !== null && o.method !== 'GET') {
+    headers['Content-Type'] = 'application/json';
+    body = typeof o.body === 'string' ? o.body : JSON.stringify(o.body);
+  }
+  const entry = { id: ++seq, at: new Date(), method: o.method || 'GET', url, sentAuth, reqBody: body, reqHeaders: Object.assign({}, headers), status: 0, ms: 0, resText: '', resData: null };
+  if (entry.reqHeaders['X-API-Key']) entry.reqHeaders['X-API-Key'] = maskKey(entry.reqHeaders['X-API-Key']);
+  if (entry.reqHeaders.Authorization) entry.reqHeaders.Authorization = 'Bearer ' + maskKey(entry.reqHeaders.Authorization.slice(7));
+  const t0 = performance.now();
+  let res;
+  try {
+    res = await fetch(url, { method: entry.method, headers, body });
+  } catch (e) {
+    entry.ms = Math.round(performance.now() - t0); entry.net = true; entry.error = String(e && e.message || e);
+    pushLog(entry);
+    return finish(entry, false, o);
+  }
+  entry.status = res.status;
+  entry.resText = await res.text();
+  entry.ms = Math.round(performance.now() - t0);
+  try { entry.resData = entry.resText ? JSON.parse(entry.resText) : null; } catch (e) { entry.resData = null; }
+  pushLog(entry);
+  if (res.status === 401 && o.auth === 'jwt' && sess && sess.refresh && !o._retried && !(o.path || '').startsWith('/auth/')) {
+    if (await refreshSession(sess)) return call(Object.assign({}, o, { _retried: true, session: sess }));
+  }
+  return finish(entry, res.ok, o);
+}
+function finish(entry, ok, o) {
+  const d = entry.resData;
+  const wrapped = d && typeof d === 'object' && !Array.isArray(d) && 'success' in d && 'message' in d;
+  return {
+    ok, status: entry.status, ms: entry.ms, net: !!entry.net, entry,
+    data: d, text: entry.resText,
+    payload: wrapped ? d.data : d,
+    message: wrapped ? d.message : (d && typeof d === 'object' && d.message) || '',
+    wrapped, error: entry.error, svc: o.svc
+  };
+}
+async function refreshSession(sess) {
+  const r = await call({ svc: 'auth', method: 'POST', path: '/auth/refresh', body: { refreshToken: sess.refresh }, auth: 'none', _retried: true });
+  if (r.ok && r.data && r.data.token) {
+    sess.token = r.data.token; if (r.data.refreshToken) sess.refresh = r.data.refreshToken;
+    Object.assign(sess, claimsOf(sess.token)); saveSessions(); return true;
+  }
+  return false;
+}
+function claimsOf(token) { const c = decodeJwt(token); return { userId: c.userId || c.uid || c.sub_id || '', exp: c.exp || 0, sid: c.sid || '' }; }
+function explainFail(res) {
+  if (res.net) {
+    return 'Could not reach ' + new URL(res.entry.url, location.href).origin + '.\n' +
+      'Check that the service is running and that the address in Connection is right.\n' +
+      'If it is running, the browser may be blocking the call (CORS). The wallet service only allows the origin in its FRONTEND_URL setting (default http://localhost:3000), and a page opened as a file has no origin. Serve this page with:  python3 -m http.server 3000  and open http://localhost:3000/wallet-console.html';
+  }
+  const m = res.message || (typeof res.data === 'string' ? res.data : '') || res.text || ('HTTP ' + res.status);
+  return m;
+}
+function hintFor(res) {
+  if (res.net) return '';
+  switch (res.status) {
+    case 401: return 'The token is missing, expired or rejected. Sign in again or switch account.';
+    case 403: return 'Not allowed: the role may not permit this, the wallet may be frozen, or the API key / initiatedBy was refused.';
+    case 404: return 'Not found: a wallet, user, reference or id does not exist.';
+    case 409: return 'Conflict: usually a reference that was already used, or a state that does not allow this step.';
+    case 422: return 'Rejected by a business rule, usually insufficient funds.';
+    case 400: return 'The request was not valid. See the message and field errors.';
+    default: return '';
+  }
+}
+
+// ---------- request log ----------
+function pushLog(e) { S.log.unshift(e); if (S.log.length > 250) S.log.pop(); if (typeof renderLog === 'function') renderLog(); }
+function curlOf(e) {
+  const parts = ['curl -X ' + e.method + " '" + e.url + "'"];
+  for (const [k, v] of Object.entries(e.reqHeaders)) {
+    if (k === 'Accept') continue;
+    let val = v;
+    if (k === 'Authorization') val = 'Bearer $TOKEN';
+    if (k === 'X-API-Key') val = '$INTERNAL_API_KEY';
+    parts.push("  -H '" + k + ': ' + val + "'");
+  }
+  if (e.reqBody) parts.push("  -d '" + e.reqBody.replace(/'/g, "'\\''") + "'");
+  return parts.join(' \\\n');
+}
+
+// ---------- sessions ----------
+async function signIn(email, password) {
+  const res = await call({ svc: 'auth', method: 'POST', path: '/auth/signin', body: { email, password }, auth: 'none' });
+  if (!res.ok) return { error: explainFail(res), res };
+  const d = res.data || {};
+  if (!d.token) return { error: 'The sign in response had no token. Response: ' + (res.text || '').slice(0, 300), res };
+  addSession(email, d.token, d.refreshToken, d.role);
+  return { ok: true };
+}
+function addSession(email, token, refresh, role) {
+  const claims = claimsOf(token);
+  if (!role) { const c = decodeJwt(token); role = c.role || (Array.isArray(c.roles) ? c.roles[0] : c.roles) || ''; }
+  const key = email || claims.userId || 'token-user';
+  S.sessions[key] = Object.assign({ email: key, token, refresh: refresh || '', role: role || '' }, claims);
+  S.active = key;
+  if (email && !S.recent.includes(email)) { S.recent.unshift(email); S.recent = S.recent.slice(0, 8); LS.set('wc-recent', JSON.stringify(S.recent)); }
+  if (claims.userId) S.vars.user_id = claims.userId;
+  S.vars.email = key; saveVars();
+  saveSessions();
+}
+async function signOut(key) {
+  const s = S.sessions[key]; if (!s) return;
+  try { await call({ svc: 'auth', method: 'POST', path: '/auth/logout', auth: 'jwt', session: s, body: {} }); } catch (e) { /* ignore */ }
+  delete S.sessions[key];
+  if (S.active === key) S.active = Object.keys(S.sessions)[0] || '';
+  S.balance = null; saveSessions();
+}
+function pickBalance(payload) {
+  if (payload === null || payload === undefined) return null;
+  if (typeof payload === 'number') return { value: payload, currency: '' };
+  if (typeof payload === 'string' && payload !== '' && !isNaN(Number(payload))) return { value: Number(payload), currency: '' };
+  if (typeof payload === 'object') {
+    const v = payload.balance ?? payload.availableBalance ?? payload.amount ?? payload.walletBalance;
+    if (v !== undefined && v !== null && !isNaN(Number(v))) return { value: Number(v), currency: payload.currency || '' };
+  }
+  return null;
+}
+async function fetchBalanceFor(sess) {
+  const r = await call({ svc: 'wallet', method: 'GET', path: '/wallet/balance', auth: 'jwt', session: sess });
+  return r.ok ? pickBalance(r.payload) : null;
+}
+async function refreshBalance() {
+  if (!session()) { S.balance = null; updateChip(); return; }
+  S.balance = await fetchBalanceFor(session());
+  updateChip();
+}
+
+// ---------- result rendering ----------
+const MONEY_KEY = /amount|balance|commission|debited|fee|total|price/i;
+function kvView(obj) {
+  const g = h('div', { class: 'kv' });
+  for (const [k, v] of Object.entries(obj)) {
+    let val;
+    if (typeof v === 'number' && MONEY_KEY.test(k)) val = fmtMoney(v);
+    else if (v !== null && typeof v === 'object') val = h('span', { class: 'mono' }, JSON.stringify(v));
+    else if (typeof v === 'boolean') val = h('span', { class: 'pill ' + (v ? 'good' : '') }, String(v));
+    else if (/status$/i.test(k) && typeof v === 'string') val = h('span', { class: 'pill ' + statusTone(v) }, v);
+    else val = fmtVal(v);
+    g.append(h('div', { class: 'k' }, k), h('div', { class: 'v' }, val));
+  }
+  return g;
+}
+function statusTone(s) {
+  s = String(s).toUpperCase();
+  if (/^(SUCCESS|COMPLETED|HELD|PAID_OUT|APPROVED|ACTIVE|VERIFIED|CONFIRMED|FINISHED|PAID)$/.test(s)) return 'good';
+  if (/^(FAILED|REJECTED|CANCELLED|CANCELED|FROZEN|DECLINED|EXPIRED|REVERSED)$/.test(s)) return 'bad';
+  if (/^(PENDING|PARTIALLY_PAID|PROCESSING|INITIATED|AWAITING.*)$/.test(s)) return 'warn';
+  return 'info';
+}
+function tableView(rows) {
+  if (!rows.length) return h('div', { class: 'empty' }, 'No rows.');
+  const sample = rows.slice(0, 25);
+  const keys = [];
+  for (const r of sample) if (r && typeof r === 'object') for (const [k, v] of Object.entries(r)) {
+    if (!keys.includes(k) && (v === null || typeof v !== 'object')) keys.push(k);
+  }
+  const pri = ['id', 'reference', 'type', 'status', 'amount', 'currency', 'provider', 'description', 'senderEmail', 'recipientEmail', 'createdAt'];
+  keys.sort((a, b) => { const ia = pri.indexOf(a), ib = pri.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
+  const cols = keys.slice(0, 9);
+  const isNum = k => sample.every(r => r && (r[k] === null || r[k] === undefined || typeof r[k] === 'number'));
+  const tb = h('tbody');
+  rows.forEach(r => {
+    if (r === null || typeof r !== 'object') { tb.append(h('tr', null, h('td', { colspan: cols.length || 1 }, fmtVal(r)))); return; }
+    const detail = h('tr', { class: 'hide' }, h('td', { colspan: cols.length }, jsonView(r)));
+    const tr = h('tr', { class: 'clk', onclick: () => detail.classList.toggle('hide') },
+      cols.map(k => {
+        const v = r[k];
+        const td = h('td', { class: isNum(k) ? 'num' : '' });
+        if (/status$/i.test(k) && typeof v === 'string') td.append(h('span', { class: 'pill ' + statusTone(v) }, v));
+        else if (typeof v === 'number' && MONEY_KEY.test(k)) td.append(fmtMoney(v));
+        else td.append(fmtVal(v));
+        return td;
+      }));
+    tb.append(tr, detail);
+  });
+  return h('div', { class: 'tw' }, h('table', { class: 't' },
+    h('thead', null, h('tr', null, cols.map(k => h('th', { class: isNum(k) ? 'num' : '' }, k)))), tb));
+}
+function summaryView(res) {
+  const p = res.payload;
+  const box = h('div', { class: 'stack' });
+  if (res.net) { box.append(h('div', { class: 'notice bad', style: { whiteSpace: 'pre-wrap', margin: 0 } }, explainFail(res))); return box; }
+  if (!res.ok) {
+    box.append(h('div', { class: 'notice bad', style: { margin: 0, whiteSpace: 'pre-wrap' } }, explainFail(res)));
+    const hint = hintFor(res); if (hint) box.append(h('div', { class: 'hint' }, hint));
+    if (p && typeof p === 'object' && Object.keys(p).length) box.append(kvView(p));
+    return box;
+  }
+  if (Array.isArray(p)) { box.append(tableView(p)); return box; }
+  if (p && typeof p === 'object') {
+    const list = Array.isArray(p.content) ? p.content : null;
+    if (list) {
+      box.append(tableView(list));
+      const meta = {}; for (const k of ['totalElements', 'totalPages', 'number', 'size']) if (k in p) meta[k] = p[k];
+      if (Object.keys(meta).length) box.append(h('div', { class: 'hint' }, Object.entries(meta).map(([k, v]) => k + ': ' + v).join('   ')));
+      return box;
+    }
+    const arrKey = Object.keys(p).find(k => Array.isArray(p[k]) && p[k].length && typeof p[k][0] === 'object');
+    const scalars = {}; for (const [k, v] of Object.entries(p)) if (!(Array.isArray(v) && typeof (v[0] || 0) === 'object')) scalars[k] = v;
+    if (Object.keys(scalars).length) box.append(kvView(scalars));
+    if (arrKey) { box.append(h('div', { class: 'fl' }, arrKey)); box.append(tableView(p[arrKey])); }
+    return box;
+  }
+  if (p === null || p === undefined || p === '') box.append(h('div', { class: 'muted' }, res.message || 'Done (empty body).'));
+  else box.append(h('div', { class: 'mono' }, String(p)));
+  return box;
+}
+function renderResult(res, opts) {
+  const e = res.entry;
+  const tone = res.net ? 'bad' : res.ok ? 'good' : (res.status >= 500 ? 'bad' : 'warn');
+  const body = h('div', { class: 'rb' });
+  const tabs = {};
+  const modes = { Summary: () => summaryView(res), JSON: () => jsonView(res.data !== null && res.data !== undefined ? res.data : (res.text || '(empty)')), Request: () => requestView(e) };
+  const bar = h('div', { class: 'rtabs' });
+  const show = name => { body.replaceChildren(modes[name]()); for (const [n, b] of Object.entries(tabs)) b.classList.toggle('on', n === name); };
+  for (const n of Object.keys(modes)) { tabs[n] = h('button', { type: 'button', onclick: () => show(n) }, n); bar.append(tabs[n]); }
+  const box = h('div', { class: 'result' },
+    h('div', { class: 'rh' },
+      h('span', { class: 'pill ' + tone }, res.net ? 'No response' : res.status + ' ' + (res.ok ? 'OK' : 'Error')),
+      h('span', { class: 'msg' }, res.net ? 'Network error' : (res.message || '')),
+      h('span', { class: 'muted small' }, res.ms + ' ms'),
+      bar),
+    body);
+  show((opts && opts.mode) || 'Summary');
+  return box;
+}
+function requestView(e) {
+  const w = h('div', { class: 'stack' });
+  w.append(h('div', { class: 'mono' }, e.method + ' ' + e.url));
+  w.append(h('div', { class: 'kv' }, Object.entries(e.reqHeaders).flatMap(([k, v]) => [h('div', { class: 'k' }, k), h('div', { class: 'v mono' }, v)])));
+  if (e.reqBody) { let b = e.reqBody; try { b = JSON.parse(b); } catch (x) { /* raw */ } w.append(jsonView(b)); }
+  w.append(h('div', { class: 'actions' },
+    h('button', { class: 'btn sm', type: 'button', onclick: () => copyText(curlOf(e), 'cURL') }, ico('copy'), 'Copy cURL'),
+    h('button', { class: 'btn sm', type: 'button', onclick: () => openInBuilder(e) }, ico('tool'), 'Open in builder')));
+  return w;
+}
+function openInBuilder(e) {
+  let svc = 'raw', path = e.url;
+  if (S.cfg.wallet && e.url.startsWith(S.cfg.wallet.replace(/\/+$/, ''))) { svc = 'wallet'; path = e.url.slice(S.cfg.wallet.replace(/\/+$/, '').length); }
+  else if (S.cfg.auth && e.url.startsWith(S.cfg.auth.replace(/\/+$/, ''))) { svc = 'auth'; path = e.url.slice(S.cfg.auth.replace(/\/+$/, '').length); }
+  S.builderPreset = { svc, method: e.method, path, auth: e.sentAuth, body: e.reqBody ? (() => { try { return JSON.stringify(JSON.parse(e.reqBody), null, 2); } catch (x) { return e.reqBody; } })() : '' };
+  go('builder');
+}
+
+// ---------- request cards (one per endpoint, built from a definition) ----------
+function fieldInput(f) {
+  const dv = typeof f.d === 'function' ? f.d() : f.d;
+  let el;
+  if (f.t === 'select') {
+    el = h('select', { class: 'inp', id: f._id }, (f.o || []).map(o => { const v = typeof o === 'object' ? o.v : o, l = typeof o === 'object' ? o.l : o; return h('option', { value: v }, l); }));
+    if (dv !== undefined) el.value = dv;
+  } else if (f.t === 'json' || f.t === 'textarea') {
+    el = h('textarea', { class: 'inp', id: f._id, rows: f.rows || 4, spellcheck: 'false' });
+    el.value = dv === undefined ? '' : (typeof dv === 'string' ? dv : JSON.stringify(dv, null, 2));
+  } else if (f.t === 'checkbox') {
+    el = h('input', { type: 'checkbox', id: f._id }); el.checked = !!dv;
+  } else {
+    el = h('input', { class: 'inp', id: f._id, type: f.t === 'number' ? 'text' : (f.t || 'text'), inputmode: f.t === 'number' ? 'decimal' : null, autocomplete: 'off', spellcheck: 'false', placeholder: f.ph || '' });
+    el.value = dv === undefined || dv === null ? '' : dv;
+  }
+  return el;
+}
+let fieldSeq = 0;
+function actionCard(def, opts) {
+  opts = opts || {};
+  const inputs = {};
+  const fields = (def.f || []).map(f => Object.assign({ _id: 'f' + (++fieldSeq) }, f));
+  const form = h('div', { class: 'fields' });
+  let rawBody = null, rawHeaders = null;
+  if (def.raw) {
+    rawBody = fieldInput({ _id: 'f' + (++fieldSeq), t: 'json', d: def.body || '', rows: 12 });
+    rawHeaders = fieldInput({ _id: 'f' + (++fieldSeq), t: 'json', d: def.headers || '{}', rows: 3 });
+    form.append(h('div', { class: 'wide' }, h('label', { class: 'fl' }, 'Body (JSON)'), rawBody),
+      h('div', { class: 'wide' }, h('label', { class: 'fl' }, 'Extra headers (JSON, for example a provider signature)'), rawHeaders));
+  }
+  for (const f of fields) {
+    const el = fieldInput(f); inputs[f.k] = { f, el };
+    const wrap = h('div', { class: f.w || f.t === 'json' || f.t === 'textarea' ? 'wide' : '' });
+    if (f.t === 'checkbox') wrap.append(h('label', { class: 'fl', for: f._id }, el, ' ', f.l || f.k));
+    else wrap.append(h('label', { class: 'fl', for: f._id }, f.l || f.k, f.r ? h('span', { class: 'req' }, '*') : null), el);
+    if (f.h) wrap.append(h('div', { class: 'hint' }, f.h));
+    form.append(wrap);
+  }
+  const out = h('div');
+  const send = h('button', { class: 'btn primary', type: 'button' }, 'Send');
+  const preview = h('div', { class: 'hide' });
+  const buildReq = () => {
+    const req = { path: def.p, query: {}, body: undefined, headers: undefined };
+    let body = def.fixed ? Object.assign({}, def.fixed) : {};
+    let hasBody = !!def.fixed || def.m !== 'GET' && fields.some(f => (f.in || 'body') === 'body');
+    for (const f of fields) {
+      const { el } = inputs[f.k];
+      let v = f.t === 'checkbox' ? el.checked : el.value.trim();
+      const where = f.in || 'body';
+      if (where === 'path') { req.path = req.path.replace('{' + f.k + '}', encodeURIComponent(interp(String(v)))); continue; }
+      if (v === '' && f.t !== 'checkbox') { if (f.r) return { error: (f.l || f.k) + ' is required' }; continue; }
+      if (where === 'query') { req.query[f.k] = v; continue; }
+      if (f.t === 'number') { const iv = interp(String(v)); const n = Number(iv); if (iv === '' || isNaN(n)) return { error: (f.l || f.k) + ' must be a number' }; v = n; }
+      else if (f.t === 'json') { try { v = JSON.parse(interp(String(v))); } catch (x) { return { error: (f.l || f.k) + ' is not valid JSON' }; } }
+      else if (typeof v === 'string') v = interp(v);
+      body[f.k] = v;
+    }
+    if (def.raw) {
+      try { req.body = JSON.parse(interp(rawBody.value) || '{}'); } catch (x) { return { error: 'Body is not valid JSON' }; }
+      try { req.headers = JSON.parse(rawHeaders.value || '{}'); } catch (x) { return { error: 'Extra headers are not valid JSON' }; }
+    } else if (hasBody) req.body = body;
+    if (def.m === 'GET' || def.m === 'DELETE') { if (def.m === 'GET') req.body = undefined; }
+    return req;
+  };
+  const run = async () => {
+    const req = buildReq();
+    if (req.error) { toast(req.error, true); return; }
+    if (def.a === 'key' && !S.cfg.apiKey) { toast('Set the internal API key in Connection first', true); openSettings(); return; }
+    if (def.a === 'jwt' && !session()) { toast('Sign in first', true); return; }
+    send.disabled = true; const lbl = send.textContent; send.replaceChildren(h('span', { class: 'spin' }), ' Sending');
+    const res = await call({ svc: def.svc || 'wallet', method: def.m, path: req.path, query: req.query, body: req.body, headers: req.headers, auth: def.a });
+    send.disabled = false; send.textContent = lbl;
+    out.replaceChildren(renderResult(res));
+    if (res.ok && def.capture) { try { setVars(def.capture(res.payload, res)); } catch (x) { /* ignore */ } }
+    if (res.ok && def.money) refreshBalance();
+    if (opts.onResult) opts.onResult(res);
+  };
+  send.addEventListener('click', run);
+  const prevBtn = h('button', { class: 'btn ghost sm', type: 'button', onclick: () => {
+    const req = buildReq(); preview.classList.toggle('hide');
+    if (req.error) { preview.replaceChildren(h('div', { class: 'notice bad', style: { margin: 0 } }, req.error)); return; }
+    const q = new URLSearchParams(); for (const [k, v] of Object.entries(req.query || {})) q.append(k, interp(v));
+    fill(preview, h('div', { class: 'mono', style: { marginBottom: '6px' } }, def.m + ' ' + interp(req.path) + (q.toString() ? '?' + q : '') + '   (' + ({ jwt: 'Bearer token', key: 'X-API-Key', none: 'no auth' }[def.a]) + ')'), req.body !== undefined ? jsonView(req.body) : null);
+  } }, 'Preview request');
+  const authBadge = { jwt: ['info', 'Bearer token'], key: ['warn', 'API key'], none: ['', 'Public'] }[def.a] || ['', ''];
+  const det = h('details', { class: 'card act', open: opts.open ? true : null },
+    h('summary', null,
+      h('span', { class: 'verb ' + def.m }, def.m),
+      h('span', { class: 't' }, def.t),
+      h('span', { class: 'p' }, def.p),
+      h('span', { class: 'pill ' + authBadge[0] }, authBadge[1]),
+      h('span', { class: 'chev' }, ico('chev'))),
+    h('div', { class: 'body' },
+      def.note ? h('div', { class: 'note' }, def.note) : null,
+      (fields.length || def.raw) ? form : null,
+      h('div', { class: 'actions' }, send, prevBtn),
+      preview, out));
+  det._run = run;
+  return det;
+}
+function cardList(defs, opts) { return h('div', { class: 'stack' }, defs.map(d => actionCard(d, opts))); }
+function tabbed(items, initial) {
+  // items: [{ id, label, build: () => Node }]
+  const holder = h('div'); const bar = h('div', { class: 'tabs', role: 'tablist' }); const btns = {};
+  const cache = {};
+  const pick = id => {
+    for (const [k, b] of Object.entries(btns)) b.classList.toggle('on', k === id);
+    if (!cache[id]) cache[id] = items.find(i => i.id === id).build();
+    holder.replaceChildren(cache[id]);
+  };
+  for (const it of items) { btns[it.id] = h('button', { type: 'button', role: 'tab', onclick: () => pick(it.id) }, it.label); bar.append(btns[it.id]); }
+  pick(initial || items[0].id);
+  return h('div', null, bar, holder);
+}
+
+// ---------- endpoint catalog (mirrors the Postman collection) ----------
+function scan(o, names) {
+  const want = names.map(n => n.toLowerCase()); const q = [o]; let guard = 0;
+  while (q.length && guard++ < 500) {
+    const x = q.shift();
+    if (x && typeof x === 'object') {
+      for (const [k, v] of Object.entries(x)) if (want.includes(k.toLowerCase()) && v !== null && typeof v !== 'object') return v;
+      for (const v of Object.values(x)) if (v && typeof v === 'object') q.push(v);
+    }
+  }
+  return '';
+}
+const CUR = ['USD', 'KES', 'EUR', 'GBP', 'GHS', 'NGN', 'UGX', 'TZS', 'ZAR'];
+const amt = d => ({ k: 'amount', l: 'Amount', t: 'number', d, r: 1 });
+const ref = (k, d) => ({ k: k || 'reference', l: 'Reference', d: d || '', h: 'Optional idempotency key' });
+const cur = d => ({ k: 'currency', l: 'Currency', t: 'select', o: CUR, d: d || 'USD' });
+const pageQ = [
+  { k: 'page', l: 'Page', in: 'query', d: 0, t: 'number' },
+  { k: 'size', l: 'Size', in: 'query', d: 20, t: 'number' },
+  { k: 'sort', l: 'Sort', in: 'query', d: 'createdAt,desc' }
+];
+const J = 'jwt', K = 'key', N = 'none';
+
+const WALLET = [
+  { id: 'wal-create', t: 'Create wallet', m: 'POST', p: '/wallet/create', a: J, note: 'Creates the wallet for the signed-in user. Usually created automatically on first use.' },
+  { id: 'wal-freeze', t: 'Freeze my wallet', m: 'PUT', p: '/wallet/freeze', a: J },
+  { id: 'wal-unfreeze', t: 'Unfreeze my wallet', m: 'PUT', p: '/wallet/unfreeze', a: J },
+  { id: 'wal-mpesa', t: 'Set M-Pesa phone number', m: 'PUT', p: '/wallet/mpesa-phone', a: J, f: [{ k: 'mpesaPhoneNumber', l: 'M-Pesa phone number', d: '254705912645', r: 1 }] },
+  { id: 'wal-pochi', t: 'Set M-Pesa Pochi phone number', m: 'PUT', p: '/wallet/pochi-phone', a: J, f: [{ k: 'pochiPhoneNumber', l: 'Pochi phone number', d: '254708374149', r: 1 }] },
+  { id: 'wal-paypal', t: 'Set PayPal email', m: 'PUT', p: '/wallet/paypal-email', a: J, f: [{ k: 'paypalEmail', l: 'PayPal email', d: 'sandbox@premisave.com', r: 1 }] }
+];
+const STATEMENT = {
+  id: 'statement', t: 'Wallet statement', m: 'POST', p: '/wallet/statement', a: J,
+  note: 'All transactions between two dates, newest first. Leave Type empty for every type.',
+  f: [{ k: 'fromDate', l: 'From', t: 'date', d: () => new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10) },
+      { k: 'toDate', l: 'To', t: 'date', d: () => new Date().toISOString().slice(0, 10) },
+      { k: 'type', l: 'Type', h: 'For example DEPOSIT, WITHDRAWAL, TRANSFER_OUT, TRANSFER_IN, PAYMENT' }]
+};
+
+const DEPOSITS = {
+  'M-Pesa': [
+    { id: 'dep-mpesa', t: 'Load wallet from M-Pesa (STK push)', m: 'POST', p: '/wallet/deposit', a: J, money: 1, fixed: { provider: 'MPESA' }, note: 'Sends an STK push to the wallet\'s M-Pesa phone number. Watch the callbacks page to simulate the result when running without a public callback URL.', f: [amt(20)], capture: p => ({ deposit_id: scan(p, ['depositId', 'id']) }) },
+    { id: 'c2b-reg', t: 'Register C2B URLs', m: 'POST', p: '/payments/mpesa/c2b/register-urls', a: J },
+    { id: 'c2b-sim', t: 'Simulate a C2B payment (sandbox)', m: 'POST', p: '/payments/mpesa/c2b/simulate', a: J, f: [{ k: 'billRefNumber', l: 'Bill reference (a wallet\'s M-Pesa phone)', d: '0790613916', r: 1 }, { k: 'amount', l: 'Amount', d: '100' }, { k: 'msisdn', l: 'MSISDN', d: '254708374149' }] }
+  ],
+  'PayPal': [
+    { id: 'dep-paypal', t: 'Load wallet from PayPal', m: 'POST', p: '/wallet/deposit', a: J, money: 1, fixed: { provider: 'PAYPAL' }, f: [amt(20), cur('USD')], capture: p => ({ paypal_order_id: scan(p, ['orderId', 'paypalOrderId']) }) },
+    { id: 'dep-paypal-c', t: 'Confirm PayPal deposit', m: 'POST', p: '/wallet/deposit/paypal/confirm', a: J, money: 1, f: [{ k: 'orderId', l: 'Order id', d: '{{paypal_order_id}}', r: 1 }] }
+  ],
+  'Flutterwave': [
+    { id: 'dep-fw', t: 'Load wallet from Flutterwave (mobile money)', m: 'POST', p: '/wallet/deposit', a: J, money: 1, fixed: { provider: 'FLUTTERWAVE' },
+      f: [amt(15), cur('GHS'), { k: 'customerName', l: 'Customer name', d: 'John Doe' }, { k: 'customerPhone', l: 'Customer phone', d: '0551234987' }, { k: 'flutterwaveCountryCode', l: 'Country code', d: '233' }, { k: 'flutterwaveMobileNetwork', l: 'Mobile network', d: 'MTN' }],
+      capture: p => ({ tx_ref_flutterwave: scan(p, ['txRef', 'tx_ref', 'reference']) }) },
+    { id: 'dep-fw-c', t: 'Confirm Flutterwave mobile money deposit', m: 'POST', p: '/wallet/deposit/flutterwave/confirm', a: J, money: 1, f: [{ k: 'txRef', l: 'txRef', d: '{{tx_ref_flutterwave}}', r: 1 }] }
+  ],
+  'Stripe': [
+    { id: 'dep-stripe', t: 'Load wallet from Stripe', m: 'POST', p: '/wallet/deposit', a: J, money: 1, fixed: { provider: 'STRIPE' }, f: [amt(100), cur('USD')], capture: p => ({ payment_intent_id: scan(p, ['paymentIntentId', 'payment_intent_id']) }) },
+    { id: 'dep-stripe-c', t: 'Confirm Stripe deposit', m: 'POST', p: '/wallet/deposit/stripe/confirm', a: J, money: 1, f: [{ k: 'paymentIntentId', l: 'Payment intent id', d: '{{payment_intent_id}}', r: 1 }] }
+  ],
+  'NOWPayments': [
+    { id: 'dep-now', t: 'Deposit through NOWPayments', m: 'POST', p: '/wallet/deposit', a: J, money: 1, fixed: { provider: 'NOWPAYMENTS' },
+      f: [amt(50), { k: 'currency', l: 'Pay currency', d: 'usdttrc20' }, { k: 'nowPaymentsPriceCurrency', l: 'Price currency', d: 'usd' }, { k: 'nowPaymentsSandboxCase', l: 'Sandbox case', t: 'select', o: ['success', 'failed', 'partially_paid'], d: 'success' }] }
+  ]
+};
+const WITHDRAWALS = {
+  'M-Pesa': [
+    { id: 'wd-b2c', t: 'Withdraw to M-Pesa (B2C)', m: 'POST', p: '/disbursements', a: J, money: 1, f: [amt(500), cur('KES'), { k: 'remarks', l: 'Remarks', d: 'Withdrawal to M-Pesa' }], capture: p => ({ disbursement_id: scan(p, ['disbursementId', 'id']) }) },
+    { id: 'wd-pochi', t: 'Withdraw to M-Pesa Pochi (B2Pochi)', m: 'POST', p: '/disbursements/b2pochi', a: J, money: 1, f: [amt(10), cur('USD'), { k: 'remarks', l: 'Remarks', d: 'Business payment' }, { k: 'occasion', l: 'Occasion', d: '' }], capture: p => ({ disbursement_id: scan(p, ['disbursementId', 'id']) }) }
+  ],
+  'PayPal': [
+    { id: 'wd-paypal', t: 'Withdraw to PayPal', m: 'POST', p: '/disbursements', a: J, money: 1, fixed: { provider: 'PAYPAL' }, f: [amt(5), ref('reference', 'DISB-{{$timestamp}}')], capture: p => ({ disbursement_id: scan(p, ['disbursementId', 'id']) }) }
+  ],
+  'Flutterwave': [
+    { id: 'wd-fw-bank', t: 'Withdraw to a bank (Flutterwave)', m: 'POST', p: '/disbursements', a: J, money: 1, fixed: { provider: 'FLUTTERWAVE', flutterwaveTransferType: 'BANK' },
+      f: [amt(1000), cur('KES'), { k: 'flutterwaveAccountBank', l: 'Bank code', d: '01' }, { k: 'flutterwaveAccountNumber', l: 'Account number', d: '1234567890' }, { k: 'flutterwaveBeneficiaryName', l: 'Beneficiary name', d: 'Jane Doe' }, { k: 'remarks', l: 'Remarks', d: 'Sandbox bank payout test' }] },
+    { id: 'wd-fw-mm', t: 'Withdraw to mobile money (Flutterwave)', m: 'POST', p: '/disbursements', a: J, money: 1, fixed: { provider: 'FLUTTERWAVE', flutterwaveTransferType: 'MOBILE_MONEY' },
+      f: [amt(500), cur('KES'), { k: 'flutterwaveAccountBank', l: 'Network', d: 'Mpesa' }, { k: 'flutterwaveAccountNumber', l: 'Phone number', d: '254701234567' }, { k: 'flutterwaveBeneficiaryName', l: 'Beneficiary name', d: 'Peter Kipchoge' }, { k: 'remarks', l: 'Remarks', d: 'Sandbox mobile money payout test' }] }
+  ],
+  'Stripe': [
+    { id: 'wd-stripe', t: 'Withdraw to a bank (Stripe)', m: 'POST', p: '/disbursements', a: J, money: 1, fixed: { provider: 'STRIPE' }, f: [amt(100), cur('USD'), ref('reference', 'WITHDRAW-{{$timestamp}}')] }
+  ],
+  'NOWPayments': [
+    { id: 'wd-now', t: 'Withdraw through NOWPayments', m: 'POST', p: '/disbursements', a: J, money: 1, fixed: { provider: 'NOWPAYMENTS' },
+      f: [amt(50), { k: 'destination', l: 'Destination address', d: 'TH4fcx7twX6WoX11CgFzQ4jNLLggbyzVxs' }, { k: 'nowPaymentsCurrency', l: 'Pay currency', d: 'usdttrc20' }, { k: 'nowPaymentsPriceCurrency', l: 'Price currency', d: 'usd' }], capture: p => ({ disbursement_id: scan(p, ['disbursementId', 'id']) }) },
+    { id: 'wd-now-v', t: 'Verify a NOWPayments payout', m: 'POST', p: '/disbursements/nowpayments/{disbursementId}/verify', a: J, money: 1, f: [{ k: 'disbursementId', l: 'Disbursement id', in: 'path', d: '{{disbursement_id}}', r: 1 }, { k: 'verificationCode', l: 'Verification code', d: '{{verification_code}}', r: 1 }] }
+  ],
+  'Status': [
+    { id: 'wd-status', t: 'Get a disbursement', m: 'GET', p: '/disbursements/{id}', a: J, f: [{ k: 'id', l: 'Disbursement id', in: 'path', d: '{{disbursement_id}}', r: 1 }] },
+    { id: 'wd-list', t: 'List my disbursements', m: 'GET', p: '/disbursements', a: J, f: pageQ }
+  ]
+};
+const SEND = [
+  { id: 'transfer', t: 'Transfer to another wallet', m: 'POST', p: '/wallet/transfer', a: J, money: 1,
+    note: 'The sender pays amount plus the internal transfer commission, the recipient receives exactly the amount.',
+    f: [amt(100), { k: 'recipientAccountNumber', l: 'Recipient account (email)', d: '{{recipient_email}}', r: 1 }, { k: 'description', l: 'Description', d: 'Rent split' }],
+    capture: p => ({ transfer_reference: scan(p, ['reference', 'transactionId']) }) },
+  { id: 'pay', t: 'Pay for a service (deduct from wallet)', m: 'POST', p: '/payments/deduct', a: J, money: 1,
+    f: [amt(5), { k: 'service', l: 'Service', d: 'AD_SUBSCRIPTION', r: 1 }, { k: 'reference', l: 'Reference', d: 'ad-sub-{{$timestamp}}', r: 1 }] }
+];
+const HISTORY = {
+  Deposits: { id: 'h-dep', t: 'Deposit history', m: 'GET', p: '/deposits/history', a: J, f: pageQ },
+  Withdrawals: { id: 'h-wd', t: 'Disbursement history', m: 'GET', p: '/disbursements/history', a: J, f: pageQ },
+  Transfers: { id: 'h-tr', t: 'Transfer history', m: 'GET', p: '/wallet/transfer/history', a: J, f: pageQ },
+  Payments: { id: 'h-pay', t: 'Payment history', m: 'GET', p: '/payments/history', a: J, f: [{ k: 'status', in: 'query', l: 'Status', d: '', h: 'For example SUCCESS' }, { k: 'service', in: 'query', l: 'Service', d: '', h: 'For example AD_SUBSCRIPTION' }].concat(pageQ) }
+};
+const LINKED = {
+  'PayPal': [
+    { id: 'pp-link', t: 'Link PayPal account', m: 'POST', p: '/wallet/paypal/link', a: J },
+    { id: 'pp-conf', t: 'Confirm PayPal link', m: 'POST', p: '/wallet/paypal/link/confirm', a: J, f: [{ k: 'setupTokenId', l: 'Setup token id', d: '', r: 1 }] },
+    { id: 'pp-acc', t: 'PayPal account status', m: 'GET', p: '/wallet/paypal/account', a: J },
+    { id: 'pp-dis', t: 'Disconnect PayPal', m: 'PUT', p: '/wallet/paypal/disconnect', a: J }
+  ],
+  'Flutterwave': [
+    { id: 'fw-link', t: 'Initiate Flutterwave link', m: 'POST', p: '/wallet/flutterwave/link', a: J },
+    { id: 'fw-conf', t: 'Confirm Flutterwave link', m: 'POST', p: '/wallet/flutterwave/link/confirm', a: J, f: [{ k: 'customerId', l: 'Customer id', r: 1 }, { k: 'paymentMethodId', l: 'Payment method id', d: 'pm_xxx', r: 1 }, { k: 'network', l: 'Network', d: 'GHS' }, { k: 'phone', l: 'Phone', d: '0551234987' }] },
+    { id: 'fw-acc', t: 'Flutterwave account status', m: 'GET', p: '/wallet/flutterwave/account', a: J },
+    { id: 'fw-un', t: 'Unlink Flutterwave', m: 'DELETE', p: '/wallet/flutterwave/link', a: J }
+  ],
+  'Stripe cards': [
+    { id: 'st-si', t: 'Create a setup intent', m: 'POST', p: '/wallet/stripe/setup-intent', a: J, capture: p => ({ setup_intent_id: scan(p, ['setupIntentId', 'id']) }) },
+    { id: 'st-sic', t: 'Confirm setup intent (save the card)', m: 'POST', p: '/wallet/stripe/setup-intent/confirm', a: J, f: [{ k: 'setupIntentId', l: 'Setup intent id', d: '{{setup_intent_id}}', r: 1 }] },
+    { id: 'st-cards', t: 'List saved cards', m: 'GET', p: '/wallet/stripe/cards', a: J, capture: p => ({ payment_method_id: scan(p, ['paymentMethodId', 'id']) }) },
+    { id: 'st-def', t: 'Set default card', m: 'PUT', p: '/wallet/stripe/cards/{id}/default', a: J, f: [{ k: 'id', l: 'Payment method id', in: 'path', d: '{{payment_method_id}}', r: 1 }] },
+    { id: 'st-rm', t: 'Remove a card', m: 'DELETE', p: '/wallet/stripe/cards/{id}', a: J, f: [{ k: 'id', l: 'Payment method id', in: 'path', d: '{{payment_method_id}}', r: 1 }] }
+  ],
+  'Stripe Connect': [
+    { id: 'sc-link', t: 'Link Stripe Connect account', m: 'POST', p: '/wallet/stripe/connect/link', a: J },
+    { id: 'sc-acc', t: 'Connect account status', m: 'GET', p: '/wallet/stripe/connect/account', a: J },
+    { id: 'sc-ref', t: 'Refresh Connect status', m: 'POST', p: '/wallet/stripe/connect/refresh', a: J },
+    { id: 'sc-un', t: 'Unlink Connect account', m: 'DELETE', p: '/wallet/stripe/connect/link', a: J }
+  ]
+};
+const SERVICE = [
+  { id: 'sv-rates', t: 'Get commission rates', m: 'GET', p: '/internal/commission/rates', a: K },
+  { id: 'sv-transfer', t: 'Transfer between wallets', m: 'POST', p: '/internal/transfer', a: K, money: 1,
+    note: 'Used by other microservices. The sender pays amount plus commission. A repeated reference is rejected with 409.',
+    f: [{ k: 'senderUserId', l: 'Sender user id', d: '{{my_user_id}}', r: 1 }, { k: 'recipientAccountNumber', l: 'Recipient (email)', d: '{{recipient_email}}', r: 1 }, amt(50), { k: 'description', l: 'Description', d: 'Maintenance fee split' }, { k: 'initiatedBy', l: 'Initiated by', d: 'PROPERTY_SERVICE', r: 1 }, { k: 'reference', l: 'Reference', d: 'transfer-{{$timestamp}}', r: 1 }],
+    capture: p => ({ transfer_reference: scan(p, ['reference', 'transactionId']) }) },
+  { id: 'sv-gettr', t: 'Get a transfer by reference', m: 'GET', p: '/internal/transfer/{ref}', a: K, f: [{ k: 'ref', l: 'Reference', in: 'path', d: '{{transfer_reference}}', r: 1 }] },
+  { id: 'sv-pay', t: 'Charge a user for a service', m: 'POST', p: '/internal/payment', a: K, money: 1,
+    f: [{ k: 'userId', l: 'User id', d: '{{my_user_id}}', r: 1 }, amt(5), { k: 'service', l: 'Service', d: 'AD_SUBSCRIPTION', r: 1 }, { k: 'description', l: 'Description', d: 'Monthly ad subscription' }, { k: 'initiatedBy', l: 'Initiated by', d: 'PROPERTY_SERVICE', r: 1 }, { k: 'reference', l: 'Reference', d: 'ad-sub-{{$timestamp}}', r: 1 }] },
+  { id: 'sv-acc', t: 'List wallet owners (directory)', m: 'GET', p: '/internal/accounts', a: K, f: [{ k: 'page', in: 'query', l: 'Page', d: 0, t: 'number' }, { k: 'size', in: 'query', l: 'Size', d: 20, t: 'number' }] },
+  { id: 'sv-eh', t: 'Escrow: hold a payment', m: 'POST', p: '/internal/escrow/hold', a: K, money: 1,
+    f: [{ k: 'senderUserId', l: 'Sender user id', d: '{{my_user_id}}', r: 1 }, { k: 'beneficiaryEmail', l: 'Beneficiary email', d: '{{recipient_email}}', r: 1 }, amt(100), { k: 'description', l: 'Description', d: 'Booking escrow test' }, { k: 'reference', l: 'Reference', d: 'escrow-{{$timestamp}}', r: 1 }, { k: 'initiatedBy', l: 'Initiated by', d: () => S.cfg.initiatedBy, r: 1 }],
+    capture: p => ({ escrow_hold_reference: scan(p, ['reference']) }) },
+  { id: 'sv-ep', t: 'Escrow: pay out of a hold', m: 'POST', p: '/internal/escrow/{hold}/payouts', a: K, money: 1,
+    f: [{ k: 'hold', l: 'Hold reference', in: 'path', d: '{{escrow_hold_reference}}', r: 1 }, { k: 'recipientAccountNumber', l: 'Recipient (sender or beneficiary email)', d: '{{recipient_email}}', r: 1 }, amt(100), { k: 'description', l: 'Description', d: 'Payout for booking escrow test' }, { k: 'reference', l: 'Payout reference', d: 'escrow-payout-{{$timestamp}}', r: 1 }, { k: 'initiatedBy', l: 'Initiated by', d: () => S.cfg.initiatedBy, r: 1 }],
+    capture: p => ({ escrow_payout_reference: scan(p, ['reference']) }) },
+  { id: 'sv-eg', t: 'Escrow: get a hold and its payouts', m: 'GET', p: '/internal/escrow/{hold}', a: K, f: [{ k: 'hold', l: 'Hold reference', in: 'path', d: '{{escrow_hold_reference}}', r: 1 }] }
+];
+const ADMIN = {
+  'Wallets': [
+    { id: 'ad-w', t: 'All wallets', m: 'GET', p: '/admin/wallet/wallets', a: J, f: pageQ },
+    { id: 'ad-ws', t: 'Search wallets', m: 'GET', p: '/admin/wallet/wallets/search', a: J, f: [{ k: 'query', in: 'query', l: 'Query', d: 'admin', r: 1 }] },
+    { id: 'ad-wu', t: 'Wallet of a user', m: 'GET', p: '/admin/wallet/wallets/{uid}', a: J, f: [{ k: 'uid', l: 'User id', in: 'path', d: '{{user_id}}', r: 1 }] },
+    { id: 'ad-wf', t: 'Freeze a wallet', m: 'PUT', p: '/admin/wallet/wallets/{uid}/freeze', a: J, f: [{ k: 'uid', l: 'User id', in: 'path', d: '{{user_id}}', r: 1 }] },
+    { id: 'ad-wun', t: 'Unfreeze a wallet', m: 'PUT', p: '/admin/wallet/wallets/{uid}/unfreeze', a: J, f: [{ k: 'uid', l: 'User id', in: 'path', d: '{{user_id}}', r: 1 }] }
+  ],
+  'Adjustments': [
+    { id: 'ad-cr', t: 'Credit a wallet (top-up)', m: 'POST', p: '/admin/wallet/wallets/{uid}/credit', a: J, money: 1, f: [{ k: 'uid', l: 'User id', in: 'path', d: '{{user_id}}', r: 1 }, amt(100), { k: 'reason', l: 'Reason', d: 'Test top-up', r: 1 }] },
+    { id: 'ad-db', t: 'Debit a wallet (deduction)', m: 'POST', p: '/admin/wallet/wallets/{uid}/debit', a: J, money: 1, f: [{ k: 'uid', l: 'User id', in: 'path', d: '{{user_id}}', r: 1 }, amt(10), { k: 'reason', l: 'Reason', d: 'Correction', r: 1 }] },
+    { id: 'ad-adj', t: 'Manual adjustments', m: 'GET', p: '/admin/wallet/adjustments', a: J, f: [{ k: 'userId', in: 'query', l: 'User id (optional)', d: '' }].concat(pageQ) }
+  ],
+  'Transactions': [
+    { id: 'ad-tx', t: 'All transactions', m: 'GET', p: '/admin/wallet/transactions', a: J },
+    { id: 'ad-tx1', t: 'One transaction', m: 'GET', p: '/admin/wallet/transactions/{id}', a: J, f: [{ k: 'id', l: 'Transaction id', in: 'path', d: '{{transaction_id}}', r: 1 }] },
+    { id: 'ad-fdep', t: 'All deposits', m: 'GET', p: '/admin/finance/deposits', a: J, f: pageQ },
+    { id: 'ad-fdis', t: 'All disbursements', m: 'GET', p: '/admin/finance/disbursements', a: J, f: pageQ },
+    { id: 'ad-ftr', t: 'All transfers', m: 'GET', p: '/admin/finance/transfers', a: J, f: pageQ },
+    { id: 'ad-fpay', t: 'All payments', m: 'GET', p: '/admin/finance/payments', a: J, f: pageQ },
+    { id: 'ad-pend', t: 'Pending disbursements', m: 'GET', p: '/admin/wallet/disbursements/pending', a: J }
+  ],
+  'Reports': [
+    { id: 'ad-sum', t: 'System summary', m: 'GET', p: '/admin/finance/reports/summary', a: J, note: 'Includes totalEscrowHeld and totalPlatformLiability once escrow is deployed.' },
+    { id: 'ad-day', t: 'Daily report', m: 'GET', p: '/admin/finance/reports/daily', a: J, f: [{ k: 'date', in: 'query', l: 'Date', t: 'date', d: () => new Date().toISOString().slice(0, 10), r: 1 }] },
+    { id: 'ad-bal', t: 'Total balance overview', m: 'GET', p: '/admin/finance/reports/balance-overview', a: J, note: 'Wallet balances, escrow held and total platform liability.' },
+    { id: 'ad-led', t: 'Company ledger', m: 'GET', p: '/admin/finance/ledger', a: J, f: pageQ, note: 'Escrow commission appears here as COMMISSION_TRANSFER with sourceType ESCROW_HOLD.' }
+  ],
+  'Gateway balances': [
+    { id: 'gb-all', t: 'All gateway balances (live)', m: 'GET', p: '/admin/gateway-balances', a: J },
+    { id: 'gb-saved', t: 'All saved balances (latest)', m: 'GET', p: '/admin/gateway-balances/saved', a: J },
+    { id: 'gb-one', t: 'One gateway live balance', m: 'GET', p: '/admin/gateway-balances/{g}', a: J, f: [{ k: 'g', l: 'Gateway', in: 'path', t: 'select', o: ['stripe', 'paypal', 'flutterwave', 'nowpayments', 'mpesa'], d: 'stripe' }] },
+    { id: 'gb-hist', t: 'Saved balance history of a gateway', m: 'GET', p: '/admin/gateway-balances/saved/{g}', a: J, f: [{ k: 'g', l: 'Gateway', in: 'path', t: 'select', o: ['stripe', 'paypal', 'flutterwave', 'nowpayments', 'mpesa'], d: 'stripe' }].concat(pageQ) }
+  ],
+  'Reconciliation': [
+    { id: 'rc-pend', t: 'Pending reconciliation', m: 'GET', p: '/admin/reconciliation/pending', a: J },
+    { id: 'rc-da', t: 'Approve a deposit', m: 'POST', p: '/admin/reconciliation/deposits/{id}/approve', a: J, money: 1, f: [{ k: 'id', l: 'Deposit id', in: 'path', d: '{{deposit_id}}', r: 1 }] },
+    { id: 'rc-dr', t: 'Reject a deposit', m: 'POST', p: '/admin/reconciliation/deposits/{id}/reject', a: J, f: [{ k: 'id', l: 'Deposit id', in: 'path', d: '{{deposit_id}}', r: 1 }, { k: 'reason', in: 'query', l: 'Reason', d: 'Payment not confirmed', r: 1 }] },
+    { id: 'rc-wa', t: 'Approve a disbursement', m: 'POST', p: '/admin/reconciliation/disbursements/{id}/approve', a: J, money: 1, f: [{ k: 'id', l: 'Disbursement id', in: 'path', d: '{{disbursement_id}}', r: 1 }] },
+    { id: 'rc-wr', t: 'Reject a disbursement', m: 'POST', p: '/admin/reconciliation/disbursements/{id}/reject', a: J, money: 1, f: [{ k: 'id', l: 'Disbursement id', in: 'path', d: '{{disbursement_id}}', r: 1 }, { k: 'reason', in: 'query', l: 'Reason', d: 'Insufficient documentation', r: 1 }] },
+    { id: 'rc-ra', t: 'Approve an M-Pesa reversal', m: 'POST', p: '/admin/reconciliation/mpesa-operations/{id}/approve-reversal', a: J, f: [{ k: 'id', l: 'Operation id', in: 'path', d: '{{operation_id}}', r: 1 }] },
+    { id: 'rc-rr', t: 'Reject an M-Pesa reversal', m: 'POST', p: '/admin/reconciliation/mpesa-operations/{id}/reject-reversal', a: J, f: [{ k: 'id', l: 'Operation id', in: 'path', d: '{{operation_id}}', r: 1 }, { k: 'reason', in: 'query', l: 'Reason', d: 'Reversal not confirmed', r: 1 }] },
+    { id: 'rc-cl', t: 'Close an M-Pesa operation', m: 'POST', p: '/admin/reconciliation/mpesa-operations/{id}/close', a: J, f: [{ k: 'id', l: 'Operation id', in: 'path', d: '{{operation_id}}', r: 1 }, { k: 'note', in: 'query', l: 'Note', d: 'Checked M-Pesa portal, nothing further found', r: 1 }] }
+  ],
+  'Exchange rates': [
+    { id: 'fx-fetch', t: 'Fetch exchange rates', m: 'POST', p: '/admin/exchange-rates/fetch', a: J, f: [{ k: 'base', in: 'query', l: 'Base currency', d: 'USD' }] },
+    { id: 'fx-get', t: 'Get exchange rates', m: 'GET', p: '/admin/exchange-rates', a: J }
+  ],
+  'M-Pesa operations': [
+    { id: 'mp-b2b', t: 'Business pay bill / buy goods (B2B)', m: 'POST', p: '/admin/wallet/b2b/pay', a: J, f: [{ k: 'commandId', l: 'Command', t: 'select', o: ['BusinessPayBill', 'BusinessBuyGoods'], d: 'BusinessPayBill' }, amt(10), cur('KES'), { k: 'receiverShortcode', l: 'Receiver shortcode', d: '600992' }, { k: 'accountReference', l: 'Account reference', d: 'KCB Bank 001' }, { k: 'remarks', l: 'Remarks', d: 'Testing B2B PayBill' }] },
+    { id: 'mp-pull-reg', t: 'Register pull transactions', m: 'POST', p: '/admin/wallet/mpesa/pull/register', a: J },
+    { id: 'mp-pull-q', t: 'Query pull transactions', m: 'POST', p: '/admin/wallet/mpesa/pull/query', a: J, f: [{ k: 'startDate', l: 'Start', d: '2026-07-24T00:00:00' }, { k: 'endDate', l: 'End', d: '2026-07-25T00:00:00' }, { k: 'offsetValue', l: 'Offset', t: 'number', d: 0 }] },
+    { id: 'mp-ts', t: 'Query transaction status', m: 'POST', p: '/admin/wallet/mpesa/transaction-status/query', a: J, f: [{ k: 'transactionId', l: 'M-Pesa transaction id', d: '{{mpesa_transaction_id}}', r: 1 }, { k: 'remarks', l: 'Remarks', d: 'Testing transaction status reconciliation' }] },
+    { id: 'mp-rev', t: 'Transaction reversal', m: 'POST', p: '/admin/wallet/mpesa/reversal', a: J, f: [{ k: 'transactionId', l: 'M-Pesa transaction id', d: '{{mpesa_transaction_id}}', r: 1 }, amt(130), { k: 'remarks', l: 'Remarks', d: 'Testing reversal reconciliation' }] },
+    { id: 'mp-poll', t: 'Poll an M-Pesa operation', m: 'GET', p: '/admin/wallet/mpesa/operations/{cid}', a: J, f: [{ k: 'cid', l: 'Conversation id', in: 'path', d: '{{conversation_id}}', r: 1 }] }
+  ]
+};
+const HEALTH = [
+  { id: 'hl', t: 'Health check', m: 'GET', p: '/system/health', a: N },
+  { id: 'hld', t: 'Health details', m: 'GET', p: '/system/health/details', a: N },
+  { id: 'hlt', t: 'Test token', m: 'GET', p: '/system/test-token', a: J }
+];
+
+// ---------- theme ----------
+function resolvedTheme() { return S.theme === 'system' ? (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : S.theme; }
+function applyTheme(t) { S.theme = t; document.documentElement.setAttribute('data-theme', resolvedTheme()); LS.set('wc-theme', t); }
+function applyAccent(a) { S.accent = a; document.documentElement.setAttribute('data-accent', a); LS.set('wc-accent', a); }
+function themeButton() {
+  const b = h('button', { class: 'icon-btn', type: 'button', title: 'Switch light and dark', 'aria-label': 'Switch light and dark theme', onclick: () => {
+    applyTheme(resolvedTheme() === 'dark' ? 'light' : 'dark'); b.replaceChildren(ico(resolvedTheme() === 'dark' ? 'sun' : 'moon'));
+  } }, ico(resolvedTheme() === 'dark' ? 'sun' : 'moon'));
+  return b;
+}
+const ACCENTS = [['blue', '#2d5bff', 'Blue'], ['emerald', '#0b8f66', 'Emerald'], ['violet', '#6a4dff', 'Violet'], ['graphite', '#1f2937', 'Graphite']];
+function openAppearance() {
+  const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Theme' });
+  const sw = h('div', { class: 'swatches', role: 'group', 'aria-label': 'Accent colour' });
+  const draw = () => {
+    seg.replaceChildren(...['light', 'dark', 'system'].map(m => h('button', { type: 'button', class: S.theme === m ? 'on' : '', onclick: () => { applyTheme(m); draw(); } }, m[0].toUpperCase() + m.slice(1))));
+    sw.replaceChildren(...ACCENTS.map(([k, col, label]) => h('button', { type: 'button', class: 'sw' + (S.accent === k ? ' on' : ''), title: label, 'aria-label': label, style: { background: col }, onclick: () => { applyAccent(k); draw(); } })));
+  };
+  draw();
+  modal('Appearance', h('div', { class: 'stack' }, h('div', null, h('label', { class: 'fl' }, 'Theme'), seg), h('div', null, h('label', { class: 'fl' }, 'Accent'), sw)));
+}
+
+// ---------- connection settings and variables ----------
+let connTimer = null;
+function connectionFields() {
+  const mk = (label, key, ph, type) => { const i = h('input', { class: 'inp', type: type || 'text', placeholder: ph || '', autocomplete: 'off', spellcheck: 'false' }); i.value = S.cfg[key] || ''; i.addEventListener('input', () => { S.cfg[key] = i.value.trim(); saveCfg(); clearTimeout(connTimer); connTimer = setTimeout(() => { if (window.checkConnections) checkConnections(); }, 500); }); return h('div', null, h('label', { class: 'fl' }, label), i); };
+  return h('div', { class: 'stack' },
+    mk('Auth service (sign in)', 'auth', 'http://localhost:8080'),
+    mk('Wallet service', 'wallet', 'http://localhost:8084'),
+    mk('Internal API key (X-API-Key, for Service API and Escrow)', 'apiKey', 'INTERNAL_API_KEY of the wallet service', 'password'),
+    mk('Default initiatedBy for escrow calls', 'initiatedBy', 'LISTING_SERVICE'),
+    h('div', { class: 'hint' }, 'Saved in this browser. The wallet only accepts calls from the origin in its FRONTEND_URL setting (default http://localhost:3000), so open this page from that address.'));
+}
+function openSettings() {
+  const body = h('div', { class: 'stack' }, connectionFields(),
+    h('div', { class: 'actions' },
+      h('button', { class: 'btn', type: 'button', onclick: async () => {
+        const r = await call({ svc: 'wallet', method: 'GET', path: '/system/health', auth: 'none' });
+        toast(r.net ? 'Wallet service not reachable' : 'Wallet service answered ' + r.status, r.net || !r.ok);
+      } }, 'Test wallet connection'),
+      h('button', { class: 'btn', type: 'button', onclick: async () => {
+        const r = await call({ svc: 'auth', method: 'GET', path: '/health', auth: 'none' });
+        toast(r.net ? 'Auth service not reachable' : 'Auth service answered ' + r.status, r.net);
+      } }, 'Test auth connection')));
+  modal('Connection', body);
+}
+function openVars() {
+  const body = h('div', { class: 'stack' });
+  const list = h('div', { class: 'stack' });
+  const draw = () => {
+    list.replaceChildren(...Object.keys(S.vars).sort().map(k => {
+      const i = h('input', { class: 'inp', spellcheck: 'false' }); i.value = S.vars[k];
+      i.addEventListener('input', () => { S.vars[k] = i.value; saveVars(); });
+      return h('div', { class: 'row', style: { flexWrap: 'nowrap' } }, h('span', { class: 'mono', style: { width: '210px', flex: 'none', overflow: 'hidden', textOverflow: 'ellipsis' } }, k), i,
+        h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Remove ' + k, onclick: () => { delete S.vars[k]; saveVars(); draw(); } }, ico('x')));
+    }));
+  };
+  draw();
+  const nk = h('input', { class: 'inp', placeholder: 'new_variable' });
+  body.append(h('p', { class: 'muted small', style: { margin: 0 } }, 'Use {{name}} in any field, like the Postman environment. Built in: {{$timestamp}}, {{$guid}}, {{$randomInt}}, {{my_user_id}}, {{my_email}}. Responses fill ids in automatically (for example a Stripe payment intent after a deposit).'),
+    list, h('div', { class: 'row' }, nk, h('button', { class: 'btn', type: 'button', onclick: () => { const k = nk.value.trim(); if (k) { S.vars[k] = ''; saveVars(); nk.value = ''; draw(); } } }, 'Add')));
+  modal('Variables', body);
+}
+
+// ---------- sign in ----------
+function loginForm(onDone) {
+  const email = h('input', { class: 'inp', type: 'email', autocomplete: 'username', placeholder: 'you@example.com', list: 'recent-emails', required: true });
+  const pass = h('input', { class: 'inp', type: 'password', autocomplete: 'current-password', placeholder: 'Password', required: true });
+  const tokenIn = h('input', { class: 'inp', placeholder: 'Paste a JWT to skip the password', spellcheck: 'false' });
+  const err = h('div', { class: 'err hide' });
+  const submit = h('button', { class: 'btn primary', type: 'submit', style: { width: '100%', justifyContent: 'center', marginTop: '16px' } }, 'Sign in');
+  const eye = h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Show password', onclick: () => { pass.type = pass.type === 'password' ? 'text' : 'password'; } }, ico('eye'));
+  const recent = h('div', { class: 'recent' }, S.recent.map(r => h('button', { type: 'button', onclick: () => { email.value = r; pass.focus(); } }, r)));
+  const dl = h('datalist', { id: 'recent-emails' }, S.recent.map(r => h('option', { value: r })));
+  const fail = m => { err.textContent = m; err.classList.remove('hide'); submit.disabled = false; submit.textContent = 'Sign in'; };
+  const form = h('form', { novalidate: true, onsubmit: async ev => {
+    ev.preventDefault(); err.classList.add('hide'); submit.disabled = true; submit.textContent = 'Signing in';
+    const t = tokenIn.value.trim().replace(/^Bearer\s+/i, '');
+    if (t) { addSession(email.value.trim(), t, '', ''); onDone(); return; }
+    if (!email.value.trim() || !pass.value) return fail('Enter your email and password.');
+    const r = await signIn(email.value.trim(), pass.value);
+    if (r.error) return fail(r.res && (r.res.status === 401 || r.res.status === 403) ? 'Sign in was refused: ' + r.error : r.error);
+    onDone();
+  } },
+    h('h2', null, 'Sign in'),
+    h('p', { class: 'muted', style: { margin: '0 0 6px' } }, 'Use an account from the auth service. Add several accounts later (tenant, owner, admin) and switch between them.'),
+    h('div', { class: 'field' }, h('label', { class: 'fl' }, 'Email'), email, S.recent.length ? recent : null, dl),
+    h('div', { class: 'field' }, h('label', { class: 'fl' }, 'Password'), h('div', { class: 'pwbox' }, pass, eye)),
+    err, submit,
+    h('details', null, h('summary', null, 'Connection and token'),
+      h('div', { style: { marginTop: '10px' } }, connectionFields()),
+      h('div', { class: 'field' }, h('label', { class: 'fl' }, 'Or paste an access token'), tokenIn,
+        h('div', { class: 'hint' }, 'With a token filled in, the password is ignored.'))));
+  return form;
+}
+const CONN = {};
+function connRows() {
+  const row = (id, label) => h('div', { class: 'c' }, h('span', { class: 'dot', id: 'cd-' + id }), h('b', null, label), h('span', { class: 'v', id: 'cv-' + id }, 'checking'));
+  return h('div', { class: 'conn' }, row('auth', 'Auth service'), row('wallet', 'Wallet service'), row('key', 'Internal API key'));
+}
+async function checkConnections() {
+  const set = (id, tone, text) => { const d = document.getElementById('cd-' + id), v = document.getElementById('cv-' + id); if (d) d.className = 'dot ' + tone; if (v) v.textContent = text; };
+  set('key', S.cfg.apiKey ? 'good' : 'warn', S.cfg.apiKey ? 'set' : 'not set');
+  set('auth', '', 'checking'); set('wallet', '', 'checking');
+  const [a, w] = await Promise.all([
+    call({ svc: 'auth', method: 'GET', path: '/health', auth: 'none' }),
+    call({ svc: 'wallet', method: 'GET', path: '/system/health', auth: 'none' })]);
+  const show = (id, r, url) => set(id, r.net ? 'bad' : (r.status < 500 ? 'good' : 'warn'), r.net ? 'unreachable or blocked' : 'reachable');
+  show('auth', a); show('wallet', w);
+}
+window.checkConnections = checkConnections;
+function renderLogin() {
+  document.title = 'Sign in | Premisave Wallet Console';
+  const root = document.getElementById('app');
+  root.replaceChildren(h('div', { class: 'login' },
+    h('div', { class: 'brand' },
+      h('div', { class: 'mark' }, h('span', { class: 'logo' }, 'P'), h('div', null, 'Premisave', h('small', null, 'Wallet Console'))),
+      h('div', null,
+        h('h1', null, 'Wallet service test console'),
+        h('p', { class: 'lede' }, 'Sign in with an auth-service account to exercise deposits, withdrawals, transfers, escrow and the admin tools against your services.'),
+        connRows()),
+      h('div', { class: 'small', style: { color: 'var(--side-ink-2)' } }, 'For testing only. Tokens stay in this browser tab.')),
+    h('div', { class: 'panel' },
+      h('div', { class: 'corner row' }, h('button', { class: 'btn ghost sm', type: 'button', onclick: openAppearance }, 'Appearance'), themeButton()),
+      loginForm(() => renderApp()))));
+  checkConnections();
+}
+
+// ---------- shell ----------
+const NAV = [
+  ['Account', 'overview', 'Wallet', 'wallet'], ['Account', 'deposit', 'Add money', 'plus'], ['Account', 'withdraw', 'Withdraw', 'up'],
+  ['Account', 'send', 'Send and pay', 'send'], ['Account', 'history', 'History', 'clock'], ['Account', 'linked', 'Linked accounts', 'link'],
+  ['Services', 'escrow', 'Escrow simulator', 'shield'], ['Services', 'service', 'Service API', 'key'], ['Services', 'webhooks', 'Provider callbacks', 'bolt'],
+  ['Staff', 'admin', 'Admin and finance', 'users'],
+  ['Tools', 'builder', 'Request builder', 'tool'], ['Tools', 'health', 'Health', 'heart']
+];
+const PAGES = {};  // filled in by pages file
+let R = {};
+function go(page) { S.page = page; SS.set('wc-page', page); renderPage(); }
+function renderApp() {
+  if (!session()) { renderLogin(); return; }
+  const root = document.getElementById('app');
+  R = {};
+  const nav = h('nav');
+  let last = '';
+  for (const [g, id, label, icon] of NAV) {
+    if (g !== last) { nav.append(h('div', { class: 'grp' }, g)); last = g; }
+    nav.append(h('a', { class: 'nav', 'data-page': id, tabindex: 0, role: 'link', onclick: () => go(id), onkeydown: e => { if (e.key === 'Enter') go(id); } }, ico(icon), label));
+  }
+  R.chip = h('div', { class: 'chip', title: 'Wallet balance of the active account' });
+  R.env = h('span', { class: 'env', title: 'Wallet service address' }, h('span', { class: 'dot', id: 'env-dot' }), (S.cfg.wallet || '').replace(/^https?:\/\//, ''));
+  R.who = h('div', { class: 'who' });
+  R.title = h('h1', null, '');
+  R.content = h('div', { class: 'content' });
+  R.drawer = h('div', { class: 'drawer' + (S.logOpen ? ' open' : '') });
+  R.logBtn = h('button', { class: 'icon-btn', type: 'button', title: 'Request log', 'aria-label': 'Toggle request log', onclick: () => toggleLog() }, ico('list'));
+  root.replaceChildren(h('div', { class: 'shell' },
+    h('aside', { class: 'side' },
+      h('div', { class: 'mark' }, h('span', { class: 'logo' }, 'P'), h('div', null, 'Premisave', h('small', null, 'Wallet Console'))), nav,
+      h('div', { class: 'foot' },
+        h('button', { class: 'btn sm', type: 'button', onclick: openSettings }, 'Connection'),
+        h('button', { class: 'btn sm', type: 'button', onclick: openVars }, 'Variables'),
+        h('button', { class: 'btn sm', type: 'button', onclick: openAppearance }, 'Appearance'))),
+    h('div', { class: 'main' },
+      h('header', { class: 'top' }, R.title, h('span', { class: 'spacer' }), R.env, R.chip, R.logBtn, themeButton(), R.who),
+      R.content)),
+    R.drawer);
+  buildWho(); updateChip(); buildDrawer(); renderPage(); refreshBalance();
+  call({ svc: 'wallet', method: 'GET', path: '/system/health', auth: 'none' }).then(r => { const d = document.getElementById('env-dot'); if (d) d.className = 'dot ' + (r.net ? 'bad' : r.status < 500 ? 'good' : 'warn'); });
+}
+function updateChip() {
+  if (!R.chip) return;
+  const b = S.balance;
+  R.chip.replaceChildren(h('span', null, 'Balance'), b ? h('span', { class: 'amt' }, fmtMoney(b.value, b.currency)) : h('span', { class: 'muted' }, 'n/a'));
+}
+function buildWho() {
+  if (!R.who) return;
+  const s = session(); if (!s) return;
+  const initial = (s.email || '?')[0].toUpperCase();
+  const btn = h('button', { type: 'button', 'aria-haspopup': 'true', onclick: () => toggleMenu() }, h('span', { class: 'avatar' }, initial), h('span', { class: 'small', style: { maxWidth: '170px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, s.email), s.role ? h('span', { class: 'pill info' }, s.role) : null);
+  R.who.replaceChildren(btn);
+}
+let menuEl = null;
+function toggleMenu() {
+  if (menuEl) { menuEl.remove(); menuEl = null; return; }
+  menuEl = h('div', { class: 'menu', role: 'menu' });
+  for (const [k, s] of Object.entries(S.sessions)) {
+    menuEl.append(h('div', { class: 'it' + (k === S.active ? ' on' : ''), onclick: () => { if (k !== S.active) switchTo(k); toggleMenu(); } },
+      h('span', { class: 'avatar' }, (s.email || '?')[0].toUpperCase()),
+      h('div', { style: { minWidth: 0, flex: 1 } }, h('div', { style: { fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' } }, s.email), h('div', { class: 'muted mono', style: { fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis' } }, s.userId || 'user id unknown')),
+      s.role ? h('span', { class: 'pill info' }, s.role) : null,
+      h('button', { class: 'icon-btn', type: 'button', title: 'Sign out of this account', 'aria-label': 'Sign out ' + s.email, onclick: async e => { e.stopPropagation(); await signOut(k); toggleMenu(); S.active ? (buildWho(), updateChip(), renderPage(), refreshBalance()) : renderApp(); } }, ico('out'))));
+  }
+  menuEl.append(h('hr'),
+    h('div', { class: 'it', onclick: () => { toggleMenu(); const m = modal('Add an account', loginForm(() => { m.close(); renderApp(); })); } }, ico('plus'), 'Add another account'),
+    h('div', { class: 'it', onclick: async () => { toggleMenu(); for (const k of Object.keys(S.sessions)) await signOut(k); renderApp(); } }, ico('out'), 'Sign out of all'));
+  R.who.append(menuEl);
+  setTimeout(() => document.addEventListener('click', function close(e) { if (menuEl && !R.who.contains(e.target)) { menuEl.remove(); menuEl = null; } document.removeEventListener('click', close); }), 0);
+}
+function switchTo(key) {
+  S.active = key; const s = session(); if (s && s.userId) S.vars.user_id = s.userId; S.vars.email = key; saveVars(); saveSessions();
+  S.balance = null; buildWho(); updateChip(); renderPage(); refreshBalance();
+}
+function renderPage() {
+  if (!R.content) return;
+  document.querySelectorAll('.side a.nav').forEach(a => a.classList.toggle('on', a.dataset.page === S.page));
+  const entry = NAV.find(n => n[1] === S.page) || NAV[0];
+  R.title.textContent = entry[2];
+  document.title = entry[2] + ' | Premisave Wallet Console';
+  const build = PAGES[entry[1]];
+  R.content.replaceChildren(h('div', { class: 'page' }, build ? build() : h('div', { class: 'empty' }, 'Page not available')));
+  R.content.scrollTop = 0;
+}
+
+// ---------- request log drawer ----------
+const openLogs = new Set();
+let errorsOnly = false;
+function toggleLog() { S.logOpen = !S.logOpen; R.drawer.classList.toggle('open', S.logOpen); if (S.logOpen) renderLog(); }
+function buildDrawer() {
+  R.logList = h('div', { class: 'dl' });
+  R.drawer.replaceChildren(
+    h('div', { class: 'dh' }, h('b', null, 'Request log'), h('span', { class: 'muted small' }, 'Every call this page makes'), h('span', { class: 'spacer' }),
+      h('label', { class: 'small', style: { display: 'flex', gap: '6px', alignItems: 'center' } }, h('input', { type: 'checkbox', onchange: e => { errorsOnly = e.target.checked; renderLog(); } }), 'Errors only'),
+      h('button', { class: 'btn sm', type: 'button', onclick: () => { S.log.length = 0; renderLog(); } }, 'Clear'),
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Close log', onclick: toggleLog }, ico('x'))),
+    R.logList);
+  renderLog();
+}
+function renderLog() {
+  if (!R.logList || !S.logOpen) return;
+  const rows = S.log.filter(e => !errorsOnly || e.net || e.status >= 400).slice(0, 120);
+  if (!rows.length) { R.logList.replaceChildren(h('div', { class: 'empty', style: { margin: '14px' } }, 'Nothing yet.')); return; }
+  R.logList.replaceChildren(...rows.map(e => {
+    const tone = e.net ? 'bad' : e.status < 300 ? 'good' : e.status < 500 ? 'warn' : 'bad';
+    const wrap = h('div', { class: 'lg' });
+    const head = h('div', { class: 'l1', onclick: () => { if (openLogs.has(e.id)) openLogs.delete(e.id); else openLogs.add(e.id); renderLog(); } },
+      h('span', { class: 'muted mono' }, e.at.toTimeString().slice(0, 8)),
+      h('span', { class: 'verb ' + e.method }, e.method),
+      h('span', { class: 'u' }, e.url),
+      h('span', { class: 'pill ' + tone }, e.net ? 'ERR' : e.status),
+      h('span', { class: 'muted small' }, e.ms + ' ms'));
+    wrap.append(head);
+    if (openLogs.has(e.id)) {
+      const res = { entry: e, data: e.resData, text: e.resText, ok: !e.net && e.status < 400, status: e.status, ms: e.ms, net: !!e.net, payload: e.resData, message: (e.resData && e.resData.message) || '', error: e.error };
+      wrap.append(h('div', { class: 'det' }, requestView(e), e.net ? h('div', { class: 'notice bad' }, explainFail(res)) : jsonView(e.resData !== null ? e.resData : (e.resText || '(empty body)'))));
+    }
+    return wrap;
+  }));
+}
+
+const CALLBACKS = [
+ {
+  "g": "M-Pesa",
+  "t": "M-Pesa B2B Result",
+  "p": "/payments/mpesa/b2b/result",
+  "b": "{\n  \"Result\": {\n    \"ResultType\": 0,\n    \"ResultCode\": 0,\n    \"ResultDesc\": \"The service request is processed successfully.\",\n    \"OriginatorConversationID\": \"{{originator_conversation_id}}\",\n    \"ConversationID\": \"{{conversation_id}}\",\n    \"TransactionID\": \"{{mpesa_transaction_id}}\",\n    \"ResultParameters\": {\n      \"ResultParameter\": [\n        {\n          \"Key\": \"TransactionAmount\",\n          \"Value\": 1000\n        },\n        {\n          \"Key\": \"TransactionReceipt\",\n          \"Value\": \"{{mpesa_transaction_id}}\"\n        }\n      ]\n    }\n  }\n}"
+ },
+ {
+  "g": "M-Pesa",
+  "t": "M-Pesa B2B Timeout",
+  "p": "/payments/mpesa/b2b/timeout",
+  "b": "{\n  \"Result\": {\n    \"ResultType\": 0,\n    \"ResultCode\": 17,\n    \"ResultDesc\": \"Request cancelled by user.\",\n    \"OriginatorConversationID\": \"{{originator_conversation_id}}\",\n    \"ConversationID\": \"{{conversation_id}}\",\n    \"TransactionID\": \"\"\n  }\n}"
+ },
+ {
+  "g": "M-Pesa",
+  "t": "Account Balance Result",
+  "p": "/payments/mpesa/balance/result",
+  "b": "{\n  \"Result\": {\n    \"ResultType\": 0,\n    \"ResultCode\": 0,\n    \"ResultDesc\": \"The service request is processed successfully.\",\n    \"OriginatorConversationID\": \"{{originator_conversation_id}}\",\n    \"ConversationID\": \"{{conversation_id}}\",\n    \"TransactionID\": \"{{mpesa_transaction_id}}\",\n    \"ResultParameters\": {\n      \"ResultParameter\": [\n        {\n          \"Key\": \"AccountBalance\",\n          \"Value\": \"Working Account|KES|10000.00|10000.00|0.00|0.00\"\n        }\n      ]\n    }\n  }\n}"
+ },
+ {
+  "g": "M-Pesa",
+  "t": "Account Balance Timeout",
+  "p": "/payments/mpesa/balance/timeout",
+  "b": "{\n  \"Result\": {\n    \"ResultType\": 0,\n    \"ResultCode\": 17,\n    \"ResultDesc\": \"Request cancelled by user.\",\n    \"OriginatorConversationID\": \"{{originator_conversation_id}}\",\n    \"ConversationID\": \"{{conversation_id}}\",\n    \"TransactionID\": \"\"\n  }\n}"
+ },
+ {
+  "g": "M-Pesa",
+  "t": "Transaction Status Result",
+  "p": "/payments/mpesa/transactionstatus/result",
+  "b": "{\n  \"Result\": {\n    \"ResultType\": 0,\n    \"ResultCode\": 0,\n    \"ResultDesc\": \"The service request is processed successfully.\",\n    \"OriginatorConversationID\": \"{{originator_conversation_id}}\",\n    \"ConversationID\": \"{{conversation_id}}\",\n    \"TransactionID\": \"{{mpesa_transaction_id}}\",\n    \"ResultParameters\": {\n      \"ResultParameter\": [\n        {\n          \"Key\": \"TransactionStatus\",\n          \"Value\": \"Completed\"\n        },\n        {\n          \"Key\": \"ReceiptNo\",\n          \"Value\": \"{{mpesa_transaction_id}}\"\n        }\n      ]\n    }\n  }\n}"
+ },
+ {
+  "g": "M-Pesa",
+  "t": "Transaction Status Timeout",
+  "p": "/payments/mpesa/transactionstatus/timeout",
+  "b": "{\n  \"Result\": {\n    \"ResultType\": 0,\n    \"ResultCode\": 17,\n    \"ResultDesc\": \"Request cancelled by user.\",\n    \"OriginatorConversationID\": \"{{originator_conversation_id}}\",\n    \"ConversationID\": \"{{conversation_id}}\",\n    \"TransactionID\": \"\"\n  }\n}"
+ },
+ {
+  "g": "M-Pesa",
+  "t": "Reversal Result",
+  "p": "/payments/mpesa/reversal/result",
+  "b": "{\n  \"Result\": {\n    \"ResultType\": 0,\n    \"ResultCode\": 0,\n    \"ResultDesc\": \"The service request is processed successfully.\",\n    \"OriginatorConversationID\": \"{{originator_conversation_id}}\",\n    \"ConversationID\": \"{{conversation_id}}\",\n    \"TransactionID\": \"{{mpesa_transaction_id}}\",\n    \"ResultParameters\": {\n      \"ResultParameter\": [\n        {\n          \"Key\": \"DebitAccountBalance\",\n          \"Value\": \"10000.00\"\n        },\n        {\n          \"Key\": \"Amount\",\n          \"Value\": 1000\n        }\n      ]\n    }\n  }\n}"
+ },
+ {
+  "g": "M-Pesa",
+  "t": "Reversal Timeout",
+  "p": "/payments/mpesa/reversal/timeout",
+  "b": "{\n  \"Result\": {\n    \"ResultType\": 0,\n    \"ResultCode\": 17,\n    \"ResultDesc\": \"Request cancelled by user.\",\n    \"OriginatorConversationID\": \"{{originator_conversation_id}}\",\n    \"ConversationID\": \"{{conversation_id}}\",\n    \"TransactionID\": \"\"\n  }\n}"
+ },
+ {
+  "g": "M-Pesa",
+  "t": "B2Pochi Result",
+  "p": "/payments/mpesa/b2pochi/result",
+  "b": "{\n  \"Result\": {\n    \"ResultType\": 0,\n    \"ResultCode\": 0,\n    \"ResultDesc\": \"The service request is processed successfully.\",\n    \"OriginatorConversationID\": \"{{originator_conversation_id}}\",\n    \"ConversationID\": \"{{conversation_id}}\",\n    \"TransactionID\": \"{{mpesa_transaction_id}}\",\n    \"ResultParameters\": {\n      \"ResultParameter\": [\n        {\n          \"Key\": \"DebitAccountBalance\",\n          \"Value\": \"10000.00\"\n        },\n        {\n          \"Key\": \"Amount\",\n          \"Value\": 1000\n        }\n      ]\n    }\n  }\n}"
+ },
+ {
+  "g": "M-Pesa",
+  "t": "B2Pochi Timeout",
+  "p": "/payments/mpesa/b2pochi/timeout",
+  "b": "{\n  \"Result\": {\n    \"ResultType\": 0,\n    \"ResultCode\": 17,\n    \"ResultDesc\": \"Request cancelled by user.\",\n    \"OriginatorConversationID\": \"{{originator_conversation_id}}\",\n    \"ConversationID\": \"{{conversation_id}}\",\n    \"TransactionID\": \"\"\n  }\n}"
+ },
+ {
+  "g": "M-Pesa",
+  "t": "STK Callback URL",
+  "p": "/payments/stk-callback",
+  "b": "{\n  \"Body\": {\n    \"stkCallback\": {\n      \"MerchantRequestID\": \"29115-34620561-1\",\n      \"CheckoutRequestID\": \"ws_CO_191220191020363925\",\n      \"ResultCode\": 0,\n      \"ResultDesc\": \"The service request is processed successfully.\",\n      \"CallbackMetadata\": {\n        \"Item\": [\n          {\n            \"Name\": \"Amount\",\n            \"Value\": 500.0\n          },\n          {\n            \"Name\": \"MpesaReceiptNumber\",\n            \"Value\": \"NLJ7RT61SV\"\n          },\n          {\n            \"Name\": \"TransactionDate\",\n            \"Value\": 20260725102151\n          },\n          {\n            \"Name\": \"PhoneNumber\",\n            \"Value\": 254712345678\n          }\n        ]\n      }\n    }\n  }\n}"
+ },
+ {
+  "g": "M-Pesa",
+  "t": "C2B Validation",
+  "p": "/payments/mpesa/c2b/validation",
+  "b": "{\n  \"TransactionType\": \"Pay Bill\",\n  \"TransID\": \"{{mpesa_transaction_id}}\",\n  \"TransTime\": \"20250627120000\",\n  \"TransAmount\": \"1000.00\",\n  \"BusinessShortCode\": \"174379\",\n  \"BillRefNumber\": \"user@example.com\",\n  \"InvoiceNumber\": \"\",\n  \"OrgAccountBalance\": \"\",\n  \"ThirdPartyTransID\": \"\",\n  \"MSISDN\": \"254712345678\",\n  \"FirstName\": \"John\",\n  \"MiddleName\": \"\",\n  \"LastName\": \"Doe\"\n}"
+ },
+ {
+  "g": "M-Pesa",
+  "t": "C2B Confirmation",
+  "p": "/payments/mpesa/c2b/confirmation",
+  "b": "{\n  \"TransactionType\": \"Pay Bill\",\n  \"TransID\": \"{{mpesa_transaction_id}}\",\n  \"TransTime\": \"20250627120000\",\n  \"TransAmount\": \"1000.00\",\n  \"BusinessShortCode\": \"174379\",\n  \"BillRefNumber\": \"user@example.com\",\n  \"InvoiceNumber\": \"\",\n  \"OrgAccountBalance\": \"50000.00\",\n  \"ThirdPartyTransID\": \"\",\n  \"MSISDN\": \"254712345678\",\n  \"FirstName\": \"John\",\n  \"MiddleName\": \"\",\n  \"LastName\": \"Doe\"\n}"
+ },
+ {
+  "g": "M-Pesa",
+  "t": "M-Pesa B2C Result",
+  "p": "/payments/mpesa/b2c/result",
+  "b": "{\n  \"Result\": {\n    \"ResultType\": 0,\n    \"ResultCode\": 0,\n    \"ResultDesc\": \"The service request is processed successfully.\",\n    \"OriginatorConversationID\": \"{{originator_conversation_id}}\",\n    \"ConversationID\": \"{{conversation_id}}\",\n    \"TransactionID\": \"{{mpesa_transaction_id}}\",\n    \"ResultParameters\": {\n      \"ResultParameter\": [\n        {\n          \"Key\": \"TransactionAmount\",\n          \"Value\": 1000\n        },\n        {\n          \"Key\": \"TransactionReceipt\",\n          \"Value\": \"{{mpesa_transaction_id}}\"\n        },\n        {\n          \"Key\": \"ReceiverPartyPublicName\",\n          \"Value\": \"254712345678 - John Doe\"\n        }\n      ]\n    }\n  }\n}"
+ },
+ {
+  "g": "M-Pesa",
+  "t": "M-Pesa B2C Timeout",
+  "p": "/payments/mpesa/b2c/timeout",
+  "b": "{\n  \"Result\": {\n    \"ResultType\": 0,\n    \"ResultCode\": 17,\n    \"ResultDesc\": \"Request cancelled by user.\",\n    \"OriginatorConversationID\": \"{{originator_conversation_id}}\",\n    \"ConversationID\": \"{{conversation_id}}\",\n    \"TransactionID\": \"\"\n  }\n}"
+ },
+ {
+  "g": "M-Pesa",
+  "t": "Pull Transactions Callback",
+  "p": "/payments/mpesa/pull/callback",
+  "b": "{\n  \"ResponseCode\": \"0\",\n  \"ResponseMessage\": \"Success\",\n  \"ResponseRefID\": \"{{request_id}}\",\n  \"Transaction\": [\n    {\n      \"transactionId\": \"{{mpesa_transaction_id}}\",\n      \"trxDate\": \"2026-07-25 10:21:51\",\n      \"msisdn\": \"254712345678\",\n      \"transactiontype\": \"Pay Bill\",\n      \"billreference\": \"user@example.com\",\n      \"amount\": \"500.00\",\n      \"organizationname\": \"Premisave\"\n    }\n  ]\n}"
+ },
+ {
+  "g": "Paypal",
+  "t": "PayPal Webhook",
+  "p": "/payments/paypal/webhook",
+  "b": "{\n  \"event_type\": \"CHECKOUT.ORDER.APPROVED\",\n  \"resource\": {\n    \"id\": \"{{paypal_order_id}}\",\n    \"status\": \"APPROVED\",\n    \"purchase_units\": [\n      {\n        \"reference_id\": \"{{idempotency_key}}\",\n        \"amount\": {\n          \"currency_code\": \"USD\",\n          \"value\": \"10.00\"\n        }\n      }\n    ]\n  }\n}"
+ },
+ {
+  "g": "Flutterwave",
+  "t": "Flutterwave Webhook",
+  "p": "/payments/flutterwave/webhook",
+  "b": "{\n  \"event\": \"charge.completed\",\n  \"data\": {\n    \"id\": \"{{flutterwave_charge_id}}\",\n    \"status\": \"succeeded\",\n    \"reference\": \"{{flutterwave_tx_ref}}\"\n  }\n}"
+ },
+ {
+  "g": "Stripe",
+  "t": "Stripe Webhook",
+  "p": "/payments/stripe/webhook",
+  "b": "{\n  \"id\": \"evt_test_webhook\",\n  \"object\": \"event\",\n  \"type\": \"payment_intent.succeeded\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"pi_test_1234567890\",\n      \"object\": \"payment_intent\",\n      \"amount\": 100000,\n      \"currency\": \"kes\",\n      \"status\": \"succeeded\",\n      \"metadata\": {\n        \"user_id\": \"{{user_id}}\"\n      }\n    }\n  }\n}"
+ },
+ {
+  "g": "Stripe",
+  "t": "Stripe Connect Webhook",
+  "p": "/payments/stripe/connect/webhook",
+  "b": "{\n  \"id\": \"evt_test_connect_webhook\",\n  \"object\": \"event\",\n  \"type\": \"payout.paid\",\n  \"account\": \"acct_test_connected_account\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"po_test_1234567890\",\n      \"object\": \"payout\",\n      \"amount\": 50000,\n      \"currency\": \"usd\",\n      \"status\": \"paid\"\n    }\n  }\n}"
+ },
+ {
+  "g": "NOWPayments",
+  "t": "NOWPayments IPN Webhook",
+  "p": "/payments/nowpayments/webhook",
+  "b": "{\n  \"payment_id\": \"test-payment-id-123\",\n  \"payment_status\": \"finished\",\n  \"pay_address\": \"TH4fcx7twX6WoX11CgFzQ4jNLLggbyzVxs\",\n  \"price_amount\": 500.0,\n  \"price_currency\": \"kes\",\n  \"pay_amount\": 3.87,\n  \"pay_currency\": \"usdttrc20\",\n  \"actually_paid\": 3.87,\n  \"order_id\": \"{{orderId}}\",\n  \"order_description\": \"Premisave wallet deposit\"\n}"
+ },
+ {
+  "g": "NOWPayments",
+  "t": "NOWPayments Payout Webhook (test)",
+  "p": "/payments/nowpayments/webhook",
+  "b": "{\n  \"id\": \"test-payout-id\",\n  \"status\": \"FINISHED\"\n}"
+ }
+];
+
+// ---------- small page helpers ----------
+function lead(text) { return h('p', { class: 'lead' }, text); }
+function sec(text) { return h('h2', { class: 'sec' }, text); }
+function listFor(defs, opts) { return h('div', { class: 'stack' }, defs.map(d => actionCard(d, opts))); }
+function tabsFromMap(map, build, initial) {
+  return tabbed(Object.keys(map).map(k => ({ id: k, label: k, build: () => build(map[k], k) })), initial);
+}
+function keyBanner() {
+  if (S.cfg.apiKey) return null;
+  return h('div', { class: 'notice warn' }, 'These calls use the internal API key, which is not set yet. ',
+    h('button', { class: 'btn sm', type: 'button', onclick: openSettings }, 'Set it in Connection'));
+}
+
+// ---------- wallet overview ----------
+PAGES.overview = () => {
+  const stats = h('div', { class: 'balance' });
+  const detBox = h('div', { class: 'card pad' });
+  const cell = (lab, val) => h('div', { class: 'cell' }, h('div', { class: 'lab' }, lab), val);
+  const draw = (res) => {
+    if (!res) { fill(stats, h('div', { class: 'cell' }, h('div', { class: 'lab' }, 'Available balance'), h('div', { class: 'num' }, '...'), h('div', { class: 'sub' }, 'Loading'))); detBox.replaceChildren(); return; }
+    if (!res.ok) {
+      const none = res.status === 404;
+      fill(stats, h('div', { class: 'cell' }, h('div', { class: 'lab' }, 'Available balance'), h('div', { class: 'num' }, '-'),
+        h('div', { class: 'sub' }, none ? 'This account has no wallet yet.' : explainFail(res).split('\n')[0])));
+      fill(detBox, h('h3', null, 'Wallet'), h('div', { style: { height: '10px' } }),
+        none ? h('button', { class: 'btn primary', type: 'button', onclick: async () => { const r = await call({ svc: 'wallet', method: 'POST', path: '/wallet/create', auth: 'jwt' }); toast(r.ok ? 'Wallet created' : explainFail(r), !r.ok); load(); refreshBalance(); } }, 'Create wallet')
+          : summaryView(res));
+      return;
+    }
+    const p = res.payload || {};
+    const b = pickBalance(p);
+    const frozen = p.frozen === true || /frozen/i.test(String(p.status || ''));
+    fill(stats,
+      h('div', { class: 'cell' }, h('div', { class: 'lab' }, 'Available balance'),
+        h('div', { class: 'num' }, b ? fmtMoney(b.value, p.currency || b.currency || '') : '-'),
+        h('button', { class: 'btn sm', type: 'button', onclick: () => { load(); refreshBalance(); } }, ico('refresh'), 'Refresh')),
+      cell('Currency', h('div', { class: 'val' }, p.currency || (b && b.currency) || '-')),
+      cell('Status', h('div', { class: 'val row', style: { gap: '7px' } }, h('span', { class: 'dot ' + (frozen ? 'bad' : 'good') }), frozen ? 'Frozen' : 'Active')),
+      cell('Account', h('div', { class: 'val mono', title: p.accountNumber || '' }, p.accountNumber || (session() || {}).email || '-')));
+    fill(detBox, h('h3', null, 'Wallet details'), h('div', { style: { height: '10px' } }), kvView(p));
+  };
+  const load = async () => { draw(null); draw(await call({ svc: 'wallet', method: 'GET', path: '/wallet', auth: 'jwt' })); };
+  load();
+  return h('div', null,
+    lead('The wallet of the signed-in account. Use the account menu in the top bar to act as someone else.'),
+    stats, h('div', { style: { height: '14px' } }), detBox,
+    sec('Wallet settings'),
+    listFor(WALLET),
+    sec('Statement'),
+    actionCard(STATEMENT, { open: true }));
+};
+
+// ---------- add money / withdraw / send / history / linked ----------
+PAGES.deposit = () => h('div', null,
+  lead('Load the wallet from a payment provider. Card and mobile money deposits finish later: confirm them here, or simulate the provider callback on the Provider callbacks page.'),
+  tabsFromMap(DEPOSITS, items => listFor(items, { open: true })));
+PAGES.withdraw = () => h('div', null,
+  lead('Send money out of the wallet. Gateway-bound withdrawals carry the gateway commission.'),
+  tabsFromMap(WITHDRAWALS, items => listFor(items, { open: true })));
+PAGES.send = () => h('div', null,
+  lead('Move money to another wallet, or pay for a platform service.'),
+  listFor(SEND, { open: true }));
+PAGES.history = () => {
+  const items = Object.keys(HISTORY).map(k => ({ id: k, label: k, build: () => { const c = actionCard(HISTORY[k], { open: true }); setTimeout(() => c._run && c._run(), 0); return c; } }));
+  items.push({ id: 'Statement', label: 'Statement', build: () => actionCard(STATEMENT, { open: true }) });
+  return h('div', null, lead('Your own deposits, withdrawals, transfers and payments. Click a row to see all of its fields.'), tabbed(items));
+};
+PAGES.linked = () => h('div', null,
+  lead('Link the payment accounts the wallet pays out to or charges.'),
+  tabsFromMap(LINKED, items => listFor(items, { open: true })));
+
+// ---------- service API (X-API-Key) ----------
+PAGES.service = () => h('div', null,
+  lead('The internal endpoints other microservices call with the shared API key. Escrow is covered step by step in the simulator; the raw calls are here too.'),
+  keyBanner(), listFor(SERVICE));
+
+// ---------- admin ----------
+PAGES.admin = () => {
+  const s = session() || {};
+  const warn = s.role && !/ADMIN|FINANCE/i.test(s.role) ? h('div', { class: 'notice warn' }, 'The active account has the role ' + s.role + '. These endpoints need an admin or finance account; switch account from the top bar.') : null;
+  return h('div', null, lead('Wallet administration, finance reports, gateway balances and reconciliation.'), warn, tabsFromMap(ADMIN, items => listFor(items)));
+};
+
+// ---------- provider callbacks ----------
+PAGES.webhooks = () => {
+  const groups = {};
+  for (const c of CALLBACKS) (groups[c.g] = groups[c.g] || []).push(c);
+  return h('div', null,
+    lead('Simulate what M-Pesa, PayPal, Flutterwave, Stripe and NOWPayments post to the wallet service, without needing a public callback URL. These are unauthenticated, like the real ones. Bodies are editable, and {{variables}} are filled in when you send.'),
+    h('div', { class: 'notice' }, 'Providers that sign their callbacks (Stripe, Flutterwave, PayPal) need the signature in Extra headers, for example {"Stripe-Signature": "..."}.'),
+    tabsFromMap(groups, items => listFor(items.map(c => ({ id: c.p, t: c.t, m: 'POST', p: c.p, a: N, raw: true, body: c.b, headers: '{}' })))));
+};
+
+// ---------- request builder ----------
+PAGES.builder = () => {
+  const pre = S.builderPreset || {}; S.builderPreset = null;
+  const svc = h('select', { class: 'inp' }, [['wallet', 'Wallet service'], ['auth', 'Auth service'], ['raw', 'Full URL']].map(([v, l]) => h('option', { value: v }, l)));
+  svc.value = pre.svc || 'wallet';
+  const method = h('select', { class: 'inp' }, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map(m => h('option', null, m))); method.value = pre.method || 'GET';
+  const path = h('input', { class: 'inp', placeholder: '/wallet/balance', spellcheck: 'false' }); path.value = pre.path || '/wallet/balance';
+  const auth = h('select', { class: 'inp' }, [['jwt', 'Bearer token of the active account'], ['key', 'X-API-Key'], ['none', 'No authentication']].map(([v, l]) => h('option', { value: v }, l))); auth.value = pre.auth || 'jwt';
+  const hdr = h('textarea', { class: 'inp', rows: 2, spellcheck: 'false' }); hdr.value = '{}';
+  const body = h('textarea', { class: 'inp', rows: 9, spellcheck: 'false', placeholder: '{ }' }); body.value = pre.body || '';
+  const out = h('div'); const send = h('button', { class: 'btn primary', type: 'button' }, 'Send');
+  send.addEventListener('click', async () => {
+    let headers, b;
+    try { headers = JSON.parse(hdr.value || '{}'); } catch (e) { return toast('Headers are not valid JSON', true); }
+    if (body.value.trim() && method.value !== 'GET') { try { b = JSON.parse(interp(body.value)); } catch (e) { return toast('Body is not valid JSON', true); } }
+    send.disabled = true;
+    const res = await call({ svc: svc.value, method: method.value, path: path.value.trim(), body: b, headers, auth: auth.value });
+    send.disabled = false; out.replaceChildren(renderResult(res));
+  });
+  return h('div', null, lead('Send any request to the wallet or auth service with the active account\'s token or the API key.'),
+    h('div', { class: 'card pad stack' },
+      h('div', { class: 'fields' },
+        h('div', null, h('label', { class: 'fl' }, 'Target'), svc), h('div', null, h('label', { class: 'fl' }, 'Method'), method),
+        h('div', { class: 'wide' }, h('label', { class: 'fl' }, 'Path (or full URL)'), path),
+        h('div', { class: 'wide' }, h('label', { class: 'fl' }, 'Authentication'), auth),
+        h('div', { class: 'wide' }, h('label', { class: 'fl' }, 'Extra headers (JSON)'), hdr),
+        h('div', { class: 'wide' }, h('label', { class: 'fl' }, 'Body (JSON)'), body)),
+      h('div', { class: 'actions' }, send), out));
+};
+
+// ---------- health ----------
+PAGES.health = () => {
+  const cards = HEALTH.map(d => actionCard(d, { open: true }));
+  const all = h('button', { class: 'btn primary', type: 'button', onclick: () => cards.forEach(c => c._run && c._run()) }, 'Run all checks');
+  return h('div', null, lead('Is the wallet service up, and does it accept this account\'s token?'), h('div', { class: 'actions', style: { marginBottom: '12px' } }, all), h('div', { class: 'stack' }, cards));
+};
+
+// ============================================================
+// Escrow simulator
+// ============================================================
+function rid() { return Math.random().toString(16).slice(2, 8); }
+function toCents(s) {
+  const m = String(s === undefined || s === null ? '' : s).trim().match(/^(\d+)(?:\.(\d{1,2}))?\d*$/);
+  if (!m) return null;
+  return BigInt(m[1]) * 100n + BigInt((m[2] || '').padEnd(2, '0') || '0');
+}
+function centsStr(c) { c = BigInt(c); const neg = c < 0n; if (neg) c = -c; return (neg ? '-' : '') + (c / 100n).toString() + '.' + (c % 100n).toString().padStart(2, '0'); }
+function feeCents(c, rate) {
+  let str = String(rate); if (/e/i.test(str)) str = Number(rate).toFixed(10);
+  const [i, f = ''] = str.split('.'); const n = BigInt(i + f), d = 10n ** BigInt(f.length);
+  return (2n * c * n + d) / (2n * d);
+}
+const E = { id: rid(), hold: null, events: [], rate: null, rateKnown: false, base: {}, cur: {}, last: null, busy: false };
+
+PAGES.escrow = () => {
+  const sess = session() || {};
+  const others = Object.values(S.sessions).filter(s => s.email !== S.active);
+  const tenant = h('input', { class: 'inp mono', spellcheck: 'false' }); tenant.value = E.tenant || sess.userId || '';
+  const owner = h('input', { class: 'inp', spellcheck: 'false', list: 'owner-list' }); owner.value = E.owner || (others[0] ? others[0].email : S.vars.recipient_email);
+  const ownerList = h('datalist', { id: 'owner-list' }, Object.values(S.sessions).map(s => h('option', { value: s.email })).concat([h('option', { value: S.vars.recipient_email })]));
+  const price = h('input', { class: 'inp', inputmode: 'decimal' }); price.value = E.price || '100.00';
+  const bid = h('input', { class: 'inp mono' }); bid.value = E.id;
+  const init = h('input', { class: 'inp' }); init.value = S.cfg.initiatedBy;
+  const pct = h('input', { type: 'range', min: 0, max: 100, step: 5, value: E.pct === undefined ? 50 : E.pct, style: { width: '100%' } });
+  const pctLab = h('b');
+  const math = h('table', { class: 'mathtbl' });
+  const holdBox = h('div'); const balBox = h('div'); const evBox = h('div', { class: 'tl' });
+  const refsLine = h('div', { class: 'hint mono' });
+
+  const cfg = () => {
+    E.tenant = tenant.value.trim(); E.owner = owner.value.trim(); E.price = price.value.trim(); E.id = bid.value.trim() || rid(); E.pct = Number(pct.value);
+    const c = { tenant: E.tenant, owner: E.owner, id: E.id, init: init.value.trim(), pct: E.pct, priceC: toCents(E.price) };
+    c.refs = { hold: 'booking-' + c.id, release: 'booking-release-' + c.id, refund: 'booking-refund-' + c.id, payout: 'booking-payout-' + c.id };
+    return c;
+  };
+  const drawMath = () => {
+    const c = cfg(); pctLab.textContent = c.pct + '%';
+    refsLine.textContent = 'References: ' + Object.values(c.refs).join('   ');
+    const rate = E.rate === null ? 0.01 : E.rate;
+    if (c.priceC === null || c.priceC <= 0n) { math.replaceChildren(h('tr', null, h('td', null, 'Enter a positive price with at most 2 decimals'))); return; }
+    const fee = feeCents(c.priceC, rate), total = c.priceC + fee;
+    const refund = (c.priceC * BigInt(c.pct) + 50n) / 100n, ownerShare = c.priceC - refund;
+    const row = (a, b, cls) => h('tr', { class: cls || '' }, h('td', null, a), h('td', null, b));
+    math.replaceChildren(
+      row('Booking price held in escrow', centsStr(c.priceC)),
+      row('Commission at ' + (rate * 100).toFixed(2).replace(/\.?0+$/, '') + '%' + (E.rateKnown ? '' : ' (assumed)') + ', charged once', centsStr(fee)),
+      row('Tenant is debited', centsStr(total), 'sum'),
+      row('Owner receives on release', centsStr(c.priceC)),
+      row('On cancel at ' + c.pct + '%: tenant refund / owner share', centsStr(refund) + ' / ' + centsStr(ownerShare)));
+  };
+
+  // ----- display -----
+  const drawHold = () => {
+    const c = cfg(); const hd = E.hold;
+    if (!hd) { holdBox.replaceChildren(h('div', { class: 'empty' }, 'No hold found for ' + c.refs.hold + ' yet.')); return; }
+    const amount = Number(hd.amount), rem = Number(hd.remainingAmount);
+    const pctLeft = amount > 0 ? Math.max(0, Math.min(100, (rem / amount) * 100)) : 0;
+    fill(holdBox,
+      h('div', { class: 'row' }, h('h3', null, 'Escrow hold'), h('span', { class: 'pill ' + statusTone(hd.status) }, hd.status), h('span', { class: 'spacer' }), h('span', { class: 'mono muted' }, hd.reference)),
+      h('div', { style: { height: '10px' } }),
+      h('div', { class: 'bar', title: 'Still held' }, h('i', { style: { width: pctLeft + '%' } })),
+      h('div', { class: 'hint', style: { marginBottom: '10px' } }, 'Still held: ' + fmtMoney(hd.remainingAmount, hd.currency) + ' of ' + fmtMoney(hd.amount, hd.currency)),
+      kvView({ senderEmail: hd.senderEmail, beneficiaryEmail: hd.beneficiaryEmail, amount: hd.amount, commission: hd.commission, totalDebited: hd.totalDebited, remainingAmount: hd.remainingAmount, failureReason: hd.failureReason }),
+      Array.isArray(hd.payouts) && hd.payouts.length ? h('div', null, h('div', { class: 'fl', style: { marginTop: '12px' } }, 'Payouts'), tableView(hd.payouts)) : null);
+  };
+  const drawBalances = () => {
+    const keys = Object.keys(S.sessions);
+    fill(balBox, h('div', { class: 'row' }, h('h3', null, 'Wallets signed in here'), h('span', { class: 'spacer' }),
+      h('button', { class: 'btn sm', type: 'button', onclick: () => { E.base = Object.assign({}, E.cur); drawBalances(); } }, 'Reset baseline'),
+      h('button', { class: 'btn sm', type: 'button', onclick: () => refreshBalances() }, ico('refresh'), 'Refresh')),
+      ...keys.map(k => {
+        const s = S.sessions[k], cur = E.cur[k], base = E.base[k];
+        const d = cur !== undefined && base !== undefined ? cur - base : null;
+        return h('div', { class: 'bal' }, h('span', { class: 'avatar' }, (s.email || '?')[0].toUpperCase()),
+          h('div', { style: { minWidth: 0 } }, h('div', { style: { fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' } }, s.email), h('div', { class: 'hint' }, s.role || 'role unknown')),
+          h('div', { style: { textAlign: 'right' } }, h('div', { class: 'fig' }, cur === undefined ? '-' : fmtMoney(cur)),
+            d !== null && Math.abs(d) > 0.0001 ? h('div', { class: 'small delta ' + (d > 0 ? 'up' : 'down') }, (d > 0 ? '+' : '') + d.toFixed(2) + ' since baseline') : h('div', { class: 'hint' }, 'no change')));
+      }),
+      Object.keys(S.sessions).length < 2 ? h('div', { class: 'hint' }, 'Add the owner as a second account from the top bar to see both balances move.') : null);
+  };
+  const drawEvents = () => {
+    if (!E.events.length) { evBox.replaceChildren(h('div', { class: 'empty' }, 'Run a step to see what the wallet service answers.')); return; }
+    evBox.replaceChildren(...E.events.slice(0, 40).map(ev => {
+      const r = ev.res; const tone = r.net ? 'bad' : r.ok ? 'good' : r.status === 409 ? 'warn' : 'bad';
+      const p = r.payload && typeof r.payload === 'object' ? r.payload : null;
+      const extra = r.ok && p ? [p.status ? 'status ' + p.status : '', p.holdRemainingAmount !== undefined ? 'left ' + p.holdRemainingAmount : '', p.totalDebited !== undefined ? 'debited ' + p.totalDebited : '', p.commission !== undefined ? 'commission ' + p.commission : ''].filter(Boolean).join(', ') : '';
+      return h('div', { class: 'ev' }, h('span', { class: 'pill ' + tone }, r.net ? 'ERR' : r.status),
+        h('div', null, h('b', null, ev.label), h('div', { class: 'm' }, r.ok ? (r.message || 'OK') + (extra ? ' (' + extra + ')' : '') : explainFail(r).split('\n')[0])));
+    }));
+  };
+
+  // ----- calls -----
+  const keyOk = () => { if (!S.cfg.apiKey) { toast('Set the internal API key in Connection first', true); openSettings(); return false; } return true; };
+  const esc1 = async (label, method, path, body) => {
+    const res = await call({ svc: 'wallet', method, path, body, auth: 'key' });
+    E.events.unshift({ label, res }); drawEvents(); return res;
+  };
+  const refreshHold = async () => {
+    const c = cfg();
+    const res = await call({ svc: 'wallet', method: 'GET', path: '/internal/escrow/' + encodeURIComponent(c.refs.hold), auth: 'key' });
+    if (res.ok) E.hold = res.payload; else if (res.status === 404) E.hold = null;
+    drawHold(); return res;
+  };
+  const refreshBalances = async () => {
+    for (const [k, s] of Object.entries(S.sessions)) { const b = await fetchBalanceFor(s); if (b) { E.cur[k] = b.value; if (E.base[k] === undefined) E.base[k] = b.value; } }
+    drawBalances(); refreshBalance();
+  };
+  const loadRate = async () => {
+    if (!S.cfg.apiKey) return;
+    const r = await call({ svc: 'wallet', method: 'GET', path: '/internal/commission/rates', auth: 'key' });
+    if (r.ok && r.payload && r.payload.internalTransferRate !== undefined) { E.rate = Number(r.payload.internalTransferRate); E.rateKnown = true; drawMath(); }
+  };
+  const after = async () => { await refreshHold(); await refreshBalances(); };
+  const holdBody = (c, o) => Object.assign({ senderUserId: c.tenant, beneficiaryEmail: c.owner, amount: Number(centsStr(c.priceC)), description: 'Booking ' + c.id, reference: c.refs.hold, initiatedBy: c.init }, o || {});
+  const payBody = (c, recipient, cents, reference) => ({ recipientAccountNumber: recipient, amount: Number(centsStr(cents)), description: 'Payout for booking ' + c.id, reference, initiatedBy: c.init });
+  const remainingCents = c => { const r = E.hold ? toCents(String(E.hold.remainingAmount)) : null; return r === null ? c.priceC : r; };
+  const priceOk = c => { if (c.priceC === null || c.priceC <= 0n) { toast('Enter a positive price with at most 2 decimals', true); return false; } return true; };
+
+  const steps = {
+    async hold() {
+      const c = cfg(); if (!keyOk() || !priceOk(c)) return;
+      const body = holdBody(c); E.last = { method: 'POST', path: '/internal/escrow/hold', body, label: 'Hold' };
+      await esc1('Hold ' + centsStr(c.priceC) + ' for ' + c.refs.hold, 'POST', '/internal/escrow/hold', body); await after();
+    },
+    async release() {
+      const c = cfg(); if (!keyOk() || !priceOk(c)) return; await refreshHold();
+      const rem = remainingCents(c), to = E.hold ? E.hold.beneficiaryEmail : c.owner;
+      const body = payBody(c, to, rem, c.refs.release); E.last = { method: 'POST', path: '/internal/escrow/' + c.refs.hold + '/payouts', body, label: 'Release' };
+      await esc1('Release ' + centsStr(rem) + ' to the owner', 'POST', E.last.path, body); await after();
+    },
+    async cancel() {
+      const c = cfg(); if (!keyOk() || !priceOk(c)) return; await refreshHold();
+      if (!E.hold) { toast('Hold first: there is no hold for ' + c.refs.hold, true); return; }
+      const rem = remainingCents(c), refund = (rem * BigInt(c.pct) + 50n) / 100n, share = rem - refund;
+      if (refund > 0n) { const b = payBody(c, E.hold.senderEmail, refund, c.refs.refund); E.last = { method: 'POST', path: '/internal/escrow/' + c.refs.hold + '/payouts', body: b, label: 'Refund' }; await esc1('Refund ' + centsStr(refund) + ' to the tenant', 'POST', E.last.path, b); }
+      if (share > 0n) { const b = payBody(c, E.hold.beneficiaryEmail, share, c.refs.payout); E.last = { method: 'POST', path: '/internal/escrow/' + c.refs.hold + '/payouts', body: b, label: 'Owner share' }; await esc1('Pay ' + centsStr(share) + ' to the owner', 'POST', E.last.path, b); }
+      await after();
+    },
+    async lookup() { if (!keyOk()) return; const c = cfg(); await esc1('Look up ' + c.refs.hold, 'GET', '/internal/escrow/' + encodeURIComponent(c.refs.hold)); await after(); },
+    async repeat() {
+      if (!keyOk()) return; if (!E.last) { toast('Run a step first, then repeat it', true); return; }
+      await esc1('Repeat the last request (' + E.last.label + ', expect 409)', E.last.method, E.last.path, E.last.body); await after();
+    },
+    async holdTwice() {
+      const c0 = cfg(); if (!keyOk() || !priceOk(c0)) return;
+      E.id = rid(); bid.value = E.id; E.hold = null; const c = cfg(); drawMath(); drawHold();
+      const body = holdBody(c);
+      const [a, b] = await Promise.all([1, 2].map(() => call({ svc: 'wallet', method: 'POST', path: '/internal/escrow/hold', body, auth: 'key' })));
+      E.events.unshift({ label: 'Same hold sent twice at once, request B', res: b }, { label: 'Same hold sent twice at once, request A (expect one 200 and one 409)', res: a }); drawEvents(); await after();
+    },
+    async racePayouts() {
+      const c = cfg(); if (!keyOk() || !priceOk(c)) return; await refreshHold();
+      if (!E.hold) { toast('Hold first', true); return; }
+      const rem = remainingCents(c), each = rem * 6n / 10n; if (each <= 0n) { toast('Nothing left to race for', true); return; }
+      const path = '/internal/escrow/' + c.refs.hold + '/payouts';
+      const mk = (suffix) => call({ svc: 'wallet', method: 'POST', path, body: payBody(c, E.hold.beneficiaryEmail, each, 'booking-race-' + suffix + '-' + c.id + '-' + rid()), auth: 'key' });
+      const [a, b] = await Promise.all([mk('a'), mk('b')]);
+      E.events.unshift({ label: 'Race payout B (' + centsStr(each) + ')', res: b }, { label: 'Race payout A (' + centsStr(each) + ', two of 60% against 100%: expect one 200 and one 422)', res: a }); drawEvents(); await after();
+    },
+    async overspend() {
+      const c = cfg(); if (!keyOk() || !priceOk(c)) return; await refreshHold();
+      if (!E.hold) { toast('Hold first', true); return; }
+      const over = remainingCents(c) + 1n;
+      await esc1('Overspend: pay ' + centsStr(over) + ' (one cent more than is left, expect 422)', 'POST', '/internal/escrow/' + c.refs.hold + '/payouts', payBody(c, E.hold.beneficiaryEmail, over, 'booking-over-' + rid())); await after();
+    },
+    async stranger() {
+      const c = cfg(); if (!keyOk() || !priceOk(c)) return;
+      await esc1('Payout to a stranger (expect 400)', 'POST', '/internal/escrow/' + c.refs.hold + '/payouts', payBody(c, 'stranger@example.com', 1n, 'booking-stranger-' + rid())); await after();
+    },
+    async badCaller() {
+      const c = cfg(); if (!keyOk() || !priceOk(c)) return;
+      await esc1('Hold from an unknown caller (expect 403)', 'POST', '/internal/escrow/hold', holdBody(c, { initiatedBy: 'SOME_OTHER_SERVICE', reference: 'booking-badcaller-' + rid() }));
+    },
+    async missing() { if (!keyOk()) return; await esc1('Look up a hold that does not exist (expect 404)', 'GET', '/internal/escrow/booking-does-not-exist-' + rid()); }
+  };
+  const stepEls = [];
+  const wrap = fn => async () => {
+    if (E.busy) return; E.busy = true; stepEls.forEach(b => b.disabled = true);
+    try { await fn(); } finally { E.busy = false; stepEls.forEach(b => b.disabled = false); }
+  };
+  const stepBtn = (n, title, desc, fn) => { const b = h('button', { class: 'stepbtn', type: 'button', onclick: wrap(fn) }, h('span', { class: 'n' }, n), h('div', null, h('b', null, title), h('span', { class: 'd' }, desc)), ico('chev')); stepEls.push(b); return b; };
+  const edgeBtn = (title, fn) => { const b = h('button', { class: 'btn sm', type: 'button', onclick: wrap(fn) }, title); stepEls.push(b); return b; };
+
+  for (const el of [tenant, owner, price, bid, init, pct]) el.addEventListener('input', () => { drawMath(); if (el === bid) { E.hold = null; drawHold(); } });
+  const newBooking = h('button', { class: 'btn sm', type: 'button', onclick: () => { bid.value = rid(); E.hold = null; E.last = null; drawMath(); drawHold(); } }, 'New booking id');
+
+  const left = h('div', { class: 'stack' },
+    h('div', { class: 'card pad stack' },
+      h('h3', null, 'Booking'),
+      h('div', { class: 'fields' },
+        h('div', { class: 'wide' }, h('label', { class: 'fl' }, 'Tenant user id (the payer)'), tenant, h('div', { class: 'hint' }, 'Filled from the active account. Switch to the tenant before opening this page, or paste an id.')),
+        h('div', null, h('label', { class: 'fl' }, 'Owner email (the beneficiary)'), owner, ownerList),
+        h('div', null, h('label', { class: 'fl' }, 'Booking price'), price),
+        h('div', null, h('label', { class: 'fl' }, 'Booking id'), bid),
+        h('div', null, h('label', { class: 'fl' }, 'initiatedBy'), init),
+        h('div', { class: 'wide' }, h('label', { class: 'fl' }, 'Refund share on cancellation: ', pctLab), pct)),
+      h('div', { class: 'row' }, newBooking, h('button', { class: 'btn sm', type: 'button', onclick: loadRate }, 'Reload commission rate')),
+      refsLine, math),
+    h('div', { class: 'card pad stack' },
+      h('h3', null, 'Walk through a booking'),
+      !S.cfg.apiKey ? keyBanner() : null,
+      h('div', { class: 'steps' },
+        stepBtn('1', 'Hold the payment', 'Tenant pays price plus commission once. The price is held in escrow.', steps.hold),
+        stepBtn('2', 'Release to the owner', 'After check-in: whatever is left goes to the owner, with no commission.', steps.release),
+        stepBtn('3', 'Or cancel with a refund', 'Refund the tenant their share and pay the owner the rest, two payouts.', steps.cancel),
+        stepBtn('4', 'Look it up', 'Read the hold and its payouts back from the wallet service.', steps.lookup))),
+    h('div', { class: 'card pad stack' },
+      h('h3', null, 'Edge cases from the spec'),
+      h('div', { class: 'row' },
+        edgeBtn('Repeat last request', steps.repeat), edgeBtn('Hold twice at once (new id)', steps.holdTwice), edgeBtn('Race two payouts', steps.racePayouts),
+        edgeBtn('Overspend by 1 cent', steps.overspend), edgeBtn('Pay a stranger', steps.stranger), edgeBtn('Unknown caller', steps.badCaller), edgeBtn('Missing hold', steps.missing)),
+      h('div', { class: 'hint' }, 'Each button states what the wallet service should answer. Anything else is worth a look in the request log.')));
+  const right = h('div', { class: 'stack' },
+    h('div', { class: 'card pad' }, holdBox),
+    h('div', { class: 'card pad' }, balBox),
+    h('div', { class: 'card pad stack' }, h('div', { class: 'row' }, h('h3', null, 'Activity'), h('span', { class: 'spacer' }), h('button', { class: 'btn sm', type: 'button', onclick: () => { E.events = []; drawEvents(); } }, 'Clear')), evBox));
+  drawMath(); drawHold(); drawBalances(); drawEvents();
+  setTimeout(() => { loadRate(); refreshHold(); refreshBalances(); }, 0);
+  return h('div', null,
+    lead('Play the listing service: hold a booking payment, release it or refund it, and check that the commission is charged once and the money adds up. Needs the internal API key, and each account you want to watch signed in from the top bar.'),
+    h('div', { class: 'esc' }, left, right));
+};
+
+// ---------- start ----------
+window.addEventListener('error', e => { try { toast('Script error: ' + e.message, true); } catch (x) { /* ignore */ } });
+window.addEventListener('unhandledrejection', e => { try { toast('Unexpected error: ' + (e.reason && e.reason.message || e.reason), true); } catch (x) { /* ignore */ } });
+applyTheme(S.theme);
+applyAccent(S.accent);
+if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (S.theme === 'system') applyTheme('system'); });
+renderApp();
+
+</script>
+</body>
+</html>
