@@ -1,96 +1,68 @@
-<p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=6DB33F&height=240&section=header&text=Premisave%20Wallet%20Service&fontSize=52&fontColor=ffffff&fontAlignY=34&desc=Multi-provider%20digital%20wallet%20and%20payment%20orchestration%20microservice&descSize=18&descAlignY=58&animation=fadeIn" alt="Premisave Wallet Service - multi-provider digital wallet and payment orchestration microservice banner" />
-</p>
+<div align="center">
 
-<h1 align="center">Premisave Wallet Service: Multi-Provider Digital Wallet &amp; Payment Orchestration API</h1>
+<img src="docs/assets/banner.svg" alt="Premisave Wallet Service. One wallet per user, however the money moves." width="100%"/>
 
-<p align="center">
-  <b>A production-minded Spring Boot 4 &amp; MongoDB microservice that unifies M-Pesa, Stripe, PayPal, Flutterwave, and NOWPayments behind a single, USD-denominated wallet API for the Premisave fintech platform, and offers the same rails to outside businesses through a commercial payment service provider API.</b>
-</p>
+<br/>
 
-<p align="center">
-  <a href="https://github.com/peacemakerbill">
-    <img src="https://avatars.githubusercontent.com/u/262163756?v=4&s=200" width="110" height="110" alt="Bill Graham Peacemaker (peacemakerbill) GitHub profile picture" />
-  </a>
-  <br/>
-  <sub>Built by <a href="https://github.com/peacemakerbill"><b>Bill Graham Peacemaker</b></a> (<code>@peacemakerbill</code>) · Backend Developer &amp; API Support Engineer · Nairobi, Kenya</sub>
-</p>
+[![Java 21](https://img.shields.io/badge/Java-21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
+[![Spring Boot 4.1](https://img.shields.io/badge/Spring_Boot-4.1-6DB33F?style=for-the-badge&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
+[![MongoDB Spring Data](https://img.shields.io/badge/MongoDB-Spring_Data-47A248?style=for-the-badge&logo=mongodb&logoColor=white)](https://www.mongodb.com)
+[![Redis Bucket4j](https://img.shields.io/badge/Redis-Bucket4j-DC382D?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io)
+[![Maven Wrapper](https://img.shields.io/badge/Maven-Wrapper-C71A36?style=for-the-badge&logo=apachemaven&logoColor=white)](https://maven.apache.org)
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Java-21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java 21" />
-  <img src="https://img.shields.io/badge/Spring_Boot-4.1.1-6DB33F?style=for-the-badge&logo=springboot&logoColor=white" alt="Spring Boot 4.1.1" />
-  <img src="https://img.shields.io/badge/Spring_Framework-7.0.9-6DB33F?style=for-the-badge&logo=spring&logoColor=white" alt="Spring Framework 7" />
-  <img src="https://img.shields.io/badge/MongoDB-Spring_Data-47A248?style=for-the-badge&logo=mongodb&logoColor=white" alt="MongoDB with Spring Data" />
-  <img src="https://img.shields.io/badge/Redis-Bucket4j-DC382D?style=for-the-badge&logo=redis&logoColor=white" alt="Redis and Bucket4j" />
-  <img src="https://img.shields.io/badge/Maven-Build-C71A36?style=for-the-badge&logo=apachemaven&logoColor=white" alt="Apache Maven" />
-</p>
+![M-PESA Daraja](https://img.shields.io/badge/M--PESA-Daraja-00A651?style=flat-square)
+![Stripe Connect](https://img.shields.io/badge/Stripe-Connect-635BFF?style=flat-square&logo=stripe&logoColor=white)
+![PayPal Payouts](https://img.shields.io/badge/PayPal-Payouts-00457C?style=flat-square&logo=paypal&logoColor=white)
+![Flutterwave v4](https://img.shields.io/badge/Flutterwave-v4-F5A623?style=flat-square)
+![NOWPayments Crypto](https://img.shields.io/badge/NOWPayments-Crypto-00D4AA?style=flat-square)
+![License Proprietary](https://img.shields.io/badge/License-Proprietary-C0392B?style=flat-square)
 
-<p align="center">
-  <img src="https://img.shields.io/badge/M--PESA-Daraja-00A651?style=for-the-badge" alt="M-Pesa Daraja" />
-  <img src="https://img.shields.io/badge/Stripe-Connect-635BFF?style=for-the-badge&logo=stripe&logoColor=white" alt="Stripe and Stripe Connect" />
-  <img src="https://img.shields.io/badge/PayPal-Payouts-00457C?style=for-the-badge&logo=paypal&logoColor=white" alt="PayPal Orders and Payouts" />
-  <img src="https://img.shields.io/badge/Flutterwave-v4-F5A623?style=for-the-badge" alt="Flutterwave v4" />
-  <img src="https://img.shields.io/badge/NOWPayments-Crypto-00D4AA?style=for-the-badge" alt="NOWPayments crypto" />
-</p>
+[![Last commit](https://img.shields.io/github/last-commit/peacemakerbill/premisave-wallet-service?style=flat-square&color=14493B)](https://github.com/peacemakerbill/premisave-wallet-service/commits/main)
+[![Stars](https://img.shields.io/github/stars/peacemakerbill/premisave-wallet-service?style=flat-square&color=14493B)](https://github.com/peacemakerbill/premisave-wallet-service/stargazers)
+[![Issues](https://img.shields.io/github/issues/peacemakerbill/premisave-wallet-service?style=flat-square&color=14493B)](https://github.com/peacemakerbill/premisave-wallet-service/issues)
+[![Frontend](https://img.shields.io/badge/frontend-premisave__flutter__frontend-0E3B2F?style=flat-square&logo=flutter&logoColor=E3A72F)](https://github.com/peacemakerbill/premisave_flutter_frontend)
 
-<p align="center">
-  <a href="https://github.com/peacemakerbill/premisave-wallet-service/stargazers"><img src="https://img.shields.io/github/stars/peacemakerbill/premisave-wallet-service?style=for-the-badge&logo=github" alt="GitHub stars" /></a>
-  <a href="https://github.com/peacemakerbill/premisave-wallet-service/network/members"><img src="https://img.shields.io/github/forks/peacemakerbill/premisave-wallet-service?style=for-the-badge&logo=github" alt="GitHub forks" /></a>
-  <a href="https://github.com/peacemakerbill/premisave-wallet-service/issues"><img src="https://img.shields.io/github/issues/peacemakerbill/premisave-wallet-service?style=for-the-badge" alt="Open issues" /></a>
-  <a href="https://github.com/peacemakerbill/premisave-wallet-service/commits"><img src="https://img.shields.io/github/last-commit/peacemakerbill/premisave-wallet-service?style=for-the-badge" alt="Last commit" /></a>
-  <img src="https://img.shields.io/github/repo-size/peacemakerbill/premisave-wallet-service?style=for-the-badge" alt="Repository size" />
-  <img src="https://img.shields.io/badge/License-Proprietary-red?style=for-the-badge" alt="Proprietary license" />
-  <img src="https://img.shields.io/badge/Made_in-Nairobi,_Kenya-000000?style=for-the-badge" alt="Made in Nairobi, Kenya" />
-</p>
+**[Quick start](#quick-start)** &nbsp;|&nbsp; **[Where it sits](#where-it-sits)** &nbsp;|&nbsp; **[Flutter app](#connected-to-the-flutter-app)** &nbsp;|&nbsp; **[Architecture](#architecture)** &nbsp;|&nbsp; **[Deposits](#how-deposits-work-all-providers)** &nbsp;|&nbsp; **[API reference](#api-reference)** &nbsp;|&nbsp; **[Configuration](#configuration-reference)** &nbsp;|&nbsp; **[Troubleshooting](#troubleshooting)**
 
-<p align="center">
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#architecture">Architecture</a> ·
-  <a href="#how-deposits-work-all-providers">How deposits work</a> ·
-  <a href="#how-disbursements-work-all-providers">How disbursements work</a> ·
-  <a href="#api-reference">API reference</a> ·
-  <a href="#commercial-api-payment-service-provider">Commercial API</a> ·
-  <a href="#configuration-reference">Configuration</a> ·
-  <a href="#troubleshooting">Troubleshooting</a>
-</p>
+</div>
+
+<img src="docs/assets/divider.svg" alt="" width="100%"/>
 
 > **If this saves you time integrating multi-provider payments in Java, please star the repo.** It helps other Kenyan fintech developers find it.
 
 > **Disclaimer.** This is an independent, community-built project shared as a portfolio and reference implementation. It is not an official product of, and is not affiliated with or endorsed by, Safaricom, Stripe, PayPal, Flutterwave, or NOWPayments. M-PESA is a trademark of Safaricom PLC. Always follow each provider's own current documentation for onboarding and go-live requirements.
 
----
+## Contents
 
-## Table of contents
+- [What is this?](#what-is-this)
+- [Features](#features)
+- [Supported payment providers](#supported-payment-providers)
+- [Architecture](#architecture)
+- [How deposits work (all providers)](#how-deposits-work-all-providers)
+- [How disbursements work (all providers)](#how-disbursements-work-all-providers)
+- [Currency and ledger model](#currency-and-ledger-model)
+- [Where it sits](#where-it-sits)
+- [A request, step by step](#a-request-step-by-step)
+- [Connected to the Flutter app](#connected-to-the-flutter-app)
+- [Quick start](#quick-start)
+- [Build and run](#build-and-run)
+- [Configuration reference](#configuration-reference)
+- [API reference](#api-reference)
+- [Testing with Postman or curl](#testing-with-postman-or-curl)
+- [Admin and financial reporting](#admin-and-financial-reporting)
+- [Data model](#data-model)
+- [Commercial API (payment service provider)](#commercial-api-payment-service-provider)
+- [Going live](#going-live)
+- [Security notes](#security-notes)
+- [Project structure](#project-structure)
+- [Troubleshooting](#troubleshooting)
+- [Upgrading from earlier deliveries](#upgrading-from-earlier-deliveries)
+- [Known limits](#known-limits)
+- [Roadmap ideas](#roadmap-ideas)
+- [Contributing](#contributing)
+- [Author](#author)
 
-1. [What is this?](#what-is-this)
-2. [Features](#features)
-3. [Supported payment providers](#supported-payment-providers)
-4. [Architecture](#architecture)
-5. [How deposits work (all providers)](#how-deposits-work-all-providers)
-6. [How disbursements work (all providers)](#how-disbursements-work-all-providers)
-7. [Currency and ledger model](#currency-and-ledger-model)
-8. [Quick start](#quick-start)
-9. [Build and run](#build-and-run)
-10. [Configuration reference](#configuration-reference)
-11. [API reference](#api-reference)
-12. [Testing with Postman or curl](#testing-with-postman-or-curl)
-13. [Admin and financial reporting](#admin-and-financial-reporting)
-14. [Data model](#data-model)
-15. [Commercial API (payment service provider)](#commercial-api-payment-service-provider)
-    - [Where it fits](#where-it-fits) · [Setup notes](#setup-notes-for-the-commercial-api) · [Contract](#contract) · [How money moves](#how-money-moves) · [Payment rails](#payment-rails)
-    - [Settlements, transfers and reports](#settlements-transfers-and-reports) · [Links, references, bulk payouts, beneficiary checks](#payment-links-account-references-bulk-payouts-and-beneficiary-checks) · [Refunds and disputes](#refunds-and-disputes) · [Subscriptions](#subscriptions)
-    - [Paybill references and validation](#paybill-account-references-and-validation-callbacks) · [Merchant numbers and onboarding](#merchant-numbers-and-onboarding) · [Document folder setup](#document-folder-setup) · [Developer service split](#developer-service-split) · [Commercial operations](#commercial-operations)
-16. [Going live](#going-live)
-17. [Security notes](#security-notes)
-18. [Project structure](#project-structure)
-19. [Troubleshooting](#troubleshooting)
-20. [Upgrading from earlier deliveries](#upgrading-from-earlier-deliveries)
-21. [Known limits](#known-limits)
-22. [Roadmap ideas](#roadmap-ideas)
-23. [Contributing](#contributing)
-24. [Author](#author)
-
----
+<img src="docs/assets/divider.svg" alt="" width="100%"/>
 
 ## What is this?
 
@@ -254,6 +226,112 @@ sequenceDiagram
 - **Exchange rates** are sourced from the [Frankfurter API](https://www.frankfurter.app/) (ECB reference rates), refreshed on a schedule, and cached in Redis (fast path) and MongoDB (durable fallback and historical record) — 160+ pairs tracked.
 - **Every revenue-generating operation** — gateway disbursement commissions, internal transfer commissions, and direct payment revenue — is recorded as a `CompanyLedgerEntry`, always normalized to USD, powering the admin financial reports.
 - **Idempotency**: every deposit, disbursement, transfer, and payment carries a `reference`, either caller-supplied or an auto-generated UUID, checked before any money movement happens.
+
+<img src="docs/assets/divider.svg" alt="" width="100%"/>
+
+## Where it sits
+
+<img src="docs/assets/services.svg" alt="The Flutter app on the left and the seven Premisave services on the right with their ports and the setting that holds each address. This service is picked out." width="100%"/>
+
+Every other service that touches money goes through this one. The Flutter app reads and spends the signed in person's wallet, the listing and property services move rent and booking payments through its internal API, the developer service forwards merchant calls to it, and the C2B Hakikisha service copies its accounts.
+
+| Caller | What for | Proves who it is with |
+| --- | --- | --- |
+| Flutter app | Payments and Transactions screens | the person's bearer token |
+| listing-service | booking payments, refunds and ad promotion | `X-API-Key` internal key |
+| property-service | rent and utility payments, wallet to wallet | `X-API-Key` internal key |
+| developer-service | the commercial API, forwarded | `X-API-Key` internal key |
+| c2b-hakikisha | a scheduled copy of the accounts | `X-API-Key` internal key |
+
+It listens on port **8084**. The Flutter app finds it with the setting `WALLET_URL`.
+
+<img src="docs/assets/divider.svg" alt="" width="100%"/>
+
+## A request, step by step
+
+<img src="docs/assets/flow.svg" alt="The request the Flutter app makes, step by step, and who answers each step." width="100%"/>
+
+A deposit shows why the wallet is built around references. The app sends one request and the provider answers later, so the result is matched to the transaction by its reference. A retried callback finds the reference already settled and changes nothing.
+
+<img src="docs/assets/divider.svg" alt="" width="100%"/>
+
+## Connected to the Flutter app
+
+<img src="docs/assets/connect.svg" alt="A screen asks a provider, which asks the repository, which uses the API client to call this service." width="100%"/>
+
+The Flutter app's **Payments** and **Transactions** screens use this service. They are shown to clients and home owners, and they appear on the Home screen under the person's other tools.
+
+The code is in [`premisave_flutter_frontend`](https://github.com/peacemakerbill/premisave_flutter_frontend): the repository class is `lib/src/data/repositories/wallet_repository.dart`, the providers are in `lib/src/state`, and every call below goes through one client built for this service.
+
+### What the app does with it
+
+| Screen | What it does | Calls |
+| --- | --- | --- |
+| Payments | Balance and currency, create the wallet, deposit with M-Pesa, transfer, withdraw, statement | `GET /wallet`, `POST /wallet/create`, `POST /wallet/deposit`, `POST /wallet/transfer`, `POST /disbursements`, `POST /wallet/statement` |
+| Transactions | Four tabs: everything, transfers, deposits, withdrawals | `GET /transactions/history`, `GET /wallet/transfer/history`, `GET /deposits/history`, `GET /disbursements/history` |
+
+- A person with no wallet sees a **Create wallet** button, which calls `POST /wallet/create`.
+- Answers use the `{ success, message, data, timestamp }` envelope. The app unwraps `data` and shows `message` when a call fails.
+- Amounts are shown with the currency the wallet returns. The wallet holds one currency per user.
+
+### Settings
+
+In the Flutter app, in `config/env/*.json` or passed with `--dart-define`:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `WALLET_URL` | `http://localhost:8084`, or `http://10.0.2.2:8084` on the Android emulator | Where this service lives, with no trailing slash |
+
+On a real phone `localhost` is the phone itself, so use the computer's address on the network. Flutter reads these values only at launch: stop the app and run it again after a change.
+
+In this service's `.env`:
+
+| Variable | Why the app cares |
+| --- | --- |
+| `JWT_SECRET` | Must equal the auth-service value |
+| `FRONTEND_URL` | The one browser origin that may call the wallet |
+| `INTERNAL_API_KEY` | Shared with the other services, not used by the app |
+
+### Signing and tokens
+
+The app sends `Authorization: Bearer <access token>`. It leaves out the device headers (`X-Client-Platform`, `X-Device-Token`) that only the auth-service reads. The service checks the signature with the same `JWT_SECRET` as the auth-service and reads the user from the claims, so **the two values must be identical**. When the access token has expired the app asks the auth-service for a new one and sends the request again, so this service never sees a refresh.
+
+### Browser rules (CORS)
+
+A phone or desktop build is not stopped by CORS. A browser is, so for the web build this service must allow the address the app is served from, which is `http://localhost:3000` in development.
+
+| Setting | Default | What to do |
+| --- | --- | --- |
+| `FRONTEND_URL` | http://localhost:3000 | Only one origin is allowed. Run the web build with `--web-port=3000`, or set `FRONTEND_URL` to the address you serve it from. |
+
+### Run it together
+
+Each command is run in its own terminal. Start the services this one needs first.
+
+```bash
+# 1. premisave_auth_service
+cd ~/MyProjects/premisave/premisave_auth_service && ./mvnw spring-boot:run
+
+# 2. this service
+cd ~/MyProjects/premisave/premisave-wallet-service && ./mvnw spring-boot:run
+
+# 3. the app, on the port the backends allow for browsers
+cd ~/MyProjects/premisave/premisave_flutter_frontend
+flutter run -d chrome --web-port=3000 --dart-define-from-file=config/env/dev.local.json
+```
+
+Leave `WALLET_URL` empty in the app's file and it finds this service on `localhost:8084`. The same walk through for every service is in [the app's docs](https://github.com/peacemakerbill/premisave_flutter_frontend/blob/main/docs/SERVICES.md).
+
+### If it does not connect
+
+| You see | Likely cause | Do this |
+| --- | --- | --- |
+| "Could not reach the server" on Payments only | The wallet is not running, or `WALLET_URL` points elsewhere | Start it, or set `WALLET_URL` in the app's environment file and restart the app |
+| Works on a phone, blocked in Chrome | `FRONTEND_URL` is not the address the app is served from | Set it to `http://localhost:3000`, or run the app with `--web-port=3000` |
+| 401 straight after signing in | `JWT_SECRET` differs from the auth-service | Copy the auth-service value into this service's `.env` |
+| A deposit stays pending | The provider has not called back yet | Wait and refresh Transactions. The callback is matched by reference |
+
+<img src="docs/assets/divider.svg" alt="" width="100%"/>
 
 ## Quick start
 
@@ -1578,7 +1656,7 @@ Found a bug or have a payment-integration question? [Open an issue](https://gith
   <img src="https://api.star-history.com/svg?repos=peacemakerbill/premisave-wallet-service&type=Date" alt="Star history chart for premisave-wallet-service" width="600" />
 </a>
 
----
+<img src="docs/assets/divider.svg" alt="" width="100%"/>
 
 <details>
 <summary>Search keywords</summary>
