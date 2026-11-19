@@ -388,6 +388,22 @@ public class WalletService {
     }
 
     /**
+     * Sets the currency the person deals in. The balance stays in USD, so this only changes the currency amounts are
+     * typed and shown in. Throws IllegalArgumentException for a code that is not three letters or has no exchange rate.
+     */
+    @Transactional
+    public WalletResponse updateDefaultCurrency(String userId, String currency) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new WalletNotFoundException("Wallet not found for userId: " + userId));
+
+        String code = defaultCurrencyService.validate(currency);
+        wallet.setDefaultCurrency(code);
+        wallet = walletRepository.save(wallet);
+        log.info("Default currency set to {} for userId={}", code, userId);
+        return mapToResponse(wallet);
+    }
+
+    /**
      * Unlinks the wallet's saved PayPal account (vault_id/customer_id/
      * connected email) so future PayPal deposits no longer auto-reuse it —
      * the next deposit will create a fresh order and, if requestVaulting
