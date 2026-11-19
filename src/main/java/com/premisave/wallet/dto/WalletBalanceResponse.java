@@ -11,4 +11,5 @@ public class WalletBalanceResponse {
     private BigDecimal balance;
     private String currency;
     private boolean isFrozen;
+    private String defaultCurrency;
 }

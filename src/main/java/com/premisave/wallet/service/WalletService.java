@@ -41,6 +41,7 @@ public class WalletService {
     private final MpesaService mpesaService;
     private final StripeService stripeService;
     private final UserNameResolver userNameResolver;
+    private final DefaultCurrencyService defaultCurrencyService;
 
     /**
      * GET /internal/accounts — the wallet-owner directory another
@@ -118,7 +119,7 @@ public class WalletService {
     public WalletBalanceResponse getBalance(String accountNumber) {
         Wallet wallet = walletRepository.findByAccountNumber(accountNumber)
                 .orElseThrow(() -> new WalletNotFoundException("Wallet not found for: " + accountNumber));
-        return new WalletBalanceResponse(wallet.getBalance(), wallet.getCurrency().name(), wallet.isFrozen());
+        return new WalletBalanceResponse(wallet.getBalance(), wallet.getCurrency().name(), wallet.isFrozen(), DefaultCurrencyService.of(wallet));
     }
 
     /**
@@ -559,6 +560,15 @@ public class WalletService {
         response.setBalance(wallet.getBalance());
         response.setCurrency(wallet.getCurrency());
         response.setFrozen(wallet.isFrozen());
+        response.setDefaultCurrency(DefaultCurrencyService.of(wallet));
+        if (!DefaultCurrencyService.SYSTEM_DEFAULT.equals(DefaultCurrencyService.of(wallet))) {
+            try {
+                response.setDefaultCurrencyBalance(defaultCurrencyService.convert(
+                        wallet.getBalance(), DefaultCurrencyService.SYSTEM_DEFAULT, DefaultCurrencyService.of(wallet)));
+            } catch (RuntimeException e) {
+                log.debug("No rate to show the balance in {}", DefaultCurrencyService.of(wallet));
+            }
+        }
         response.setPaypalEmail(wallet.getPaypalEmail());
         response.setMpesaPhoneNumber(wallet.getMpesaPhoneNumber());
         response.setPochiPhoneNumber(wallet.getPochiPhoneNumber());

@@ -31,6 +31,12 @@ public class PendingReconciliationItem {
 
     private String id;
     private String userId;
+
+    /** The wallet owner's email, so a person reading the list can tell whose money it is without an id. */
+    private String customer;
+
+    /** Why a failed item failed, when the provider or the service said. Empty for a pending item. */
+    private String failureReason;
     private BigDecimal amount;
     private String provider;
     private String reference;

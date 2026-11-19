@@ -225,6 +225,9 @@ sequenceDiagram
 - **USD is the only currency a `Wallet` document ever stores.** Conversion happens once, at the point money enters or leaves the system, using the exchange rate in effect at that moment. Admin reporting never has to reconcile mixed-currency totals.
 - **Exchange rates** are sourced from the [Frankfurter API](https://www.frankfurter.app/) (ECB reference rates), refreshed on a schedule, and cached in Redis (fast path) and MongoDB (durable fallback and historical record) — 160+ pairs tracked.
 - **Every revenue-generating operation** — gateway disbursement commissions, internal transfer commissions, and direct payment revenue — is recorded as a `CompanyLedgerEntry`, always normalized to USD, powering the admin financial reports.
+- **Default currency.** A person can choose the currency they deal in with `PUT /wallet/default-currency` (body `{ "currency": "KES" }`). It is USD until they change it, for every user and the whole system. The wallet balance is still held in USD: the chosen currency is what payment forms use without asking, and what `GET /wallet` shows alongside the USD balance (`defaultCurrency`, `defaultCurrencyBalance`).
+- **Wallet activity.** `GET /transactions/history` returns one merged, newest-first list of the person's deposits, withdrawals, transfers, payments and refunds. Each line has `type`, `direction` (`IN` or `OUT`), `status`, `amount`, `currency`, `description`, `provider` and `createdAt`.
+- **Resolving stuck items.** `GET /admin/reconciliation/pending` lists everything still waiting and `GET /admin/reconciliation/failed?days=30` lists what failed in the last 30 days (at most 90). Pending and failed items are resolved with the existing approve and reject calls, which settle the item and move money only when it is safe to.
 - **Idempotency**: every deposit, disbursement, transfer, and payment carries a `reference`, either caller-supplied or an auto-generated UUID, checked before any money movement happens.
 
 <img src="docs/assets/divider.svg" alt="" width="100%"/>
@@ -269,6 +272,8 @@ The code is in [`premisave_flutter_frontend`](https://github.com/peacemakerbill/
 | --- | --- | --- |
 | Payments | Balance and currency, create the wallet, deposit with M-Pesa, transfer, withdraw, statement | `GET /wallet`, `POST /wallet/create`, `POST /wallet/deposit`, `POST /wallet/transfer`, `POST /disbursements`, `POST /wallet/statement` |
 | Transactions | Four tabs: everything, transfers, deposits, withdrawals | `GET /transactions/history`, `GET /wallet/transfer/history`, `GET /deposits/history`, `GET /disbursements/history` |
+| Wallet settings | Default currency and the payout details (M-Pesa Pochi number, PayPal email and so on) with the saved values filled in and shown partly hidden | `PUT /wallet/default-currency`, `GET /wallet` |
+| Finance, Resolve | Pending and failed deposits, withdrawals and transfers with approve and reject | `GET /admin/reconciliation/pending`, `GET /admin/reconciliation/failed` |
 
 - A person with no wallet sees a **Create wallet** button, which calls `POST /wallet/create`.
 - Answers use the `{ success, message, data, timestamp }` envelope. The app unwraps `data` and shows `message` when a call fails.

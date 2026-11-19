@@ -80,6 +80,7 @@ public class DisbursementService {
     private final NowPaymentsDisbursementService nowPaymentsDisbursementService;
     private final CommissionService commissionService;
     private final DisbursementTransactionRecorder disbursementTransactionRecorder;
+    private final DefaultCurrencyService defaultCurrencyService;
 
     // ─── User-facing disbursement (phone / PayPal / Stripe / Flutterwave / NOWPayments) ───
 
@@ -120,6 +121,16 @@ public class DisbursementService {
         if (wallet.isFrozen()) throw new WalletFrozenException("Wallet is frozen");
 
         String provider = request.getProvider() != null ? request.getProvider().toUpperCase() : "MPESA";
+
+        // A withdrawal that does not name a currency is in the wallet's default currency (USD unless the person chose
+        // another). The amount is brought to Kenyan shillings, which is what the rest of this method works in. Crypto
+        // names its own currency and is left alone.
+        if (!"NOWPAYMENTS".equals(provider) && (request.getCurrency() == null || request.getCurrency().isBlank())) {
+            String code = DefaultCurrencyService.of(wallet);
+            if (!"KES".equals(code)) {
+                request.setAmount(defaultCurrencyService.convert(request.getAmount(), code, "KES"));
+            }
+        }
 
         // MUST run before the balance check below. Mutates request's own
         // amount field in place (Lombok @Data setter) rather than

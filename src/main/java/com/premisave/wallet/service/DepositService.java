@@ -57,6 +57,7 @@ public class DepositService {
     private final PaypalDepositService paypalDepositService;
     private final FlutterwaveDepositService flutterwaveDepositService;
     private final NowPaymentsDepositService nowPaymentsDepositService;
+    private final DefaultCurrencyService defaultCurrencyService;
 
     public PaymentResponse initiateDeposit(String userId, String userEmail, DepositRequest request) {
         Wallet wallet = walletRepository.findByUserId(userId)
@@ -69,6 +70,8 @@ public class DepositService {
         String provider = request.getProvider() != null ? request.getProvider().toUpperCase() : "MPESA";
         String idempotencyKey = UUID.randomUUID().toString();
 
+        useDefaultCurrency(wallet, request, provider);
+
         return switch (provider) {
             case "MPESA" -> mpesaDepositService.initiateMpesaDeposit(userId, request, wallet, idempotencyKey);
             case "STRIPE" -> stripeDepositService.initiateStripeDeposit(userId, userEmail, request, wallet, idempotencyKey);
@@ -77,6 +80,32 @@ public class DepositService {
             case "NOWPAYMENTS" -> nowPaymentsDepositService.initiateNowPaymentsDeposit(userId, request, wallet, idempotencyKey);
             default -> new PaymentResponse(false, null, "Unsupported deposit provider: " + provider);
         };
+    }
+
+    /**
+     * A deposit that does not name a currency is in the wallet's default currency, which is USD unless the person chose
+     * another. M-Pesa and PayPal take one currency each (Kenyan shillings and US dollars), so the amount is converted
+     * for them here. Stripe is told the currency. Flutterwave mobile money and crypto name their own currency, so they
+     * are left alone.
+     */
+    private void useDefaultCurrency(Wallet wallet, DepositRequest request, String provider) {
+        if (request.getCurrency() != null && !request.getCurrency().isBlank()) return;
+        String code = DefaultCurrencyService.of(wallet);
+        switch (provider) {
+            case "MPESA" -> {
+                if (!"KES".equals(code)) {
+                    request.setAmount(defaultCurrencyService.convert(request.getAmount(), code, "KES")
+                            .setScale(0, java.math.RoundingMode.CEILING));
+                }
+            }
+            case "PAYPAL" -> {
+                if (!"USD".equals(code)) {
+                    request.setAmount(defaultCurrencyService.convert(request.getAmount(), code, "USD"));
+                }
+            }
+            case "STRIPE" -> request.setCurrency(code.toLowerCase());
+            default -> { }
+        }
     }
 
     /** GET /deposits/history — every deposit for this user, across all five providers, newest first. */

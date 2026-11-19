@@ -16,6 +16,7 @@ import com.premisave.wallet.repository.DisbursementRepository;
 import com.premisave.wallet.repository.MpesaOperationRepository;
 import com.premisave.wallet.repository.PaymentRepository;
 import com.premisave.wallet.repository.TransferRepository;
+import com.premisave.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -23,7 +24,9 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Cross-entity "what's currently pending, across the whole system" view —
@@ -59,6 +62,7 @@ public class ReconciliationService {
     private final TransferRepository transferRepository;
     private final PaymentRepository paymentRepository;
     private final MpesaOperationRepository mpesaOperationRepository;
+    private final WalletRepository walletRepository;
 
     public List<PendingReconciliationItem> getAllPending() {
         List<PendingReconciliationItem> items = new ArrayList<>();
@@ -118,7 +122,74 @@ public class ReconciliationService {
         }
 
         items.sort((a, b) -> a.getCreatedAt().compareTo(b.getCreatedAt()));
+        nameCustomers(items);
         return items;
+    }
+
+    /**
+     * Deposits, withdrawals, transfers and payments that failed in the last [days] days, newest first, for a person to look
+     * at. Nothing here can be approved, because a failed item did not move money. When a customer says they paid
+     * anyway, the staff member checks the provider and, if the money did arrive, credits the wallet with a manual
+     * adjustment, which is recorded with a reason and the staff member's name.
+     */
+    public List<PendingReconciliationItem> getRecentFailed(int days) {
+        LocalDateTime since = LocalDateTime.now().minusDays(Math.max(1, Math.min(days, 90)));
+        List<PendingReconciliationItem> items = new ArrayList<>();
+
+        for (Deposit d : depositRepository.findAll()) {
+            if (d.getStatus() == DepositStatus.FAILED && d.getCreatedAt() != null && d.getCreatedAt().isAfter(since)) {
+                items.add(failed("DEPOSIT", providerLabel(d.getProvider()) + " Deposit", d.getId(), d.getUserId(), d.getAmount(),
+                        d.getProvider(), d.getReference(), d.getCreatedAt(), d.getFailureReason(),
+                        "This deposit failed. If the customer says the money left their account, check it with the provider. "
+                                + "When it did arrive, credit the wallet from here."));
+            }
+        }
+        for (Disbursement d : disbursementRepository.findAll()) {
+            if (d.getStatus() == DisbursementStatus.FAILED && d.getCreatedAt() != null && d.getCreatedAt().isAfter(since)) {
+                items.add(failed("DISBURSEMENT", providerLabel(d.getProvider()) + " Payout", d.getId(), d.getUserId(), d.getAmount(),
+                        d.getProvider(), d.getReference(), d.getCreatedAt(), d.getFailureReason(),
+                        "This payout failed. Check the wallet balance of the customer. If they were debited and the money did not go out, credit it back from here."));
+            }
+        }
+        for (Transfer t : transferRepository.findAll()) {
+            if (t.getStatus() == TransferStatus.FAILED && t.getCreatedAt() != null && t.getCreatedAt().isAfter(since)) {
+                items.add(failed("TRANSFER", "Wallet Transfer", t.getId(), t.getSenderId(), t.getAmount(), null,
+                        t.getReference(), t.getCreatedAt(), t.getFailureReason(),
+                        "This transfer failed. Nothing was sent unless the sender's balance shows otherwise."));
+            }
+        }
+        for (Payment p : paymentRepository.findAll()) {
+            if (p.getStatus() == PaymentStatus.FAILED && p.getCreatedAt() != null && p.getCreatedAt().isAfter(since)) {
+                items.add(failed("PAYMENT", "Payment", p.getId(), p.getUserId(), p.getAmount(), null,
+                        p.getReference(), p.getCreatedAt(), p.getFailureReason(),
+                        "This payment failed. The service that asked for it was told so."));
+            }
+        }
+
+        items.sort((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()));
+        List<PendingReconciliationItem> capped = items.size() > 200 ? new ArrayList<>(items.subList(0, 200)) : items;
+        nameCustomers(capped);
+        return capped;
+    }
+
+    private PendingReconciliationItem failed(String entityType, String summary, String id, String userId, BigDecimal amount,
+                                              String provider, String reference, LocalDateTime createdAt,
+                                              String reason, String message) {
+        PendingReconciliationItem item = toItem(entityType, summary, id, userId, amount, provider, reference, createdAt,
+                false, "REVIEW_FAILED", message);
+        item.setFailureReason(reason);
+        return item;
+    }
+
+    /** Fills in the wallet owner's email, one lookup per person. */
+    private void nameCustomers(List<PendingReconciliationItem> items) {
+        Map<String, String> emails = new HashMap<>();
+        for (PendingReconciliationItem item : items) {
+            String userId = item.getUserId();
+            if (userId == null) continue;
+            item.setCustomer(emails.computeIfAbsent(userId,
+                    id -> walletRepository.findByUserId(id).map(w -> w.getAccountNumber()).orElse("")));
+        }
     }
 
     /** "MPESA" -> "M-Pesa", "STRIPE" -> "Stripe", etc. — plain provider names for displaySummary, not the raw uppercase enum-style string. */

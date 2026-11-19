@@ -1,7 +1,7 @@
 package com.premisave.wallet.controller;
 
 import com.premisave.wallet.dto.ApiResponse;
-import com.premisave.wallet.dto.TransactionResponse;
+import com.premisave.wallet.dto.ActivityResponse;
 import com.premisave.wallet.service.TransactionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -18,9 +18,9 @@ public class TransactionController {
     private final TransactionService transactionService;
 
     @GetMapping("/history")
-    public ResponseEntity<ApiResponse<List<TransactionResponse>>> getHistory(Authentication auth) {
+    public ResponseEntity<ApiResponse<List<ActivityResponse>>> getHistory(Authentication auth) {
         String userId = auth.getName();
-        List<TransactionResponse> history = transactionService.getTransactionHistory(userId);
+        List<ActivityResponse> history = transactionService.getTransactionHistory(userId);
         return ResponseEntity.ok(ApiResponse.success("Transaction history retrieved", history));
     }
 }

@@ -36,6 +36,13 @@ public class Wallet {
      */
     private Currency currency = Currency.USD;
 
+    /**
+     * The currency this person chose to deal in, as a plain code such as KES. Null means the system default, USD. The
+     * balance above stays in USD whatever this says. This only decides what a typed amount is in when a deposit or a
+     * withdrawal does not name a currency, and what the app shows. Set via PUT /wallet/default-currency.
+     */
+    private String defaultCurrency;
+
     private boolean isFrozen = false;
 
     /**

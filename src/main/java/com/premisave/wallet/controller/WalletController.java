@@ -201,6 +201,16 @@ public class WalletController {
         return ResponseEntity.ok(ApiResponse.success("PayPal account status retrieved", info));
     }
 
+    /** The currency the person deals in. Body: { "currency": "KES" }. USD until they change it. */
+    @PutMapping("/default-currency")
+    public ResponseEntity<ApiResponse<WalletResponse>> updateDefaultCurrency(
+            @Valid @RequestBody UpdateDefaultCurrencyRequest updateRequest,
+            Authentication auth, HttpServletRequest request) {
+        String userId = resolveUserId(request);
+        WalletResponse response = walletService.updateDefaultCurrency(userId, updateRequest.getCurrency());
+        return ResponseEntity.ok(ApiResponse.success("Default currency updated", response));
+    }
+
     @PutMapping("/mpesa-phone")
     public ResponseEntity<ApiResponse<WalletResponse>> updateMpesaPhone(
             @Valid @RequestBody UpdateMpesaPhoneRequest updateRequest,

@@ -16,6 +16,12 @@ public class WalletResponse {
     private String userId;
     private BigDecimal balance;
     private Currency currency;
+
+    /** The currency the person chose to deal in. USD unless they changed it. */
+    private String defaultCurrency = "USD";
+
+    /** The balance in the default currency, at today's rate. Null when the default is USD or no rate is available. */
+    private BigDecimal defaultCurrencyBalance;
     private boolean isFrozen;
 
     /** Null if never set. */

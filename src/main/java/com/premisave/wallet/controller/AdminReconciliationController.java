@@ -65,6 +65,13 @@ public class AdminReconciliationController {
         return ResponseEntity.ok(ApiResponse.success("Pending items retrieved", reconciliationService.getAllPending()));
     }
 
+    /** Items that failed in the last [days] days (30 by default, at most 90), for a person to look at. */
+    @GetMapping("/failed")
+    public ResponseEntity<ApiResponse<List<PendingReconciliationItem>>> getRecentFailed(
+            @RequestParam(defaultValue = "30") int days) {
+        return ResponseEntity.ok(ApiResponse.success("Failed items retrieved", reconciliationService.getRecentFailed(days)));
+    }
+
     /**
      * Admin-only: every M-Pesa operation (Account Balance, Transaction
      * Status, Reversal, B2Pochi) ever recorded, paginated — the actual
