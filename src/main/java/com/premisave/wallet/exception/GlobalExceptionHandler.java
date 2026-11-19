@@ -306,6 +306,20 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error("Invalid webhook signature"));
     }
 
+    /**
+     * A path nothing is mapped to. Spring raises this for a missing route, and without this handler it landed in the
+     * generic one below and came back as a 500. A route that exists only when a feature is switched on (for example the
+     * consents endpoints, which need COMMERCIAL_PREMISAVE_ENABLED=true) now answers 404, so a client can tell "not
+     * available here" from a crash.
+     */
+    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResource(
+            org.springframework.web.servlet.resource.NoResourceFoundException ex, HttpServletRequest request) {
+        log.debug("No route for {} {}", request.getMethod(), request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error("Not found: " + request.getRequestURI()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleGeneric(Exception ex, HttpServletRequest request) {
         log.error("Unhandled exception at {}: {}", request.getRequestURI(), ex.getMessage(), ex);

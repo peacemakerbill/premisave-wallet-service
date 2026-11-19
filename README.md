@@ -485,6 +485,7 @@ The service **refuses to start** if `INTERNAL_API_KEY` is missing, by design.
 | Onboarding | `COMMERCIAL_ONBOARDING_ENABLED`, `COMMERCIAL_ONBOARDING_STAFF_EMAILS`, `COMMERCIAL_ONBOARDING_MAIL_FROM` |
 | Onboarding document storage | `STORAGE_MODE`, `STORAGE_ROOT`, `STORAGE_NETWORK_PROTOCOL`, `STORAGE_NETWORK_HOST`, `STORAGE_NETWORK_SHARE`, `STORAGE_NETWORK_MOUNT_PATH`, `STORAGE_NETWORK_DIRECTORY`, `STORAGE_NETWORK_REQUIRE_MOUNT` (`COMMERCIAL_ONBOARDING_STORAGE_PATH` is the old name for `STORAGE_ROOT` and still works) |
 | Payment links | `COMMERCIAL_LINKS_CHECKOUT_BASE_URL`, `COMMERCIAL_LINKS_SANDBOX_CHECKOUT_BASE_URL` |
+| Email footer | `SUPPORT_EMAIL`, the support address printed in every email, default `thepeacemakerske@gmail.com` |
 | Commercial rails | `COMMERCIAL_MPESA_ENABLED`, `COMMERCIAL_MPESA_CALLBACK_BASE_URL`, `COMMERCIAL_MPESA_CALLBACK_SECRET`, `COMMERCIAL_STRIPE_ENABLED`, `COMMERCIAL_STRIPE_PUBLISHABLE_KEY`, `COMMERCIAL_STRIPE_WEBHOOK_SECRET`, `COMMERCIAL_PAYPAL_ENABLED`, `COMMERCIAL_FLUTTERWAVE_ENABLED`, `COMMERCIAL_NOWPAYMENTS_ENABLED`, `COMMERCIAL_PREMISAVE_ENABLED` |
 
 #### Commercial settings by feature
@@ -1039,7 +1040,7 @@ Owner side, authenticated as the wallet owner with the login token (not part of 
 
 | Call | Effect |
 |:-|:-|
-| `GET /wallet/consents` | Requests waiting and standing approvals already given |
+| `GET /wallet/consents` | Requests waiting and standing approvals already given. These routes exist only with `COMMERCIAL_PREMISAVE_ENABLED=true`; with it off the path is unmapped and answers 404 (it used to surface as a 500) |
 | `POST /wallet/consents/{id}/approve` | Debits the wallet and completes the payment. A short balance returns 422 and leaves the request open; a frozen wallet 403; an expired request 410; one already answered 409 |
 | `POST /wallet/consents/{id}/decline` | Fails the payment with `CUSTOMER_CANCELLED` |
 | `POST /wallet/consents/{id}/revoke` | Withdraws a standing approval; later charges under it fail with `DECLINED` |
@@ -1243,7 +1244,7 @@ The owner of the wallet named on the form follows the application with their log
 
 #### Emails
 
-Every email the wallet sends, the transaction ones (deposit, withdrawal, failed withdrawal, payment, transfer) and the onboarding ones below, shares one look with the developer service emails: navy header with the Premisave mark, a status label (green, blue, amber or red), a heading, a detail box, a coloured note, and a footer, with a dark theme for mail programs that ask for it and a layout that fits a phone. The page frame is `src/main/resources/templates/email/layout.html`; each transaction email is a body file next to it, and `util/EmailLayout` builds the onboarding bodies. To change the look for all of them, edit `layout.html`. Every value is escaped when it is put in, so a name containing markup shows as plain text.
+Every email the wallet sends, the transaction ones (deposit, withdrawal, failed withdrawal, payment, transfer) and the onboarding ones below, shares one look with the auth service emails: an indigo header with the skyline and the Premisave mark, a round status icon (green, indigo, amber or red), a heading, a detail card, a coloured callout, and a footer with the support address (`SUPPORT_EMAIL`), with a dark theme for mail programs that ask for it and a layout that fits a phone. The page frame is `src/main/resources/templates/email/layout.html`; each transaction email is a body file next to it, and `util/EmailLayout` builds the onboarding bodies. To change the look for all of them, edit `layout.html`. Every value is escaped when it is put in, so a name containing markup shows as plain text.
 
 Sent through the existing `JavaMailSender` (`spring.mail.*`) on a separate thread, so a slow mail server never slows a request and a failed email never fails a step. Text typed by people is escaped. The outcome of each is written to the timeline as `EMAIL_SENT` or `EMAIL_FAILED`. The applicant address is the form's contact email, falling back to the merchant's. `mail-from` overrides the sender. Until approval an email names the application by its `applicationId` (shown as "Application reference"), because the merchant number does not exist yet; the approval email carries the merchant number.
 

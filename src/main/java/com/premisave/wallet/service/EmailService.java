@@ -20,7 +20,7 @@ import java.util.Map;
  * templates stored as classpath resources under templates/email/.
  *
  * Every email shares one look, defined by EmailLayout and
- * templates/email/layout.html (the same design as the developer service
+ * templates/email/layout.html (the same design as the auth service
  * emails). Each template file holds only the body; send() puts it inside
  * the shared page.
  *
