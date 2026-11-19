@@ -122,10 +122,12 @@ public class DisbursementService {
 
         String provider = request.getProvider() != null ? request.getProvider().toUpperCase() : "MPESA";
 
-        // A withdrawal that does not name a currency is in the wallet's default currency (USD unless the person chose
-        // another). The amount is brought to Kenyan shillings, which is what the rest of this method works in. Crypto
-        // names its own currency and is left alone.
-        if (!"NOWPAYMENTS".equals(provider) && (request.getCurrency() == null || request.getCurrency().isBlank())) {
+        // M-Pesa pays out in Kenyan shillings, so an M-Pesa withdrawal is always typed in KES. For the other providers a
+        // withdrawal that does not name a currency is in the wallet's default currency (USD unless the person chose
+        // another), brought to Kenyan shillings here because the rest of this method works in them. Crypto names its
+        // own currency and is left alone.
+        if (!"NOWPAYMENTS".equals(provider) && !"MPESA".equals(provider)
+                && (request.getCurrency() == null || request.getCurrency().isBlank())) {
             String code = DefaultCurrencyService.of(wallet);
             if (!"KES".equals(code)) {
                 request.setAmount(defaultCurrencyService.convert(request.getAmount(), code, "KES"));

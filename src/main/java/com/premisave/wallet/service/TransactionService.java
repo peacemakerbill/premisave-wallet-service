@@ -42,13 +42,15 @@ public class TransactionService {
 
         for (Deposit d : depositRepository.findByUserIdOrderByCreatedAtDesc(userId)) {
             out.add(new ActivityResponse(d.getId(), "DEPOSIT", "IN", name(d.getStatus()), d.getAmount(),
-                    name(d.getCurrency(), "USD"), "Deposit via " + label(d.getProvider()), d.getProvider(), d.getCreatedAt()));
+                    name(d.getCurrency(), "USD"), "Deposit via " + label(d.getProvider()), d.getProvider(), d.getCreatedAt())
+                    .with(null, null, d.getSenderName(), d.getChannel(), d.getReference(), d.getFailureReason()));
         }
         for (Disbursement d : disbursementRepository.findByUserIdOrderByCreatedAtDesc(userId)) {
             BigDecimal amount = d.getTotalDebited() != null ? d.getTotalDebited() : d.getAmount();
             out.add(new ActivityResponse(d.getId(), "WITHDRAWAL", "OUT", name(d.getStatus()), amount,
                     d.getCurrency() == null || d.getCurrency().isBlank() ? "USD" : d.getCurrency(),
-                    "Withdrawal via " + label(d.getProvider()), d.getProvider(), d.getCreatedAt()));
+                    "Withdrawal via " + label(d.getProvider()), d.getProvider(), d.getCreatedAt())
+                    .with(null, null, d.getVerifiedRecipientName(), d.getDestination(), d.getReference(), d.getFailureReason()));
         }
         for (Transfer t : transferRepository.findBySenderIdOrRecipientIdOrderByCreatedAtDesc(userId, userId)) {
             boolean sent = userId.equals(t.getSenderId());
@@ -56,12 +58,14 @@ public class TransactionService {
             String text = (sent ? "Sent to " : "Received from ") + (other == null ? "another wallet" : other);
             out.add(new ActivityResponse(t.getId(), "TRANSFER", sent ? "OUT" : "IN", name(t.getStatus()),
                     sent && t.getTotalDebited() != null ? t.getTotalDebited() : t.getAmount(),
-                    name(t.getCurrency(), "USD"), text, null, t.getCreatedAt()));
+                    name(t.getCurrency(), "USD"), text, null, t.getCreatedAt())
+                    .with(sent ? t.getRecipientId() : t.getSenderId(), other, null, null, t.getReference(), null));
         }
         for (Payment p : paymentRepository.findByUserIdOrderByCreatedAtDesc(userId)) {
             String text = p.getDescription() != null && !p.getDescription().isBlank() ? p.getDescription() : "Payment for " + label(p.getService());
             out.add(new ActivityResponse(p.getId(), "PAYMENT", "OUT", name(p.getStatus()), p.getAmount(),
-                    name(p.getCurrency(), "USD"), text, p.getService(), p.getCreatedAt()));
+                    name(p.getCurrency(), "USD"), text, p.getService(), p.getCreatedAt())
+                    .with(null, null, null, p.getService(), p.getReference(), p.getFailureReason()));
         }
         for (Transaction tx : transactionRepository.findByUserIdOrderByCreatedAtDesc(userId)) {
             boolean adjustment = tx.getReference() != null && tx.getReference().startsWith("ADJ-");

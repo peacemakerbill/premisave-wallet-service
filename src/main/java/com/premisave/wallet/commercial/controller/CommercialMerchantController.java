@@ -40,6 +40,13 @@ public class CommercialMerchantController {
         return Responses.ok("Merchants retrieved", merchants.listForDeveloper(developerAccountId));
     }
 
+    /** Staff search of every business by name or merchant number, newest first. */
+    @GetMapping("/search")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> search(@RequestParam(required = false) String q,
+                                                                    @RequestParam(defaultValue = "10") int limit) {
+        return Responses.ok("Merchants retrieved", merchants.search(q, limit));
+    }
+
     @GetMapping("/by-number/{merchantNumber}")
     public ResponseEntity<ApiResponse<Map<String, Object>>> byNumber(@PathVariable String merchantNumber) {
         return Responses.ok("Merchant retrieved", merchants.getByNumber(merchantNumber));

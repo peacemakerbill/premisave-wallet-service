@@ -28,6 +28,7 @@ import com.premisave.wallet.commercial.service.onboarding.MerchantNumbers;
 import com.premisave.wallet.commercial.service.onboarding.OnboardingService;
 import com.premisave.wallet.commercial.util.Ids;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -41,6 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /** Merchant provisioning, driven by the developer service. Apps are owned by the developer service. */
 @Service("commercialMerchantService")
@@ -126,6 +128,30 @@ public class MerchantService {
         List<Map<String, Object>> businesses = new ArrayList<>();
         for (MerchantProfile p : merchants.findByDeveloperAccountIdOrderByCreatedAtAsc(developerAccountId)) {
             businesses.add(withOnboarding(numbers.issueIfLive(p)));
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("businesses", businesses);
+        return out;
+    }
+
+    /**
+     * Staff search of every business by name, trading name or merchant number, anywhere in the text and ignoring case. With
+     * no text it lists the newest. Only the business itself is shown, not its onboarding application.
+     */
+    public Map<String, Object> search(String text, int limit) {
+        int max = Math.max(1, Math.min(limit, 25));
+        Query query = new Query().limit(max).with(Sort.by(Sort.Direction.DESC, "createdAt"));
+        String q = text == null ? "" : text.trim();
+        if (!q.isEmpty()) {
+            String pattern = Pattern.quote(q.length() > 100 ? q.substring(0, 100) : q);
+            query.addCriteria(new Criteria().orOperator(
+                    Criteria.where("businessName").regex(pattern, "i"),
+                    Criteria.where("displayName").regex(pattern, "i"),
+                    Criteria.where("merchantNumber").regex(pattern, "i")));
+        }
+        List<Map<String, Object>> businesses = new ArrayList<>();
+        for (MerchantProfile p : mongo.find(query, MerchantProfile.class)) {
+            businesses.add(Views.merchant(p));
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("businesses", businesses);

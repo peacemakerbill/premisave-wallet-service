@@ -83,21 +83,16 @@ public class DepositService {
     }
 
     /**
-     * A deposit that does not name a currency is in the wallet's default currency, which is USD unless the person chose
-     * another. M-Pesa and PayPal take one currency each (Kenyan shillings and US dollars), so the amount is converted
-     * for them here. Stripe is told the currency. Flutterwave mobile money and crypto name their own currency, so they
-     * are left alone.
+     * M-Pesa always takes Kenyan shillings, so an M-Pesa deposit is typed and paid in KES whatever the wallet's default
+     * currency is, and the wallet is credited the USD value. For the other providers a deposit that does not name a
+     * currency is in the wallet's default currency, which is USD unless the person chose another. PayPal takes US
+     * dollars, so the amount is converted for it here. Stripe is told the currency. Flutterwave mobile money and crypto
+     * name their own currency, so they are left alone.
      */
     private void useDefaultCurrency(Wallet wallet, DepositRequest request, String provider) {
         if (request.getCurrency() != null && !request.getCurrency().isBlank()) return;
         String code = DefaultCurrencyService.of(wallet);
         switch (provider) {
-            case "MPESA" -> {
-                if (!"KES".equals(code)) {
-                    request.setAmount(defaultCurrencyService.convert(request.getAmount(), code, "KES")
-                            .setScale(0, java.math.RoundingMode.CEILING));
-                }
-            }
             case "PAYPAL" -> {
                 if (!"USD".equals(code)) {
                     request.setAmount(defaultCurrencyService.convert(request.getAmount(), code, "USD"));

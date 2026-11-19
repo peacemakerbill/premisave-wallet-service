@@ -171,6 +171,48 @@
           "response": []
         },
         {
+          "name": "Search merchants by name or number",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{internal_api_key}}"
+              },
+              {
+                "key": "X-Request-Id",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_provisioning}}/merchants/search?q=acme&limit=10",
+              "host": [
+                "{{base_provisioning}}"
+              ],
+              "path": [
+                "merchants",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "acme"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Staff search of every merchant by business name, trading name or merchant number, anywhere in the text and ignoring case. With no q it lists the newest. limit is at most 25. The developer service uses it to let staff pick a business to share by name."
+          },
+          "response": []
+        },
+        {
           "name": "Get merchant",
           "request": {
             "method": "GET",
